@@ -47,7 +47,8 @@ import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 /**
- * The knowledge bases Nexus offers, searchable, each store a row to download. It is the dashboard's
+ * The knowledge bases Nexus offers, searchable, each store a row to download beside the knowledge base's
+ * icon; only those that deploy a knowledge-base descriptor at a supported level. It is the dashboard's
  * secondary place: what is not yet in {@code ~/Solor} is found here and brought down, and from then on
  * the main window looks after it.
  */
@@ -63,7 +64,8 @@ public final class NexusBrowser extends BorderPane {
     private final Button download = new Button("Download");
     private final Label message = new Label();
     private Set<String> here = Set.of();
-    private Map<String, Image> icons = Map.of();
+    private Map<Coordinate, Image> icons = Map.of();
+    private Map<Coordinate, NexusCatalog.Described> described = Map.of();
     private BiConsumer<Coordinate, String> onDownload = (coordinate, classifier) -> { };
 
     /** Builds the browser, empty until offers are set. */
@@ -73,19 +75,20 @@ public final class NexusBrowser extends BorderPane {
         search.textProperty().addListener((observable, was, now) -> {
             String needle = now == null ? "" : now.strip().toLowerCase(Locale.ROOT);
             shown.setPredicate(offer -> needle.isEmpty()
-                    || offer.coordinate().artifactId().toLowerCase(Locale.ROOT).contains(needle));
+                    || offer.coordinate().artifactId().toLowerCase(Locale.ROOT).contains(needle)
+                    || displayName(offer).toLowerCase(Locale.ROOT).contains(needle));
         });
         HBox top = new HBox(8, search);
         top.setPadding(new Insets(8));
 
-        TableColumn<NexusCatalog.Offer, String> name = column("Knowledge base", 220, offer -> offer.coordinate().artifactId());
+        TableColumn<NexusCatalog.Offer, String> name = column("Knowledge base", 220, this::displayName);
         name.setCellFactory(view -> new TableCell<>() {
             @Override
-            protected void updateItem(String artifactId, boolean empty) {
-                super.updateItem(artifactId, empty);
-                setText(empty || artifactId == null ? null : artifactId);
-                setGraphic(empty || artifactId == null ? null : KnowledgeBaseIcon.of(artifactId,
-                        Optional.ofNullable(icons.get(artifactId.toLowerCase(Locale.ROOT))), 18));
+            protected void updateItem(String displayName, boolean empty) {
+                super.updateItem(displayName, empty);
+                NexusCatalog.Offer offer = empty || getTableRow() == null ? null : getTableRow().getItem();
+                setText(offer == null ? null : displayName);
+                setGraphic(offer == null ? null : KnowledgeBaseIcon.of(Optional.ofNullable(icons.get(offer.coordinate())), 18));
             }
         });
         table.getColumns().addAll(List.of(
@@ -123,12 +126,37 @@ public final class NexusBrowser extends BorderPane {
     }
 
     /**
-     * Shows what Nexus offers.
+     * Shows what Nexus offers of the knowledge bases it describes, each beside its icon.
+     *
+     * @param catalog the described knowledge bases and their stores
+     * @param here    the names, in lower case, of the knowledge bases already in {@code ~/Solor}
+     */
+    public void setCatalog(NexusCatalog.Catalog catalog, Set<String> here) {
+        described = catalog.described();
+        Map<Coordinate, Image> read = new HashMap<>();
+        described.forEach((coordinate, entry) -> read.put(coordinate, KnowledgeBaseIcon.load(entry.icon())));
+        icons = Map.copyOf(read);
+        setOffers(catalog.offers(), here);
+    }
+
+    /**
+     * The name a person reads for an offer: its descriptor's display name, else its artifactId.
+     *
+     * @param offer the offer
+     * @return the name
+     */
+    public String displayName(NexusCatalog.Offer offer) {
+        NexusCatalog.Described entry = described.get(offer.coordinate());
+        return entry == null ? offer.coordinate().artifactId() : entry.descriptor().displayName();
+    }
+
+    /**
+     * Shows offers.
      *
      * @param offers the offers
      * @param here   the names, in lower case, of the knowledge bases already in {@code ~/Solor}
      */
-    public void setOffers(List<NexusCatalog.Offer> offers, Set<String> here) {
+    private void setOffers(List<NexusCatalog.Offer> offers, Set<String> here) {
         this.here = Set.copyOf(here);
         this.offers.setAll(offers);
         table.setPlaceholder(new Label("Nexus offers no knowledge bases"));
@@ -138,26 +166,13 @@ public final class NexusBrowser extends BorderPane {
     }
 
     /**
-     * Shows the icons Nexus holds beside the knowledge bases they belong to; the others show their
-     * monogram.
+     * Whether an offer shows its knowledge base's icon.
      *
-     * @param pngs each icon's bytes, by artifactId
+     * @param offer the offer
+     * @return whether its icon was read
      */
-    public void setIcons(Map<String, byte[]> pngs) {
-        Map<String, Image> read = new HashMap<>();
-        pngs.forEach((artifactId, png) -> read.put(artifactId.toLowerCase(Locale.ROOT), KnowledgeBaseIcon.load(png)));
-        icons = Map.copyOf(read);
-        table.refresh();
-    }
-
-    /**
-     * Whether Nexus holds an icon for a knowledge base it offers, and it could be read.
-     *
-     * @param artifactId the knowledge base's artifactId
-     * @return whether its icon is shown
-     */
-    public boolean hasIcon(String artifactId) {
-        Image icon = icons.get(artifactId.toLowerCase(Locale.ROOT));
+    public boolean hasIcon(NexusCatalog.Offer offer) {
+        Image icon = icons.get(offer.coordinate());
         return icon != null && !icon.isError();
     }
 

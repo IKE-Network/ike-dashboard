@@ -84,7 +84,8 @@ public final class DashboardCommand {
 
     private static void list(PrintStream out, DashboardSettings settings, boolean check) throws Exception {
         List<KnowledgeBase> knowledgeBases = KnowledgeBaseScanner.scan(settings.solor());
-        List<KnowledgeBaseFamily> families = KnowledgeBaseFamily.group(knowledgeBases);
+        List<KnowledgeBaseFamily> families = KnowledgeBaseFamily.managed(knowledgeBases);
+        List<KnowledgeBase> unmanaged = KnowledgeBaseFamily.unmanaged(knowledgeBases);
         List<KometInstallation> komets = KometInstallations.find(KometInstallations.defaultRoots(
                 Path.of(System.getProperty("user.home")), settings.installLocation()));
         NewerBuildCheck newer = check ? new NewerBuildCheck(RepositoryHttpClients.newClient(), access(settings)) : null;
@@ -103,6 +104,13 @@ public final class DashboardCommand {
                 if (member != shown) {
                     out.printf("    %-30s %-20s %9s%n", member.name(), member.kind().label(), size(member.sizeBytes()));
                 }
+            }
+        }
+        if (!unmanaged.isEmpty()) {
+            out.printf("Not managed (%d): no knowledge-base descriptor that meets level 1%n", unmanaged.size());
+            for (KnowledgeBase entry : unmanaged) {
+                out.printf("    %-30s %-20s %9s  %s%n", entry.name(), entry.kind().label(), size(entry.sizeBytes()),
+                        String.join("; ", entry.descriptor().problems()));
             }
         }
         out.println("* the bold row in the window: the newest copy Komet can open");

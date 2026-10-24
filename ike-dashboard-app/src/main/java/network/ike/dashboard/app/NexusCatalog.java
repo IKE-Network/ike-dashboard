@@ -15,6 +15,7 @@
  */
 package network.ike.dashboard.app;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -31,13 +32,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.stream.Collectors;
 
 /**
  * The knowledge bases Nexus offers, asked of its search API: the store zips Komet opens once unpacked
  * ({@code rkb} for Rocks, {@code reasoned-sa} for a spined array), newest deploy per artifact, version
- * and classifier. Nexus answers search only for a signed-in user, so this needs the repository's
- * credentials.
+ * and classifier. The {@link #catalog catalog} keeps only the artifacts that deploy a knowledge-base
+ * descriptor ({@code properties:kb-descriptor}) at a supported level and their icon
+ * ({@code png:icon}): small files read instead of the stores. Nexus answers search only for a
+ * signed-in user, so this needs the repository's credentials.
  */
 public final class NexusCatalog {
 
@@ -49,6 +53,9 @@ public final class NexusCatalog {
 
     /** The classifier a knowledge base's icon deploys under, a PNG beside its store zips. */
     public static final String ICON_CLASSIFIER = "icon";
+
+    /** The classifier a knowledge base's descriptor deploys under, a properties file beside its store zips. */
+    public static final String DESCRIPTOR_CLASSIFIER = "kb-descriptor";
 
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
 
@@ -74,13 +81,54 @@ public final class NexusCatalog {
     }
 
     /**
-     * A knowledge base's icon on Nexus.
+     * A small file deployed beside a knowledge base's stores, its descriptor or its icon.
      *
-     * @param artifactId  the knowledge base
-     * @param downloadUrl where its PNG is
+     * @param coordinate  the artifact, at its base version
+     * @param downloadUrl where the file is
      * @param updated     when it was deployed
      */
-    record IconAsset(String artifactId, URI downloadUrl, Instant updated) {
+    record Attachment(Coordinate coordinate, URI downloadUrl, Instant updated) {
+    }
+
+    /**
+     * A knowledge base on Nexus the dashboard manages: its descriptor meets the minimum and its icon is
+     * beside it.
+     *
+     * @param descriptor the descriptor
+     * @param icon       the icon's bytes, a PNG
+     */
+    public record Described(KnowledgeBaseDescriptor descriptor, byte[] icon) {
+    }
+
+    /**
+     * What the Nexus window shows.
+     *
+     * @param offers    the stores of described artifacts
+     * @param described each described artifact, by its coordinate at its base version
+     */
+    public record Catalog(List<Offer> offers, Map<Coordinate, Described> described) {
+
+        /**
+         * Copies the lists.
+         *
+         * @param offers    the stores of described artifacts
+         * @param described each described artifact
+         */
+        public Catalog {
+            offers = List.copyOf(offers);
+            described = Map.copyOf(described);
+        }
+
+        /**
+         * The catalog of the offers whose knowledge base is described; the others are left out.
+         *
+         * @param offers    every store Nexus offers
+         * @param described each described artifact, by its coordinate at its base version
+         * @return the catalog
+         */
+        public static Catalog of(List<Offer> offers, Map<Coordinate, Described> described) {
+            return new Catalog(offers.stream().filter(offer -> described.containsKey(offer.coordinate())).toList(), described);
+        }
     }
 
     /**
@@ -173,43 +221,81 @@ public final class NexusCatalog {
     }
 
     /**
-     * The icons Nexus holds for knowledge bases, the newest deploy of each, fetched.
+     * The stores Nexus offers of the knowledge bases that deploy a descriptor at a supported level and
+     * an icon, with both read.
      *
      * @param http       the client
      * @param repository the repository and its credentials
-     * @return each icon's bytes, by artifactId; an icon that cannot be fetched is left out
+     * @return the catalog
      * @throws IOException          if Nexus cannot be asked
      * @throws InterruptedException if interrupted
      */
-    public static Map<String, byte[]> icons(HttpClient http, RepositoryAccess repository) throws IOException, InterruptedException {
-        List<IconAsset> all = new ArrayList<>();
+    public static Catalog catalog(HttpClient http, RepositoryAccess repository) throws IOException, InterruptedException {
+        Map<Coordinate, Attachment> icons = newestEach(search(http, repository, ICON_CLASSIFIER, "png"));
+        Map<Coordinate, Described> described = new LinkedHashMap<>();
+        for (Attachment file : newestEach(search(http, repository, DESCRIPTOR_CLASSIFIER, "properties")).values()) {
+            Attachment icon = icons.get(file.coordinate());
+            if (icon == null) {
+                continue;
+            }
+            Optional<byte[]> properties = fetch(http, repository, file.downloadUrl());
+            Optional<byte[]> png = fetch(http, repository, icon.downloadUrl());
+            if (properties.isEmpty() || png.isEmpty()) {
+                continue;
+            }
+            describedBy(properties.get()).ifPresent(descriptor -> described.put(file.coordinate(), new Described(descriptor, png.get())));
+        }
+        return Catalog.of(list(http, repository), described);
+    }
+
+    /**
+     * Reads a descriptor deployed beside a knowledge base, as {@link KnowledgeBaseScanner} holds it to
+     * the minimum.
+     *
+     * @param properties the file's bytes
+     * @return the descriptor, when it meets the minimum
+     */
+    static Optional<KnowledgeBaseDescriptor> describedBy(byte[] properties) {
+        Properties entries = new Properties();
+        try {
+            entries.load(new ByteArrayInputStream(properties));
+        } catch (IOException | IllegalArgumentException e) {
+            return Optional.empty();
+        }
+        return KnowledgeBaseScanner.knowledgeBaseDescriptor(entries).descriptor();
+    }
+
+    private static List<Attachment> search(HttpClient http, RepositoryAccess repository, String classifier, String extension)
+            throws IOException, InterruptedException {
+        List<Attachment> all = new ArrayList<>();
         Optional<String> token = Optional.empty();
         do {
             Map<String, String> query = new LinkedHashMap<>();
             query.put("group", GROUP);
-            query.put("maven.extension", "png");
-            query.put("maven.classifier", ICON_CLASSIFIER);
+            query.put("maven.extension", extension);
+            query.put("maven.classifier", classifier);
             token.ifPresent(value -> query.put("continuationToken", value));
             HttpResponse<String> response = http.send(authorized(searchUri(repository.url(), query), repository),
                     HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() != 200) {
                 throw new IOException("Nexus search answered " + response.statusCode());
             }
-            all.addAll(parseIcons(response.body()));
+            all.addAll(parseAttachments(response.body(), classifier, extension));
             token = Optional.ofNullable(continuation(response.body()));
         } while (token.isPresent());
+        return all;
+    }
 
-        Map<String, IconAsset> newest = new LinkedHashMap<>();
-        all.forEach(icon -> newest.merge(icon.artifactId(), icon, (a, b) -> a.updated().isAfter(b.updated()) ? a : b));
-        Map<String, byte[]> fetched = new LinkedHashMap<>();
-        for (IconAsset icon : newest.values()) {
-            HttpResponse<byte[]> response = http.send(authorized(icon.downloadUrl(), repository),
-                    HttpResponse.BodyHandlers.ofByteArray());
-            if (response.statusCode() == 200) {
-                fetched.put(icon.artifactId(), response.body());
-            }
-        }
-        return fetched;
+    private static Map<Coordinate, Attachment> newestEach(List<Attachment> attachments) {
+        Map<Coordinate, Attachment> newest = new LinkedHashMap<>();
+        attachments.forEach(file -> newest.merge(file.coordinate(), file, (a, b) -> a.updated().isAfter(b.updated()) ? a : b));
+        return newest;
+    }
+
+    private static Optional<byte[]> fetch(HttpClient http, RepositoryAccess repository, URI uri)
+            throws IOException, InterruptedException {
+        HttpResponse<byte[]> response = http.send(authorized(uri, repository), HttpResponse.BodyHandlers.ofByteArray());
+        return response.statusCode() == 200 ? Optional.of(response.body()) : Optional.empty();
     }
 
     private static HttpRequest authorized(URI uri, RepositoryAccess repository) {
@@ -224,28 +310,33 @@ public final class NexusCatalog {
     }
 
     /**
-     * Reads the icons on one page of a search answer.
+     * Reads the files of one classifier and extension on one page of a search answer.
      *
-     * @param json the answer
-     * @return the {@code png:icon} assets on it
+     * @param json       the answer
+     * @param classifier the classifier, such as {@code kb-descriptor}
+     * @param extension  the extension, such as {@code properties}
+     * @return the files, each at its artifact's base version
      */
     @SuppressWarnings("unchecked")
-    static List<IconAsset> parseIcons(String json) {
+    static List<Attachment> parseAttachments(String json, String classifier, String extension) {
         Map<String, Object> answer = (Map<String, Object>) Json.parse(json);
-        List<IconAsset> icons = new ArrayList<>();
+        List<Attachment> files = new ArrayList<>();
         for (Object item : (List<Object>) answer.getOrDefault("items", List.of())) {
             Map<String, Object> asset = (Map<String, Object>) item;
             Map<String, Object> maven = (Map<String, Object>) asset.get("maven2");
             String url = (String) asset.get("downloadUrl");
-            if (maven == null || url == null || !ICON_CLASSIFIER.equals(maven.get("classifier"))
-                    || !"png".equals(maven.get("extension"))) {
+            String path = (String) asset.get("path");
+            if (maven == null || url == null || path == null || !classifier.equals(maven.get("classifier"))
+                    || !extension.equals(maven.get("extension"))) {
                 continue;
             }
+            String[] segments = path.split("/");
+            String baseVersion = segments.length >= 2 ? segments[segments.length - 2] : (String) maven.get("version");
             Object modified = asset.get("lastModified");
-            icons.add(new IconAsset((String) maven.get("artifactId"), URI.create(url),
-                    modified instanceof String text ? OffsetDateTime.parse(text).toInstant() : Instant.EPOCH));
+            files.add(new Attachment(new Coordinate((String) maven.get("groupId"), (String) maven.get("artifactId"), baseVersion),
+                    URI.create(url), modified instanceof String text ? OffsetDateTime.parse(text).toInstant() : Instant.EPOCH));
         }
-        return icons;
+        return files;
     }
 
     /**

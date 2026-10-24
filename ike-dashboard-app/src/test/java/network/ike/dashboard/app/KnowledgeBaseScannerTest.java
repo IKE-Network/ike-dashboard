@@ -85,29 +85,75 @@ class KnowledgeBaseScannerTest {
         assertThat(solorKb.assembledAt()).isEqualTo(Optional.empty());
     }
 
-    @Test
-    void aStoreNamesItsIcon() throws IOException {
-        Path store = Files.createDirectories(solor.resolve("pizza-kb"));
-        Files.createDirectories(store.resolve("rocks"));
-        Files.createDirectories(store.resolve("META-INF/ike"));
-        Files.write(store.resolve("META-INF/ike/icon.png"), new byte[] {(byte) 0x89, 'P', 'N', 'G'});
-        Files.writeString(store.resolve("META-INF/MANIFEST.MF"), """
-                Manifest-Version: 1.0
-                Ike-Icon: META-INF/ike/icon.png
+    private static final String LEVEL_ONE = """
+            #Knowledge-base descriptor, level 1
+            descriptorLevel=1
+            groupId=network.ike.data
+            artifactId=pizza-kb
+            version=20250627.1-SNAPSHOT
+            displayName=Pizza Knowledge Base
+            layout=rocks
+            entityFormat=3
+            assembledAt=2026-10-24T14\\:05\\:07.641539Z
+            access=restricted
+            icon=META-INF/ike/icon.png
+            """;
 
-                """);
-        Path escaping = Files.createDirectories(solor.resolve("other-kb"));
-        Files.createDirectories(escaping.resolve("META-INF"));
-        Files.writeString(escaping.resolve("META-INF/MANIFEST.MF"), "Manifest-Version: 1.0\nIke-Icon: ../pizza-kb/META-INF/ike/icon.png\n\n");
+    @Test
+    void aCompleteLevelOneDescriptorWithItsIconIsManaged() throws IOException {
+        Path store = describedStore("pizza-kb", LEVEL_ONE, true);
 
         KnowledgeBase pizza = KnowledgeBaseScanner.inspect(store);
 
-        assertThat(pizza.attributes()).containsEntry("Ike-Icon", "META-INF/ike/icon.png");
+        assertThat(pizza.managed()).isTrue();
+        assertThat(pizza.descriptor().descriptor()).contains(new KnowledgeBaseDescriptor(1,
+                new Coordinate("network.ike.data", "pizza-kb", "20250627.1-SNAPSHOT"), Optional.empty(),
+                "Pizza Knowledge Base", "rocks", 3, Instant.parse("2026-10-24T14:05:07.641539Z"), "restricted",
+                "META-INF/ike/icon.png"));
         assertThat(pizza.icon()).contains(store.resolve("META-INF/ike/icon.png"));
-        assertThat(KnowledgeBaseFamily.group(List.of(pizza)).getFirst().icon()).contains(store.resolve("META-INF/ike/icon.png"));
-        assertThat(KnowledgeBaseScanner.inspect(escaping).icon()).as("a name leading out of the store is not followed").isEmpty();
-        Files.delete(store.resolve("META-INF/ike/icon.png"));
-        assertThat(KnowledgeBaseScanner.inspect(store).icon()).as("named but missing").isEmpty();
+        assertThat(pizza.displayName()).isEqualTo("Pizza Knowledge Base");
+        assertThat(KnowledgeBaseFamily.managed(List.of(pizza))).singleElement()
+                .satisfies(family -> assertThat(family.icon()).contains(store.resolve("META-INF/ike/icon.png")));
+        assertThat(KnowledgeBaseFamily.unmanaged(List.of(pizza))).isEmpty();
+    }
+
+    @Test
+    void aStoreFallingShortOfTheMinimumIsNotManaged() throws IOException {
+        assertThat(problems(describedStore("no-icon", LEVEL_ONE, false))).containsExactly("icon META-INF/ike/icon.png is missing");
+        assertThat(problems(describedStore("no-name", LEVEL_ONE.replace("displayName=Pizza Knowledge Base\n", ""), true)))
+                .containsExactly("missing displayName");
+        assertThat(problems(describedStore("bad-fields", LEVEL_ONE.replace("layout=rocks", "layout=tape")
+                .replace("access=restricted", "access=friends").replace("entityFormat=3", "entityFormat=three"), true)))
+                .containsExactly("layout tape is not rocks, spined-32 or spined-64", "access friends is not public or restricted",
+                        "entityFormat three is not a number");
+        assertThat(problems(describedStore("level-2", LEVEL_ONE.replace("descriptorLevel=1", "descriptorLevel=2"), true)))
+                .containsExactly("descriptor level 2 is not one the dashboard reads");
+        assertThat(problems(describedStore("escaping", LEVEL_ONE.replace("icon=META-INF/ike/icon.png",
+                "icon=../no-icon/META-INF/ike/icon.png"), true)))
+                .containsExactly("icon ../no-icon/META-INF/ike/icon.png is outside the store");
+        Path bare = Files.createDirectories(solor.resolve("bare/rocks")).getParent();
+        assertThat(problems(bare)).containsExactly("no knowledge-base descriptor");
+        Files.writeString(solor.resolve("starter-pb.zip"), "zip");
+        KnowledgeBase zip = KnowledgeBaseScanner.inspect(solor.resolve("starter-pb.zip"));
+        assertThat(zip.managed()).isFalse();
+        assertThat(KnowledgeBaseFamily.unmanaged(KnowledgeBaseScanner.scan(solor))).extracting(KnowledgeBase::name)
+                .containsExactly("bad-fields", "bare", "escaping", "level-2", "no-icon", "no-name", "starter-pb.zip");
+    }
+
+    private Path describedStore(String name, String descriptor, boolean withIcon) throws IOException {
+        Path store = Files.createDirectories(solor.resolve(name).resolve("rocks")).getParent();
+        Files.createDirectories(store.resolve("META-INF/ike"));
+        Files.writeString(store.resolve("META-INF/ike/knowledge-base.properties"), descriptor);
+        if (withIcon) {
+            Files.write(store.resolve("META-INF/ike/icon.png"), new byte[] {(byte) 0x89, 'P', 'N', 'G'});
+        }
+        return store;
+    }
+
+    private static List<String> problems(Path store) throws IOException {
+        KnowledgeBase entry = KnowledgeBaseScanner.inspect(store);
+        assertThat(entry.managed()).isFalse();
+        return entry.descriptor().problems();
     }
 
     @Test

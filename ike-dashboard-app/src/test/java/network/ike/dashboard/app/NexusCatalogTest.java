@@ -49,27 +49,49 @@ class NexusCatalogTest {
     }
 
     @Test
-    void iconsAreReadFromTheirSearchAnswer() {
+    void descriptorsAndIconsAreReadAtTheirArtifactsBaseVersion() {
         String answer = """
                 {
                   "items" : [ {
-                    "downloadUrl" : "https://nexus.tinkar.org/repository/ike-restricted-snapshots/network/ike/data/pizza-kb/20250627.1-SNAPSHOT/pizza-kb-20250627.1-20261024.140000-8-icon.png",
-                    "path" : "/network/ike/data/pizza-kb/20250627.1-SNAPSHOT/pizza-kb-20250627.1-20261024.140000-8-icon.png",
+                    "downloadUrl" : "https://nexus.tinkar.org/repository/ike-restricted-snapshots/network/ike/data/pizza-kb/20250627.1-SNAPSHOT/pizza-kb-20250627.1-20261024.140000-8-kb-descriptor.properties",
+                    "path" : "/network/ike/data/pizza-kb/20250627.1-SNAPSHOT/pizza-kb-20250627.1-20261024.140000-8-kb-descriptor.properties",
                     "lastModified" : "2026-10-24T14:00:10.000+00:00",
-                    "maven2" : { "classifier" : "icon", "extension" : "png", "artifactId" : "pizza-kb",
+                    "maven2" : { "classifier" : "kb-descriptor", "extension" : "properties", "artifactId" : "pizza-kb",
                                  "version" : "20250627.1-20261024.140000-8", "groupId" : "network.ike.data" }
                   }, {
-                    "downloadUrl" : "https://nexus.tinkar.org/repository/ike-restricted-snapshots/network/ike/data/pizza-kb/20250627.1-SNAPSHOT/pizza-kb-20250627.1-20261024.140000-8-icon.png.sha1",
-                    "path" : "/network/ike/data/pizza-kb/20250627.1-SNAPSHOT/pizza-kb-20250627.1-20261024.140000-8-icon.png.sha1",
-                    "maven2" : { "classifier" : "icon", "extension" : "png.sha1", "artifactId" : "pizza-kb",
+                    "downloadUrl" : "https://nexus.tinkar.org/repository/ike-restricted-snapshots/network/ike/data/pizza-kb/20250627.1-SNAPSHOT/pizza-kb-20250627.1-20261024.140000-8-kb-descriptor.properties.sha1",
+                    "path" : "/network/ike/data/pizza-kb/20250627.1-SNAPSHOT/pizza-kb-20250627.1-20261024.140000-8-kb-descriptor.properties.sha1",
+                    "maven2" : { "classifier" : "kb-descriptor", "extension" : "properties.sha1", "artifactId" : "pizza-kb",
                                  "version" : "20250627.1-20261024.140000-8", "groupId" : "network.ike.data" }
                   } ]
                 }
                 """;
 
-        assertThat(NexusCatalog.parseIcons(answer)).containsExactly(new NexusCatalog.IconAsset("pizza-kb",
-                java.net.URI.create("https://nexus.tinkar.org/repository/ike-restricted-snapshots/network/ike/data/pizza-kb/20250627.1-SNAPSHOT/pizza-kb-20250627.1-20261024.140000-8-icon.png"),
+        assertThat(NexusCatalog.parseAttachments(answer, "kb-descriptor", "properties")).containsExactly(new NexusCatalog.Attachment(
+                new Coordinate("network.ike.data", "pizza-kb", "20250627.1-SNAPSHOT"),
+                java.net.URI.create("https://nexus.tinkar.org/repository/ike-restricted-snapshots/network/ike/data/pizza-kb/20250627.1-SNAPSHOT/pizza-kb-20250627.1-20261024.140000-8-kb-descriptor.properties"),
                 Instant.parse("2026-10-24T14:00:10Z")));
+        assertThat(NexusCatalog.parseAttachments(answer, "icon", "png")).isEmpty();
+    }
+
+    @Test
+    void onlyKnowledgeBasesWithADescriptorAtASupportedLevelAreOffered() {
+        String levelOne = "descriptorLevel=1\ngroupId=network.ike.data\nartifactId=pizza-kb\nversion=20250627.1-SNAPSHOT\n"
+                + "displayName=Pizza Knowledge Base\nlayout=spined-64\nentityFormat=3\nassembledAt=2026-10-24T14\\:05\\:03Z\n"
+                + "access=restricted\nicon=META-INF/ike/icon.png\n";
+        Coordinate pizza = new Coordinate("network.ike.data", "pizza-kb", "20250627.1-SNAPSHOT");
+        Coordinate other = new Coordinate("network.ike.data", "other-kb", "1-SNAPSHOT");
+
+        assertThat(NexusCatalog.describedBy(levelOne.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1)))
+                .map(KnowledgeBaseDescriptor::displayName).contains("Pizza Knowledge Base");
+        assertThat(NexusCatalog.describedBy(levelOne.replace("descriptorLevel=1", "descriptorLevel=9")
+                .getBytes(java.nio.charset.StandardCharsets.ISO_8859_1))).isEmpty();
+        NexusCatalog.Offer described = new NexusCatalog.Offer(pizza, "rkb", 1, Instant.EPOCH, "r");
+        NexusCatalog.Offer undescribed = new NexusCatalog.Offer(other, "rkb", 1, Instant.EPOCH, "r");
+        NexusCatalog.Catalog catalog = NexusCatalog.Catalog.of(List.of(described, undescribed), Map.of(pizza,
+                new NexusCatalog.Described(NexusCatalog.describedBy(levelOne.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1))
+                        .orElseThrow(), new byte[] {1})));
+        assertThat(catalog.offers()).containsExactly(described);
     }
 
     @Test

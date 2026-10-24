@@ -82,12 +82,44 @@ public record KnowledgeBaseFamily(String name, List<KnowledgeBase> members) {
     }
 
     /**
-     * The knowledge base's icon: the one the newest copy that carries one names.
+     * The knowledge base's icon: the newest managed copy's.
      *
-     * @return the icon file, or empty when no copy carries one
+     * @return the icon file, or empty when no copy is managed
      */
     public Optional<Path> icon() {
         return members.stream().map(KnowledgeBase::icon).flatMap(Optional::stream).findFirst();
+    }
+
+    /**
+     * The name a person reads: the newest managed copy's display name, else the family's name.
+     *
+     * @return the name
+     */
+    public String displayName() {
+        return members.stream().filter(KnowledgeBase::managed).findFirst().map(KnowledgeBase::displayName).orElse(name);
+    }
+
+    /**
+     * The knowledge bases the dashboard manages, grouped into families: the stores whose descriptor
+     * meets the minimum.
+     *
+     * @param knowledgeBases what is in {@code ~/Solor}
+     * @return the families of managed stores
+     */
+    public static List<KnowledgeBaseFamily> managed(List<KnowledgeBase> knowledgeBases) {
+        return group(knowledgeBases.stream().filter(KnowledgeBase::managed).toList());
+    }
+
+    /**
+     * The stores and change-set zips the dashboard does not manage, which it offers only to show in
+     * the Finder or move to the Trash. Folders no provider would list are left out.
+     *
+     * @param knowledgeBases what is in {@code ~/Solor}
+     * @return the entries, by name
+     */
+    public static List<KnowledgeBase> unmanaged(List<KnowledgeBase> knowledgeBases) {
+        return knowledgeBases.stream().filter(entry -> !entry.managed() && entry.kind() != StoreKind.UNKNOWN)
+                .sorted(Comparator.comparing(entry -> entry.name().toLowerCase(Locale.ROOT))).toList();
     }
 
     /**

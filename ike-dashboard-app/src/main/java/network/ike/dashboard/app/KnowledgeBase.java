@@ -15,14 +15,13 @@
  */
 package network.ike.dashboard.app;
 
-import java.nio.file.Files;
-import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
@@ -38,9 +37,10 @@ import java.util.regex.Pattern;
  * @param coordinate the Maven coordinate its descriptor names, if it carries one
  * @param attributes the {@code Ike-*} attributes of its {@code META-INF/MANIFEST.MF}, by name
  * @param modified   when the folder or file was last changed
+ * @param descriptor whether its knowledge-base descriptor meets the minimum for the dashboard to manage it
  */
 public record KnowledgeBase(String name, Path path, StoreKind kind, long sizeBytes, Optional<Coordinate> coordinate,
-                            Map<String, String> attributes, Instant modified) {
+                            Map<String, String> attributes, Instant modified, DescriptorCheck descriptor) {
 
     /** The manifest attribute holding when the store was assembled. */
     public static final String ASSEMBLED_AT = "Ike-Assembled-At";
@@ -57,9 +57,6 @@ public record KnowledgeBase(String name, Path path, StoreKind kind, long sizeByt
     /** The manifest attribute naming the "Open …" provider. */
     public static final String OPEN_CONTROLLER = "Ike-Open-Controller";
 
-    /** The manifest attribute naming the store's icon, a path relative to the store. */
-    public static final String ICON = "Ike-Icon";
-
     /**
      * Copies the attributes.
      *
@@ -70,9 +67,37 @@ public record KnowledgeBase(String name, Path path, StoreKind kind, long sizeByt
      * @param coordinate the Maven coordinate its descriptor names, if it carries one
      * @param attributes the {@code Ike-*} attributes
      * @param modified   when it was last changed
+     * @param descriptor whether its knowledge-base descriptor meets the minimum
      */
     public KnowledgeBase {
         attributes = Map.copyOf(attributes);
+    }
+
+    /**
+     * An entry without a knowledge-base descriptor, which the dashboard does not manage.
+     *
+     * @param name       the folder or file name
+     * @param path       where it is
+     * @param kind       what it is
+     * @param sizeBytes  its size on disk
+     * @param coordinate the Maven coordinate its descriptor names, if it carries one
+     * @param attributes the {@code Ike-*} attributes
+     * @param modified   when it was last changed
+     */
+    public KnowledgeBase(String name, Path path, StoreKind kind, long sizeBytes, Optional<Coordinate> coordinate,
+                         Map<String, String> attributes, Instant modified) {
+        this(name, path, kind, sizeBytes, coordinate, attributes, modified,
+                DescriptorCheck.unmet(List.of("no knowledge-base descriptor")));
+    }
+
+    /**
+     * Whether the dashboard manages the store: its knowledge-base descriptor is at a supported level,
+     * complete, and its icon is there.
+     *
+     * @return {@code true} when it is managed
+     */
+    public boolean managed() {
+        return descriptor.met();
     }
 
     /**
@@ -85,22 +110,21 @@ public record KnowledgeBase(String name, Path path, StoreKind kind, long sizeByt
     }
 
     /**
-     * The store's icon, if its manifest names one and the file is there. A name that leads out of the
-     * store is not followed.
+     * The store's icon, which a managed store always has.
      *
-     * @return the icon file, a PNG
+     * @return the icon file, a PNG; empty when the store is not managed
      */
     public Optional<Path> icon() {
-        String value = attributes.get(ICON);
-        if (value == null || value.isBlank() || !Files.isDirectory(path)) {
-            return Optional.empty();
-        }
-        try {
-            Path icon = path.resolve(value.strip()).normalize();
-            return icon.startsWith(path.normalize()) && Files.isRegularFile(icon) ? Optional.of(icon) : Optional.empty();
-        } catch (InvalidPathException e) {
-            return Optional.empty();
-        }
+        return descriptor.descriptor().map(described -> path.resolve(described.icon()));
+    }
+
+    /**
+     * The name a person reads: the descriptor's display name, else the folder or file name.
+     *
+     * @return the name
+     */
+    public String displayName() {
+        return descriptor.descriptor().map(KnowledgeBaseDescriptor::displayName).orElse(name);
     }
 
     /**

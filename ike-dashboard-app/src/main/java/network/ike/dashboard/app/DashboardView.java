@@ -75,9 +75,11 @@ import java.util.stream.Collectors;
 
 /**
  * The dashboard's window content, master and detail, about what is downloaded and keeping it current.
- * The list on the left names each knowledge base in {@code ~/Solor} once, marked only when something
- * needs attention: a newer build on Nexus, or no installed Komet that opens it; above it, when Nexus
- * has newer builds, a line to download them all. The pane on the right is the selected one: its facts,
+ * The list on the left names each managed knowledge base in {@code ~/Solor} once, beside its icon,
+ * marked only when something needs attention: a newer build on Nexus, or no installed Komet that opens
+ * it; above it, when Nexus has newer builds, a line to download them all. A store is managed when its
+ * knowledge-base descriptor meets the minimum (level 1, complete, its icon there); the rest fold into
+ * a Not managed section at the foot of the list, offering only Show in Finder and Move to Trash. The pane on the right is the selected one: its facts,
  * one Open, a newer build to download, and the older copies and change sets folded into sections, with
  * the space they take. What is not yet here is found in a window of its own, the {@link NexusBrowser}.
  * It holds no IO of its own; {@link DashboardApp} supplies the data and the actions.
@@ -110,7 +112,10 @@ public final class DashboardView extends BorderPane {
     private final Hyperlink showLog = new Hyperlink("Show last log");
 
     private List<KnowledgeBaseFamily> families = List.of();
-    private List<NexusCatalog.Offer> offers = List.of();
+    private NexusCatalog.Catalog catalog = new NexusCatalog.Catalog(List.of(), java.util.Map.of());
+    private final ObservableList<KnowledgeBase> unmanaged = FXCollections.observableArrayList();
+    private final ListView<KnowledgeBase> unmanagedList = new ListView<>(unmanaged);
+    private final TitledPane unmanagedPane = new TitledPane("", unmanagedList);
     private List<KometInstallation> komets = List.of();
     private final Map<String, BuildStatus> statuses = new HashMap<>();
     private final Map<Path, Image> icons = new HashMap<>();
@@ -175,15 +180,34 @@ public final class DashboardView extends BorderPane {
         masterBottom.setPadding(new Insets(8));
 
         list.setCellFactory(view -> new ListingCell());
-        list.setPlaceholder(new Label("No knowledge bases downloaded"));
+        list.setPlaceholder(new Label("No managed knowledge bases downloaded"));
         list.getSelectionModel().selectedItemProperty().addListener((observable, was, now) -> showDetail());
         search.textProperty().addListener((observable, was, now) -> {
             String needle = now == null ? "" : now.strip().toLowerCase(Locale.ROOT);
-            shown.setPredicate(family -> needle.isEmpty() || family.name().toLowerCase(Locale.ROOT).contains(needle));
+            shown.setPredicate(family -> needle.isEmpty() || family.name().toLowerCase(Locale.ROOT).contains(needle)
+                    || family.displayName().toLowerCase(Locale.ROOT).contains(needle));
         });
+        unmanagedList.setCellFactory(view -> new UnmanagedCell());
+        unmanagedList.setPrefHeight(150);
+        unmanagedList.getSelectionModel().selectedItemProperty().addListener((observable, was, now) -> {
+            if (now != null) {
+                list.getSelectionModel().clearSelection();
+            }
+            showDetail();
+        });
+        list.getSelectionModel().selectedItemProperty().addListener((observable, was, now) -> {
+            if (now != null) {
+                unmanagedList.getSelectionModel().clearSelection();
+            }
+        });
+        unmanagedPane.setText("Not managed (0)");
+        unmanagedPane.setExpanded(false);
+        unmanagedPane.setAnimated(false);
+        unmanagedPane.managedProperty().bind(unmanagedPane.visibleProperty());
+        unmanagedPane.setVisible(false);
         BorderPane master = new BorderPane(list);
         master.setTop(masterTop);
-        master.setBottom(masterBottom);
+        master.setBottom(new VBox(unmanagedPane, masterBottom));
         master.setMinWidth(260);
 
         detail.setPadding(new Insets(16, 20, 20, 20));
@@ -224,26 +248,54 @@ public final class DashboardView extends BorderPane {
         icons.clear();
         statuses.keySet().retainAll(families.stream().map(KnowledgeBaseFamily::name).collect(Collectors.toSet()));
         rebuild();
-        browser.setOffers(offers, here());
+        browser.setCatalog(catalog, here());
     }
 
     /**
-     * Gives the Nexus window the icons Nexus holds for the knowledge bases it offers.
+     * Shows, folded at the foot of the list, what is in {@code ~/Solor} but not managed: stores
+     * without a knowledge-base descriptor that meets the minimum, and change-set zips. Each can only
+     * be shown in the Finder or moved to the Trash.
      *
-     * @param pngs each icon's bytes, by artifactId
+     * @param entries the entries
      */
-    public void setNexusIcons(Map<String, byte[]> pngs) {
-        browser.setIcons(pngs);
+    public void setUnmanaged(List<KnowledgeBase> entries) {
+        String keep = Optional.ofNullable(unmanagedList.getSelectionModel().getSelectedItem()).map(KnowledgeBase::name).orElse(null);
+        unmanaged.setAll(entries);
+        unmanagedPane.setText("Not managed (" + entries.size() + ")");
+        unmanagedPane.setVisible(!entries.isEmpty());
+        unmanaged.stream().filter(entry -> entry.name().equals(keep)).findFirst()
+                .ifPresent(entry -> unmanagedList.getSelectionModel().select(entry));
     }
 
     /**
-     * Gives the Nexus window what Nexus offers.
+     * Opens the Not managed section and selects an entry in it, showing its detail.
      *
-     * @param offers the offers
+     * @param name the entry's folder or file name
      */
-    public void setOffers(List<NexusCatalog.Offer> offers) {
-        this.offers = List.copyOf(offers);
-        browser.setOffers(this.offers, here());
+    public void selectUnmanaged(String name) {
+        unmanaged.stream().filter(entry -> entry.name().equals(name)).findFirst().ifPresent(entry -> {
+            unmanagedPane.setExpanded(true);
+            unmanagedList.getSelectionModel().select(entry);
+        });
+    }
+
+    /**
+     * What is listed as not managed, by name.
+     *
+     * @return the names
+     */
+    public List<String> unmanagedListed() {
+        return unmanaged.stream().map(KnowledgeBase::name).toList();
+    }
+
+    /**
+     * Gives the Nexus window what Nexus offers of the knowledge bases it describes.
+     *
+     * @param catalog the described knowledge bases and their stores
+     */
+    public void setCatalog(NexusCatalog.Catalog catalog) {
+        this.catalog = catalog;
+        browser.setCatalog(catalog, here());
     }
 
     /**
@@ -547,6 +599,11 @@ public final class DashboardView extends BorderPane {
 
     private void showDetail() {
         detail.getChildren().clear();
+        KnowledgeBase loose = unmanagedList.getSelectionModel().getSelectedItem();
+        if (loose != null) {
+            showUnmanaged(loose);
+            return;
+        }
         Optional<KnowledgeBaseFamily> chosen = selected();
         if (chosen.isEmpty()) {
             Label none = new Label(families.isEmpty()
@@ -555,12 +612,35 @@ public final class DashboardView extends BorderPane {
             detail.getChildren().add(none);
             return;
         }
-        Label title = new Label(chosen.get().name());
+        Label title = new Label(chosen.get().displayName());
         title.setStyle("-fx-font-size: 20px; -fx-font-weight: bold;");
         HBox heading = new HBox(12, icon(chosen.get(), 48), title);
         heading.setAlignment(Pos.CENTER_LEFT);
         detail.getChildren().add(heading);
         showFamily(chosen.get());
+    }
+
+    private void showUnmanaged(KnowledgeBase entry) {
+        Label title = new Label(entry.name());
+        title.setStyle("-fx-font-size: 20px; -fx-font-weight: bold;");
+        detail.getChildren().add(title);
+        detail.getChildren().add(muted(entry.kind().label() + "  ·  " + DashboardCommand.size(entry.sizeBytes())
+                + "  ·  " + WHEN.format(entry.recency())));
+        entry.coordinate().ifPresent(coordinate -> detail.getChildren().add(muted(coordinate.toString())));
+        Label why = new Label("Not managed: " + String.join("; ", entry.descriptor().problems()) + ".");
+        why.setStyle(ATTENTION);
+        why.setWrapText(true);
+        detail.getChildren().add(why);
+        detail.getChildren().add(muted("The dashboard manages a store that carries a complete knowledge-base descriptor"
+                + " (level 1) and its icon, as builds by ike-maven-plugin 268 or later do. Download a newer build to"
+                + " manage this knowledge base; this copy can be shown in the Finder or moved to the Trash."));
+        Button reveal = new Button("Show in Finder");
+        reveal.setOnAction(event -> onReveal.accept(entry.path()));
+        Button trash = new Button("Move to Trash…");
+        trash.setOnAction(event -> confirmTrash(List.of(entry)));
+        HBox actions = new HBox(8, reveal, trash);
+        actions.setPadding(new Insets(6, 0, 0, 0));
+        detail.getChildren().add(actions);
     }
 
     private void showFamily(KnowledgeBaseFamily family) {
@@ -767,10 +847,9 @@ public final class DashboardView extends BorderPane {
         alert.showAndWait().filter(ButtonType.OK::equals).ifPresent(ok -> onTrash.accept(copies));
     }
 
-    /** A knowledge base's icon, read once per refresh, or its monogram. */
+    /** A knowledge base's icon, read once per refresh. */
     private Node icon(KnowledgeBaseFamily family, double size) {
-        return KnowledgeBaseIcon.of(family.name(), family.icon().map(file -> icons.computeIfAbsent(file, KnowledgeBaseIcon::load)),
-                size);
+        return KnowledgeBaseIcon.of(family.icon().map(file -> icons.computeIfAbsent(file, KnowledgeBaseIcon::load)), size);
     }
 
     private static Label muted(String text) {
@@ -790,7 +869,7 @@ public final class DashboardView extends BorderPane {
                 setGraphic(null);
                 return;
             }
-            Label name = new Label(family.name());
+            Label name = new Label(family.displayName());
             Label mark = new Label();
             mark.setStyle("-fx-font-size: 11px;");
             Optional<KnowledgeBase> latest = family.latest();
@@ -812,6 +891,36 @@ public final class DashboardView extends BorderPane {
             line.setMinWidth(0);
             line.prefWidthProperty().bind(list.widthProperty().subtract(36));
             setGraphic(line);
+        }
+    }
+
+    /** A line of the Not managed section: the folder or file name, what it is, and only Finder and Trash. */
+    private final class UnmanagedCell extends ListCell<KnowledgeBase> {
+        @Override
+        protected void updateItem(KnowledgeBase entry, boolean empty) {
+            super.updateItem(entry, empty);
+            setText(null);
+            if (empty || entry == null) {
+                setGraphic(null);
+                setContextMenu(null);
+                return;
+            }
+            Label name = new Label(entry.name());
+            name.setStyle(MUTED);
+            Label kind = new Label(entry.kind().label());
+            kind.setStyle("-fx-font-size: 11px;" + MUTED);
+            Region gap = new Region();
+            HBox.setHgrow(gap, Priority.ALWAYS);
+            HBox line = new HBox(6, name, gap, kind);
+            line.setAlignment(Pos.CENTER_LEFT);
+            line.setMinWidth(0);
+            line.prefWidthProperty().bind(unmanagedList.widthProperty().subtract(36));
+            setGraphic(line);
+            MenuItem reveal = new MenuItem("Show in Finder");
+            reveal.setOnAction(event -> onReveal.accept(entry.path()));
+            MenuItem trash = new MenuItem("Move to Trash…");
+            trash.setOnAction(event -> confirmTrash(List.of(entry)));
+            setContextMenu(new ContextMenu(reveal, trash));
         }
     }
 }

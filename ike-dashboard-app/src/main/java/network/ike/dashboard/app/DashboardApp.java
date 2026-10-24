@@ -24,7 +24,6 @@ import network.ike.dashboard.download.RepositoryHttpClients;
 import java.net.http.HttpClient;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -100,11 +99,13 @@ public final class DashboardApp extends Application {
                 List<KnowledgeBase> knowledgeBases = KnowledgeBaseScanner.scan(settings.solor());
                 List<KometInstallation> komets = KometInstallations.find(KometInstallations.defaultRoots(
                         Path.of(System.getProperty("user.home")), settings.installLocation()));
-                families = KnowledgeBaseFamily.group(knowledgeBases);
+                families = KnowledgeBaseFamily.managed(knowledgeBases);
                 List<KnowledgeBaseFamily> found = families;
+                List<KnowledgeBase> unmanaged = KnowledgeBaseFamily.unmanaged(knowledgeBases);
                 Platform.runLater(() -> {
                     view.setKomets(komets);
                     view.setFamilies(found);
+                    view.setUnmanaged(unmanaged);
                     String select = selectAfterRefresh;
                     if (select != null) {
                         selectAfterRefresh = null;
@@ -155,18 +156,11 @@ public final class DashboardApp extends Application {
     private void loadCatalog() {
         work.submit(() -> {
             try {
-                List<NexusCatalog.Offer> offers = NexusCatalog.list(RepositoryHttpClients.newClient(),
+                NexusCatalog.Catalog catalog = NexusCatalog.catalog(RepositoryHttpClients.newClient(),
                         DashboardCommand.access(settings));
-                Platform.runLater(() -> view.setOffers(offers));
+                Platform.runLater(() -> view.setCatalog(catalog));
             } catch (Exception e) {
                 Platform.runLater(() -> view.setOffersProblem("Could not ask Nexus: " + e.getMessage()));
-                return;
-            }
-            try {
-                Map<String, byte[]> icons = NexusCatalog.icons(RepositoryHttpClients.newClient(), DashboardCommand.access(settings));
-                Platform.runLater(() -> view.setNexusIcons(icons));
-            } catch (Exception e) {
-                // Without icons the Nexus window shows each knowledge base's monogram.
             }
         });
     }

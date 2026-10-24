@@ -19,26 +19,42 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.jar.Attributes;
 import java.util.jar.Manifest;
 import java.util.stream.Stream;
 
 /**
- * Lists the knowledge bases in a folder and reads what each says about itself: its Maven descriptor
- * at {@code META-INF/maven/<g>/<a>/pom.properties} and the {@code Ike-*} attributes of its
- * {@code META-INF/MANIFEST.MF}, with the JDK alone. No store is opened.
+ * Lists the knowledge bases in a folder and reads what each says about itself, with the JDK alone: its
+ * knowledge-base descriptor {@code META-INF/ike/knowledge-base.properties}, which decides whether the
+ * dashboard manages it, and, for the details of what it does not manage, its Maven descriptor at
+ * {@code META-INF/maven/<g>/<a>/pom.properties} and the {@code Ike-*} attributes of its
+ * {@code META-INF/MANIFEST.MF}. No store is opened. This is the one place a knowledge-base descriptor
+ * is read, the ones on Nexus included.
  */
 public final class KnowledgeBaseScanner {
+
+    /** The knowledge-base descriptor, relative to the store. */
+    public static final String DESCRIPTOR = "META-INF/ike/knowledge-base.properties";
+
+    /** The descriptor levels the dashboard reads. */
+    public static final Set<Integer> SUPPORTED_LEVELS = Set.of(1);
+
+    private static final Set<String> LAYOUTS = Set.of("rocks", "spined-32", "spined-64");
+    private static final Set<String> ACCESS = Set.of("public", "restricted");
 
     private KnowledgeBaseScanner() {
     }
@@ -76,7 +92,109 @@ public final class KnowledgeBaseScanner {
      */
     public static KnowledgeBase inspect(Path entry) throws IOException {
         return new KnowledgeBase(entry.getFileName().toString(), entry, kind(entry), size(entry), descriptor(entry),
-                ikeAttributes(entry), Files.getLastModifiedTime(entry).toInstant());
+                ikeAttributes(entry), Files.getLastModifiedTime(entry).toInstant(), knowledgeBaseDescriptor(entry));
+    }
+
+    /**
+     * Whether a store's knowledge-base descriptor meets the minimum for the dashboard to manage it: at a
+     * supported level, every required field, and the icon it names inside the store.
+     *
+     * @param entry a folder or zip
+     * @return the descriptor, or why the store is not managed
+     * @throws IOException if the descriptor exists but cannot be read
+     */
+    public static DescriptorCheck knowledgeBaseDescriptor(Path entry) throws IOException {
+        Path file = entry.resolve(DESCRIPTOR);
+        if (!Files.isDirectory(entry) || !Files.isRegularFile(file)) {
+            return DescriptorCheck.unmet(List.of("no knowledge-base descriptor"));
+        }
+        Properties properties = new Properties();
+        try (InputStream in = Files.newInputStream(file)) {
+            properties.load(in);
+        }
+        DescriptorCheck fields = knowledgeBaseDescriptor(properties);
+        if (!fields.met()) {
+            return fields;
+        }
+        String icon = fields.descriptor().get().icon();
+        try {
+            Path resolved = entry.resolve(icon).normalize();
+            if (!resolved.startsWith(entry.normalize())) {
+                return DescriptorCheck.unmet(List.of("icon " + icon + " is outside the store"));
+            }
+            if (!Files.isRegularFile(resolved)) {
+                return DescriptorCheck.unmet(List.of("icon " + icon + " is missing"));
+            }
+        } catch (InvalidPathException e) {
+            return DescriptorCheck.unmet(List.of("icon " + icon + " is not a path"));
+        }
+        return fields;
+    }
+
+    /**
+     * Whether a knowledge-base descriptor's fields meet the minimum: a supported level and every field
+     * the level requires, each well formed. The icon file is not looked for; a store's is checked by
+     * {@link #knowledgeBaseDescriptor(Path)}, one on Nexus by its {@code png:icon} beside it.
+     *
+     * @param properties the descriptor's entries
+     * @return the descriptor, or what is missing or malformed
+     */
+    public static DescriptorCheck knowledgeBaseDescriptor(Properties properties) {
+        String level = field(properties, "descriptorLevel");
+        if (level == null) {
+            return DescriptorCheck.unmet(List.of("descriptor names no level"));
+        }
+        int number;
+        try {
+            number = Integer.parseInt(level);
+        } catch (NumberFormatException e) {
+            return DescriptorCheck.unmet(List.of("descriptor level " + level + " is not a number"));
+        }
+        if (!SUPPORTED_LEVELS.contains(number)) {
+            return DescriptorCheck.unmet(List.of("descriptor level " + number + " is not one the dashboard reads"));
+        }
+        List<String> problems = new ArrayList<>();
+        for (String required : List.of("groupId", "artifactId", "version", "displayName", "layout", "entityFormat",
+                "assembledAt", "access", "icon")) {
+            if (field(properties, required) == null) {
+                problems.add("missing " + required);
+            }
+        }
+        String layout = field(properties, "layout");
+        if (layout != null && !LAYOUTS.contains(layout)) {
+            problems.add("layout " + layout + " is not rocks, spined-32 or spined-64");
+        }
+        String access = field(properties, "access");
+        if (access != null && !ACCESS.contains(access)) {
+            problems.add("access " + access + " is not public or restricted");
+        }
+        Integer entityFormat = null;
+        String format = field(properties, "entityFormat");
+        try {
+            entityFormat = format == null ? null : Integer.valueOf(format);
+        } catch (NumberFormatException e) {
+            problems.add("entityFormat " + format + " is not a number");
+        }
+        Instant assembledAt = null;
+        String assembled = field(properties, "assembledAt");
+        try {
+            assembledAt = assembled == null ? null : Instant.parse(assembled);
+        } catch (DateTimeParseException e) {
+            problems.add("assembledAt " + assembled + " is not an instant");
+        }
+        if (!problems.isEmpty()) {
+            return DescriptorCheck.unmet(problems);
+        }
+        return DescriptorCheck.met(new KnowledgeBaseDescriptor(number,
+                new Coordinate(field(properties, "groupId"), field(properties, "artifactId"), field(properties, "version")),
+                Optional.ofNullable(field(properties, "resolvedVersion")), field(properties, "displayName"), layout,
+                entityFormat, assembledAt, access, field(properties, "icon")));
+    }
+
+    /** A field's value, stripped; {@code null} when absent or blank. */
+    private static String field(Properties properties, String name) {
+        String value = properties.getProperty(name);
+        return value == null || value.isBlank() ? null : value.strip();
     }
 
     /**

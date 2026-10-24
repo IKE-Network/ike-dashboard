@@ -25,8 +25,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Renders the dashboard window headless, under Monocle, from a knowledge-base folder built for the
  * test, and writes it to {@code target/dashboard-view.png} so a person can see what it shows: one line
- * per knowledge base on the left, each with its icon or monogram, the selected one's detail on the
- * right; the Nexus window goes to {@code target/nexus-browser.png}.
+ * per managed knowledge base on the left beside its icon, the rest folded into Not managed, the
+ * selected one's detail on the right; a Not managed entry's detail goes to
+ * {@code target/dashboard-not-managed.png}, the Nexus window to {@code target/nexus-browser.png}.
  */
 class DashboardViewSnapshotTest {
 
@@ -45,37 +46,48 @@ class DashboardViewSnapshotTest {
     }
 
     @Test
-    void eachKnowledgeBaseIsOneLineAndTheSelectedOneFillsTheDetail(@TempDir Path solor) throws Exception {
+    void managedKnowledgeBasesShowTheirIconsAndTheRestFoldIntoNotManaged(@TempDir Path solor) throws Exception {
         store(solor, "pizza-kb", "20250627.1-20261023.232318-6");
-        icon(solor.resolve("pizza-kb"));
+        describe(solor.resolve("pizza-kb"), "pizza-kb", "Pizza Knowledge Base", "rocks", new java.awt.Color(0xe65100), true);
+        Files.createDirectories(solor.resolve("solor-kb/nidToByteArrayMap"));
+        Files.createDirectories(solor.resolve("solor-kb/nidToCitingComponentNidMap"));
+        describe(solor.resolve("solor-kb"), "solor-kb", "SOLOR", "spined-32", new java.awt.Color(0x00838f), true);
+        Files.createDirectories(solor.resolve("solor-kb-broken/nidToByteArrayMap"));
+        Files.createDirectories(solor.resolve("solor-kb-broken/nidToCitingComponentNidMap"));
+        describe(solor.resolve("solor-kb-broken"), "solor-kb", "SOLOR", "spined-32", new java.awt.Color(0x00838f), false);
+        store(solor, "pizza-kb-2026-10-01", "20250627.1-20261001.101010-1");
         rocks(solor, "*DeX-4-17-2026", "2026-06-29T21:21:00Z");
         rocks(solor, "*DeX-4-17-2026-64bit-2", "2026-10-09T03:26:00Z");
         Files.writeString(solor.resolve("DeX-2026-10-08-pb.zip"), "zip");
         Files.setLastModifiedTime(solor.resolve("DeX-2026-10-08-pb.zip"), FileTime.from(Instant.parse("2026-10-08T14:44:00Z")));
-        Files.createDirectories(solor.resolve("solor-kb/nidToByteArrayMap"));
-        Files.createDirectories(solor.resolve("solor-kb/nidToCitingComponentNidMap"));
-        List<KnowledgeBaseFamily> families = KnowledgeBaseFamily.group(KnowledgeBaseScanner.scan(solor));
+        Files.createDirectories(solor.resolve("notes"));
+        List<KnowledgeBase> scanned = KnowledgeBaseScanner.scan(solor);
+        List<KnowledgeBaseFamily> families = KnowledgeBaseFamily.managed(scanned);
+        List<KnowledgeBase> unmanaged = KnowledgeBaseFamily.unmanaged(scanned);
         KometInstallation komet = new KometInstallation("Komet Desktop 2026-10-16 346s", "26.1016.346",
                 Path.of("/Applications/Komet Desktop 2026-10-16 346s.app"),
                 Path.of("/Applications/Komet Desktop 2026-10-16 346s.app/Contents/MacOS/Komet Desktop 2026-10-16 346s"));
-        List<NexusCatalog.Offer> offers = List.of(
-                offer("pizza-kb", "rkb"),
-                offer("solor-gudid-kb", "rkb"),
-                offer("solor-gudid-kb", "reasoned-sa"));
-
-        java.io.ByteArrayOutputStream gudidIcon = new java.io.ByteArrayOutputStream();
-        ImageIO.write(drawn(64, new java.awt.Color(0x1565c0)), "png", gudidIcon);
+        NexusCatalog.Catalog catalog = NexusCatalog.Catalog.of(List.of(
+                        offer("pizza-kb", "rkb"),
+                        offer("solor-gudid-kb", "rkb"),
+                        offer("solor-gudid-kb", "reasoned-sa"),
+                        offer("undescribed-kb", "rkb")),
+                java.util.Map.of(
+                        coordinate("pizza-kb"), described("pizza-kb", "Pizza Knowledge Base", new java.awt.Color(0xe65100)),
+                        coordinate("solor-gudid-kb"), described("solor-gudid-kb", "SOLOR GUDID", new java.awt.Color(0x1565c0))));
 
         CompletableFuture<WritableImage> rendered = new CompletableFuture<>();
+        CompletableFuture<WritableImage> notManaged = new CompletableFuture<>();
         CompletableFuture<WritableImage> nexus = new CompletableFuture<>();
         CompletableFuture<DashboardView> built = new CompletableFuture<>();
+        CompletableFuture<List<String>> unmanagedDetail = new CompletableFuture<>();
         Platform.runLater(() -> {
             try {
                 DashboardView view = new DashboardView();
                 view.setKomets(List.of(komet));
                 view.setFamilies(families);
-                view.setOffers(offers);
-                view.setNexusIcons(java.util.Map.of("solor-gudid-kb", gudidIcon.toByteArray()));
+                view.setUnmanaged(unmanaged);
+                view.setCatalog(catalog);
                 view.setStatus("pizza-kb", new BuildStatus(BuildStatus.State.NEWER, "newer build",
                         Optional.of(new SnapshotMetadata.Deploy("20250627.1-20261024.001942-7", Instant.parse("2026-10-24T00:20:14Z")))));
                 view.setKometRelease(Optional.of(new KometRelease("26.1024.1324", KometRelease.Source.NEXUS,
@@ -86,40 +98,85 @@ class DashboardViewSnapshotTest {
                 Scene scene = new Scene(view, 1080, 480);
                 view.applyCss();
                 view.layout();
-                built.complete(view);
                 rendered.complete(scene.snapshot(null));
+                built.complete(view);
+            } catch (RuntimeException e) {
+                rendered.completeExceptionally(e);
+                built.completeExceptionally(e);
+            }
+        });
+        WritableImage image = rendered.get(30, TimeUnit.SECONDS);
+        DashboardView view = built.get();
+        Platform.runLater(() -> {
+            try {
+                // A view of its own: a snapshot of a scene already drawn shows the detail pane as it was.
+                DashboardView loose = new DashboardView();
+                loose.setKomets(List.of(komet));
+                loose.setFamilies(families);
+                loose.setUnmanaged(unmanaged);
+                loose.selectUnmanaged("solor-kb-broken");
+                Scene looseScene = new Scene(loose, 1080, 480);
+                loose.applyCss();
+                loose.layout();
+                unmanagedDetail.complete(loose.lookupAll(".label").stream()
+                        .map(node -> ((javafx.scene.control.Label) node).getText()).toList());
+                notManaged.complete(looseScene.snapshot(null));
+
                 Scene browserScene = new Scene(view.browser(), 720, 200);
                 view.browser().applyCss();
                 view.browser().layout();
                 nexus.complete(browserScene.snapshot(null));
             } catch (RuntimeException e) {
-                rendered.completeExceptionally(e);
+                notManaged.completeExceptionally(e);
                 nexus.completeExceptionally(e);
+                unmanagedDetail.completeExceptionally(e);
             }
         });
-        WritableImage image = rendered.get(30, TimeUnit.SECONDS);
-        DashboardView view = built.get();
 
-        assertThat(view.listed()).as("only what is downloaded").containsExactly("DeX", "pizza-kb", "solor-kb");
-        assertThat(view.selected()).map(KnowledgeBaseFamily::name).contains("pizza-kb");
-        assertThat(families.getFirst().latest()).map(KnowledgeBase::name).contains("*DeX-4-17-2026-64bit-2");
-        assertThat(view.browser().shown()).extracting(offer -> offer.coordinate().artifactId(), view.browser()::isHere)
-                .containsExactly(org.assertj.core.groups.Tuple.tuple("pizza-kb", true),
-                        org.assertj.core.groups.Tuple.tuple("solor-gudid-kb", false),
-                        org.assertj.core.groups.Tuple.tuple("solor-gudid-kb", false));
+        assertThat(view.listed()).as("only managed stores").containsExactly("pizza-kb", "solor-kb");
+        assertThat(view.unmanagedListed()).as("the rest, without folders that are no store").containsExactly(
+                "*DeX-4-17-2026", "*DeX-4-17-2026-64bit-2", "DeX-2026-10-08-pb.zip", "pizza-kb-2026-10-01", "solor-kb-broken");
+        assertThat(families).extracting(KnowledgeBaseFamily::displayName).containsExactly("Pizza Knowledge Base", "SOLOR");
         assertThat(view.status("pizza-kb").state()).isEqualTo(BuildStatus.State.NEWER);
-        assertThat(families).filteredOn(family -> family.name().equals("pizza-kb")).singleElement()
-                .satisfies(pizza -> assertThat(pizza.icon()).isPresent());
-        assertThat(view.lookupAll(".image-view")).as("pizza-kb's icon in its list line and in the detail").hasSize(2);
-        assertThat(monograms(view)).as("the others are told apart by colour")
-                .contains(KnowledgeBaseIcon.color("DeX"), KnowledgeBaseIcon.color("solor-kb"))
-                .doesNotContain(KnowledgeBaseIcon.color("pizza-kb"));
-        assertThat(view.browser().hasIcon("solor-gudid-kb")).isTrue();
-        assertThat(view.browser().hasIcon("pizza-kb")).as("Nexus holds none for it here").isFalse();
+        assertThat(unmanagedDetail.get()).as("why a store is not managed")
+                .anyMatch(text -> text.contains("icon META-INF/ike/icon.png is missing"));
+        assertThat(view.browser().shown()).as("only described knowledge bases on Nexus")
+                .extracting(offer -> offer.coordinate().artifactId(), view.browser()::isHere, view.browser()::hasIcon)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("pizza-kb", true, true),
+                        org.assertj.core.groups.Tuple.tuple("solor-gudid-kb", false, true),
+                        org.assertj.core.groups.Tuple.tuple("solor-gudid-kb", false, true));
         Path png = Path.of("target", "dashboard-view.png");
         write(image, png);
         assertThat(png).isNotEmptyFile();
+        write(notManaged.get(30, TimeUnit.SECONDS), Path.of("target", "dashboard-not-managed.png"));
         write(nexus.get(30, TimeUnit.SECONDS), Path.of("target", "nexus-browser.png"));
+        CompletableFuture<Integer> icons = new CompletableFuture<>();
+        Platform.runLater(() -> icons.complete(view.lookupAll(".image-view").size()));
+        assertThat(icons.get(30, TimeUnit.SECONDS)).as("each managed line's icon and the detail's").isEqualTo(3);
+    }
+
+    private static Coordinate coordinate(String artifactId) {
+        return new Coordinate("network.ike.data", artifactId, "1-SNAPSHOT");
+    }
+
+    private static NexusCatalog.Described described(String artifactId, String displayName, java.awt.Color color) throws IOException {
+        java.io.ByteArrayOutputStream png = new java.io.ByteArrayOutputStream();
+        ImageIO.write(drawn(64, color), "png", png);
+        return new NexusCatalog.Described(new KnowledgeBaseDescriptor(1, coordinate(artifactId), Optional.empty(), displayName,
+                "rocks", 3, Instant.parse("2026-10-24T00:19:00Z"), "restricted", "META-INF/ike/icon.png"), png.toByteArray());
+    }
+
+    /** Gives a store a level-1 knowledge-base descriptor as ike:kb-assemble writes it, with or without its icon. */
+    private static void describe(Path store, String artifactId, String displayName, String layout, java.awt.Color color,
+                                 boolean withIcon) throws IOException {
+        Path ike = Files.createDirectories(store.resolve("META-INF/ike"));
+        if (withIcon) {
+            ImageIO.write(drawn(64, color), "png", ike.resolve("icon.png").toFile());
+        }
+        Files.writeString(ike.resolve("knowledge-base.properties"), "descriptorLevel=1\ngroupId=network.ike.data\n"
+                + "artifactId=" + artifactId + "\nversion=20250627.1-SNAPSHOT\ndisplayName=" + displayName + "\n"
+                + "layout=" + layout + "\nentityFormat=3\nassembledAt=2026-10-23T23\\:20\\:08Z\naccess=restricted\n"
+                + "icon=META-INF/ike/icon.png\n");
     }
 
     private static NexusCatalog.Offer offer(String artifactId, String classifier) {
@@ -134,27 +191,6 @@ class DashboardViewSnapshotTest {
                 "artifactId=pizza-kb\ngroupId=network.ike.data\nversion=20250627.1-SNAPSHOT\n");
         Files.writeString(store.getParent().resolve("META-INF/MANIFEST.MF"), "Manifest-Version: 1.0\n"
                 + "Ike-Entity-Format: 3\nIke-Resolved-Version: " + resolvedVersion + "\n\n");
-    }
-
-    /** The fills of the monograms shown, read from the rounded squares they are drawn on. */
-    private static List<javafx.scene.paint.Paint> monograms(javafx.scene.Parent parent) {
-        List<javafx.scene.paint.Paint> fills = new java.util.ArrayList<>();
-        for (javafx.scene.Node child : parent.getChildrenUnmodifiable()) {
-            if (child instanceof javafx.scene.shape.Rectangle square && square.getArcWidth() > 0) {
-                fills.add(square.getFill());
-            } else if (child instanceof javafx.scene.Parent inner) {
-                fills.addAll(monograms(inner));
-            }
-        }
-        return fills;
-    }
-
-    /** Gives a store an icon as ike:kb-assemble writes it. */
-    private static void icon(Path store) throws IOException {
-        Path ike = Files.createDirectories(store.resolve("META-INF/ike"));
-        ImageIO.write(drawn(64, new java.awt.Color(0xe65100)), "png", ike.resolve("icon.png").toFile());
-        Path manifest = store.resolve("META-INF/MANIFEST.MF");
-        Files.writeString(manifest, Files.readString(manifest).stripTrailing() + "\nIke-Icon: META-INF/ike/icon.png\n\n");
     }
 
     /** A round icon with a lighter centre, so it reads as an image and not a monogram. */
