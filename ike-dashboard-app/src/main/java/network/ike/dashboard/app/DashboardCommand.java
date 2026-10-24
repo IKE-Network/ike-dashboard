@@ -32,6 +32,7 @@ import java.util.Locale;
  * list                                  the knowledge bases in ~/Solor
  * check                                 the same, with the newer-build check against Nexus
  * komets                                the Komet versions installed
+ * nexus                                 the knowledge bases Nexus offers
  * download &lt;g:a:v&gt; &lt;classifier&gt;          the newest deploy of a store, into ~/Solor/&lt;artifactId&gt;
  * </pre>
  */
@@ -54,6 +55,7 @@ public final class DashboardCommand {
             case "list" -> list(out, settings, false);
             case "check" -> list(out, settings, true);
             case "komets" -> komets(out, settings);
+            case "nexus" -> nexus(out, settings);
             case "download" -> {
                 if (args.length != 3) {
                     throw new IllegalArgumentException("download <groupId:artifactId:version> <classifier>");
@@ -106,6 +108,15 @@ public final class DashboardCommand {
         out.printf("%d Komet versions%n", komets.size());
         for (KometInstallation komet : komets) {
             out.printf("%-14s %s%n", komet.version(), komet.bundle());
+        }
+    }
+
+    private static void nexus(PrintStream out, DashboardSettings settings) throws Exception {
+        List<NexusCatalog.Offer> offers = NexusCatalog.list(RepositoryHttpClients.newClient(), access(settings));
+        out.printf("%d stores on Nexus%n", offers.size());
+        for (NexusCatalog.Offer offer : offers) {
+            out.printf("%-28s %-12s %9s  %s  %s%n", offer.coordinate().artifactId(), offer.label(),
+                    size(offer.sizeBytes()), offer.updated(), offer.repository());
         }
     }
 
