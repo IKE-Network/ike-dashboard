@@ -1,0 +1,8 @@
+IKE Dashboard
+Copyright 2026 IKE Network
+
+This product includes software developed by Integrated Knowledge Management
+(https://ikm.dev): the classes of the ike-dashboard-download module were copied
+on 2026-10-23 from the artifact-resolution module of Komet
+(https://github.com/ikmdev/komet), licensed under the Apache License, Version 2.0,
+and changed as that module's descriptor (module-info.java) records.

@@ -1,0 +1,15 @@
+target/
+.idea/
+*.iml
+.DS_Store
+**/.claude/standards/
+
+# ws vcs bridge state (tool-written)
+.ike/vcs-state
+
+# ike:* goal reports
+ike꞉*.md
+# BEGIN ike-managed
+# IKE local state (never committed)
+.ike/vcs-state
+# END ike-managed

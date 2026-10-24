@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.1.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.1.0 https://maven.apache.org/xsd/maven-4.1.0.xsd">
+    <modelVersion>4.1.0</modelVersion>
+
+    <parent>
+        <groupId>network.ike.dashboard</groupId>
+        <artifactId>ike-dashboard</artifactId>
+    </parent>
+
+    <artifactId>ike-dashboard-download</artifactId>
+    <packaging>jar</packaging>
+
+    <name>IKE Dashboard Download</name>
+    <description>
+        Maven repository access with the JDK alone: Nexus search, version resolution from
+        maven-metadata.xml, settings.xml proxies and servers, platform trust, and the resumable
+        download and unpack of a classified artifact through the local repository. Copied from
+        Komet's artifact-resolution module (ikmdev/komet, Apache 2.0) and freed of its Komet and
+        Tinkar dependencies.
+    </description>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>
