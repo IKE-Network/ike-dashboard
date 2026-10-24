@@ -13,6 +13,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/*
+ * Copyright © 2026 IKE Network (support@ike.network)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package network.ike.dashboard.app;
 
 import javafx.application.Application;
@@ -62,6 +77,7 @@ public final class DashboardApp extends Application {
         view.setOnRefresh(this::refresh);
         view.setOnCheckNexus(this::checkNexus);
         view.setOnOpen(this::open);
+        view.setOnDownload(this::download);
         stage.setTitle("IKE Dashboard");
         stage.setScene(new Scene(view, 1180, 660));
         stage.show();
@@ -70,7 +86,6 @@ public final class DashboardApp extends Application {
 
     @Override
     public void stop() {
-        view.dispose();
         work.shutdownNow();
     }
 
@@ -81,12 +96,15 @@ public final class DashboardApp extends Application {
                 List<KnowledgeBase> knowledgeBases = KnowledgeBaseScanner.scan(settings.solor());
                 List<KometInstallation> komets = KometInstallations.find(KometInstallations.defaultRoots(
                         Path.of(System.getProperty("user.home")), settings.installLocation()));
+                List<KnowledgeBaseFamily> families = KnowledgeBaseFamily.group(knowledgeBases);
                 long identified = knowledgeBases.stream().filter(KnowledgeBase::identified).count();
+                long other = knowledgeBases.stream().filter(knowledgeBase -> knowledgeBase.kind() == StoreKind.UNKNOWN).count();
                 Platform.runLater(() -> {
-                    view.setKnowledgeBases(knowledgeBases);
                     view.setKomets(komets);
-                    view.setMessage(knowledgeBases.size() + " entries in " + settings.solor() + ", " + identified
-                            + " of them say which build they are; " + komets.size() + " Komet versions installed");
+                    view.setFamilies(families);
+                    view.setMessage(families.size() + " knowledge bases in " + settings.solor() + " (" + knowledgeBases.size()
+                            + " entries, " + identified + " saying which build they are" + (other == 0 ? ""
+                            : ", " + other + " other folders not shown") + "); " + komets.size() + " Komet versions installed");
                 });
             } catch (Exception e) {
                 Platform.runLater(() -> view.setMessage("Could not read " + settings.solor() + ": " + e.getMessage()));
@@ -95,26 +113,49 @@ public final class DashboardApp extends Application {
     }
 
     private void checkNexus() {
-        List<DashboardView.Row> rows = view.rows().stream()
-                .filter(row -> row.knowledgeBase().kind().opensInKomet()).toList();
-        view.setMessage("Asking " + settings.repositoryUrl() + " about " + rows.size() + " stores …");
+        List<DashboardView.Entry> rows = view.families();
+        view.setMessage("Asking " + settings.repositoryUrl() + " about " + rows.size() + " knowledge bases …");
         work.submit(() -> {
             try {
                 NewerBuildCheck check = new NewerBuildCheck(RepositoryHttpClients.newClient(),
                         DashboardCommand.access(settings));
                 int newer = 0;
-                for (DashboardView.Row row : rows) {
-                    BuildStatus status = check.check(row.knowledgeBase());
+                for (DashboardView.Entry row : rows) {
+                    BuildStatus status = row.family().latestIdentified().map(check::check)
+                            .orElse(BuildStatus.of(BuildStatus.State.UNIDENTIFIED, "no copy says which build it is"));
                     if (status.state() == BuildStatus.State.NEWER) {
                         newer++;
                     }
-                    Platform.runLater(() -> row.statusProperty().set(status));
+                    Platform.runLater(() -> view.setStatus(row, status));
                 }
                 int found = newer;
                 Platform.runLater(() -> view.setMessage(found == 0 ? "No newer builds found"
-                        : found + (found == 1 ? " store has" : " stores have") + " a newer build on Nexus"));
+                        : found + (found == 1 ? " knowledge base has" : " knowledge bases have") + " a newer build on Nexus"));
             } catch (Exception e) {
                 Platform.runLater(() -> view.setMessage("Could not check Nexus: " + e.getMessage()));
+            }
+        });
+    }
+
+    private void download(DashboardView.Entry available) {
+        KnowledgeBase identified = available.family().latestIdentified().orElse(null);
+        if (identified == null) {
+            view.setMessage("No copy of " + available.family().name() + " says which build it is");
+            return;
+        }
+        Coordinate coordinate = identified.coordinate().orElseThrow();
+        String classifier = identified.kind().classifier();
+        view.setMessage("Downloading " + coordinate + " " + classifier + " …");
+        work.submit(() -> {
+            try {
+                Path store = StoreDownload.download(RepositoryHttpClients.newClient(), DashboardCommand.access(settings),
+                        coordinate, classifier, settings.solor(), settings.localRepository(), null);
+                Platform.runLater(() -> {
+                    view.setMessage("Downloaded " + store);
+                    refresh();
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> view.setMessage("Could not download " + coordinate + ": " + e.getMessage()));
             }
         });
     }

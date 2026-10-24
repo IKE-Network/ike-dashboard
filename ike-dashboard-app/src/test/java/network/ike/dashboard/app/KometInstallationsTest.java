@@ -51,7 +51,7 @@ class KometInstallationsTest {
         KometInstallation komet = new KometInstallation("Komet", "26.1016.346", Path.of("/Applications/Komet.app"),
                 Path.of("/Applications/Komet.app/Contents/MacOS/Komet"));
         KnowledgeBase pizza = new KnowledgeBase("pizza-kb", Path.of("/Users/someone/Solor/pizza-kb"), StoreKind.ROCKS,
-                0, java.util.Optional.empty(), java.util.Map.of());
+                0, java.util.Optional.empty(), java.util.Map.of(), java.time.Instant.EPOCH);
 
         assertThat(KometLauncher.command(komet, pizza))
                 .containsExactly("/Applications/Komet.app/Contents/MacOS/Komet", "--kb=/Users/someone/Solor/pizza-kb");

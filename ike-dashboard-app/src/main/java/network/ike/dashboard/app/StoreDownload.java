@@ -13,6 +13,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/*
+ * Copyright © 2026 IKE Network (support@ike.network)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package network.ike.dashboard.app;
 
 import network.ike.dashboard.download.ArtifactCoordinates;
@@ -65,7 +80,9 @@ public final class StoreDownload {
     }
 
     /**
-     * Downloads the newest deploy of a store and unpacks it as {@code <solor>/<artifactId>}.
+     * Downloads the newest deploy of a store and unpacks it as {@code <solor>/<artifactId>}, or, when a
+     * copy is already there, beside it as {@code <solor>/<artifactId>-<deploy>}: a download never writes
+     * over a store.
      *
      * @param http            the client to download with
      * @param repository      the repository and its login
@@ -75,20 +92,17 @@ public final class StoreDownload {
      * @param localRepository the local Maven repository the zip is cached in
      * @param listener        told of progress
      * @return the unpacked store
-     * @throws Exception if the store already exists, Nexus has no such deploy, or the download fails
+     * @throws Exception if that deploy is already unpacked, Nexus has no such deploy, or the download fails
      */
     public static Path download(HttpClient http, RepositoryAccess repository, Coordinate coordinate, String classifier,
                                 Path solor, Path localRepository, DownloadListener<Path> listener) throws Exception {
-        Path destination = solor.resolve(coordinate.artifactId());
-        if (Files.exists(destination)) {
-            throw new IOException(destination + " already exists; the dashboard never writes over a store");
-        }
         String fileVersion = coordinate.version();
         if (coordinate.snapshot()) {
             fileVersion = newestDeploy(http, repository, coordinate, classifier)
                     .orElseThrow(() -> new IOException("Nexus lists no " + classifier + " zip for " + coordinate))
                     .value();
         }
+        Path destination = destination(solor, coordinate.artifactId(), fileVersion);
         ArtifactCoordinates artifact = new ArtifactCoordinates(coordinate.groupId(), coordinate.artifactId());
         URI uri = MavenDataStoreDownloadTask.downloadUri(repository.url(), artifact, coordinate.version(), fileVersion,
                 classifier);
@@ -111,6 +125,30 @@ public final class StoreDownload {
         addToManifest(store, attributes);
         UsageJournal.record(localRepository, UsageJournal.DASHBOARD, LocalDate.now(), List.of(cached));
         return store;
+    }
+
+    /**
+     * Where a download unpacks: {@code <artifactId>} when free, else {@code <artifactId>-<deploy>}.
+     *
+     * @param solor       the knowledge-base folder
+     * @param artifactId  the knowledge base
+     * @param fileVersion the deploy
+     * @return the new folder
+     * @throws IOException if both are taken: that deploy is already unpacked
+     */
+    static Path destination(Path solor, String artifactId, String fileVersion) throws IOException {
+        Path plain = solor.resolve(artifactId);
+        if (!Files.exists(plain)) {
+            return plain;
+        }
+        if (fileVersion.equals(KnowledgeBaseScanner.ikeAttributes(plain).get(KnowledgeBase.RESOLVED_VERSION))) {
+            throw new IOException(plain + " already holds " + fileVersion);
+        }
+        Path beside = solor.resolve(artifactId + "-" + fileVersion);
+        if (Files.exists(beside)) {
+            throw new IOException(beside + " already exists; the dashboard never writes over a store");
+        }
+        return beside;
     }
 
     /**

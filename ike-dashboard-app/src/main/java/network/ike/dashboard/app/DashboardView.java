@@ -25,87 +25,146 @@ import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
-import javafx.scene.control.ComboBox;
+import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
-import javafx.scene.control.ListCell;
+import javafx.scene.control.Menu;
+import javafx.scene.control.MenuItem;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
-import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.Tooltip;
+import javafx.scene.control.TreeItem;
+import javafx.scene.control.TreeTableCell;
+import javafx.scene.control.TreeTableColumn;
+import javafx.scene.control.TreeTableRow;
+import javafx.scene.control.TreeTableView;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
-import javafx.util.Subscription;
 
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
- * The dashboard's window content: the knowledge bases in {@code ~/Solor}, and the Komet versions
- * installed. It holds no IO of its own; {@link DashboardApp} supplies the data and the actions.
+ * The dashboard's window content. Knowledge bases show as one row each: the row is the newest copy
+ * Komet can open, in bold, with the Komet that opens it; older copies, and a newer build Nexus has,
+ * fold beneath it. It holds no IO of its own; {@link DashboardApp} supplies the data and the actions.
  */
 public final class DashboardView extends BorderPane {
 
-    private static final DateTimeFormatter ASSEMBLED = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+    private static final DateTimeFormatter WHEN = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
             .withZone(ZoneId.systemDefault());
 
-    /** One knowledge base and what the newer-build check last found for it. */
-    public static final class Row {
-        private final KnowledgeBase knowledgeBase;
+    /** A row of the tree: a knowledge base, an older copy of it, or a newer build Nexus has. */
+    public static final class Entry {
+
+        /** The kinds of row. */
+        public enum Kind {
+            /** A knowledge base: its newest copy, or its only entry. */
+            FAMILY,
+            /** An older copy of a knowledge base, in {@code ~/Solor}. */
+            COPY,
+            /** A newer build on Nexus, not downloaded. */
+            AVAILABLE
+        }
+
+        private final Kind kind;
+        private final KnowledgeBaseFamily family;
+        private final KnowledgeBase copy;
+        private final SnapshotMetadata.Deploy deploy;
         private final ObjectProperty<BuildStatus> status = new SimpleObjectProperty<>(BuildStatus.UNCHECKED);
 
-        Row(KnowledgeBase knowledgeBase) {
-            this.knowledgeBase = knowledgeBase;
+        private Entry(Kind kind, KnowledgeBaseFamily family, KnowledgeBase copy, SnapshotMetadata.Deploy deploy) {
+            this.kind = kind;
+            this.family = family;
+            this.copy = copy;
+            this.deploy = deploy;
         }
 
         /**
-         * The knowledge base.
+         * The kind of row.
          *
-         * @return the knowledge base
+         * @return the kind
          */
-        public KnowledgeBase knowledgeBase() {
-            return knowledgeBase;
+        public Kind kind() {
+            return kind;
         }
 
         /**
-         * What the newer-build check last found.
+         * The knowledge base the row belongs to.
+         *
+         * @return the family
+         */
+        public KnowledgeBaseFamily family() {
+            return family;
+        }
+
+        /**
+         * The copy in {@code ~/Solor} the row stands for.
+         *
+         * @return the copy; empty for a build on Nexus
+         */
+        public Optional<KnowledgeBase> copy() {
+            return Optional.ofNullable(copy);
+        }
+
+        /**
+         * The newer build on Nexus the row stands for.
+         *
+         * @return the deploy; empty for a copy in {@code ~/Solor}
+         */
+        public Optional<SnapshotMetadata.Deploy> deploy() {
+            return Optional.ofNullable(deploy);
+        }
+
+        /**
+         * What the newer-build check last found for the knowledge base; set on its family row.
          *
          * @return the status property
          */
         public ObjectProperty<BuildStatus> statusProperty() {
             return status;
         }
+
+        boolean latest() {
+            return copy != null && family.latest().map(latest -> latest == copy).orElse(false);
+        }
     }
 
-    private final ObservableList<Row> rows = FXCollections.observableArrayList();
+    private final TreeItem<Entry> root = new TreeItem<>();
+    private final TreeTableView<Entry> knowledgeBaseTree = new TreeTableView<>(root);
     private final ObservableList<KometInstallation> komets = FXCollections.observableArrayList();
-    private final TableView<Row> knowledgeBaseTable = new TableView<>(rows);
     private final TableView<KometInstallation> kometTable = new TableView<>(komets);
-    private final ComboBox<KometInstallation> kometChoice = new ComboBox<>(komets);
     private final Button refresh = new Button("Refresh");
     private final Button checkNexus = new Button("Check Nexus");
+    private final Button download = new Button("Download");
     private final Button open = new Button("Open in Komet");
     private final Label message = new Label();
-    private final Subscription subscriptions;
+    private BiConsumer<KometInstallation, KnowledgeBase> onOpen = (komet, knowledgeBase) -> { };
+    private Consumer<Entry> onDownload = entry -> { };
 
     /** Builds the view, empty until data is set. */
     public DashboardView() {
-        knowledgeBaseTable.getColumns().addAll(List.of(
-                column("Knowledge base", 260, row -> row.knowledgeBase().name()),
-                column("Kind", 150, row -> row.knowledgeBase().kind().label()),
-                column("Size", 90, row -> DashboardCommand.size(row.knowledgeBase().sizeBytes())),
-                column("Build", 300, row -> row.knowledgeBase().coordinate().map(Coordinate::toString)
-                        .orElse("unidentified")),
-                column("Assembled", 130, row -> row.knowledgeBase().assembledAt().map(ASSEMBLED::format).orElse("")),
-                statusColumn()));
-        knowledgeBaseTable.setPlaceholder(new Label("No knowledge bases found"));
-        knowledgeBaseTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        knowledgeBaseTree.setShowRoot(false);
+        knowledgeBaseTree.getColumns().addAll(List.of(
+                nameColumn(),
+                column("Kind", 140, entry -> entry.copy().map(copy -> copy.kind().label()).orElse("")),
+                column("Size", 80, entry -> entry.copy().map(copy -> DashboardCommand.size(copy.sizeBytes())).orElse("")),
+                column("Build", 330, DashboardView::build),
+                column("Date", 120, entry -> entry.copy().map(copy -> WHEN.format(copy.recency()))
+                        .or(() -> entry.deploy().map(deploy -> WHEN.format(deploy.updated()))).orElse("")),
+                statusColumn(),
+                column("Opens with", 170, this::opensWith)));
+        knowledgeBaseTree.setPlaceholder(new Label("No knowledge bases found"));
+        knowledgeBaseTree.setColumnResizePolicy(TreeTableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        knowledgeBaseTree.setRowFactory(tree -> new EntryRow());
 
         TableColumn<KometInstallation, String> version = new TableColumn<>("Version");
         version.setCellValueFactory(cell -> new ReadOnlyObjectWrapper<>(cell.getValue().version()));
@@ -119,22 +178,15 @@ public final class DashboardView extends BorderPane {
         kometTable.setPlaceholder(new Label("No Komet installed"));
         kometTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
 
-        kometChoice.setPromptText("Komet version");
-        kometChoice.setCellFactory(list -> new KometCell());
-        kometChoice.setButtonCell(new KometCell());
-
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox toolbar = new HBox(8, refresh, checkNexus, spacer, kometChoice, open);
+        HBox toolbar = new HBox(8, refresh, checkNexus, spacer, download, open);
         toolbar.setAlignment(Pos.CENTER_LEFT);
         toolbar.setPadding(new Insets(8));
 
-        BorderPane knowledgeBases = new BorderPane(knowledgeBaseTable);
+        BorderPane knowledgeBases = new BorderPane(knowledgeBaseTree);
         knowledgeBases.setTop(toolbar);
-
-        Tab knowledgeBaseTab = new Tab("Knowledge bases", knowledgeBases);
-        Tab kometTab = new Tab("Komet versions", kometTable);
-        TabPane tabs = new TabPane(knowledgeBaseTab, kometTab);
+        TabPane tabs = new TabPane(new Tab("Knowledge bases", knowledgeBases), new Tab("Komet versions", kometTable));
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         setCenter(tabs);
 
@@ -142,27 +194,22 @@ public final class DashboardView extends BorderPane {
         message.setMaxWidth(Double.MAX_VALUE);
         setBottom(message);
 
-        // Opening needs a store Komet opens and a Komet to open it with.
-        ObservableValue<Boolean> noStore = knowledgeBaseTable.getSelectionModel().selectedItemProperty()
-                .map(row -> !row.knowledgeBase().kind().opensInKomet())
-                .orElse(true);
-        ObservableValue<Boolean> noKomet = kometChoice.valueProperty().map(komet -> false).orElse(true);
-        open.disableProperty().bind(Bindings.createBooleanBinding(() -> noStore.getValue() || noKomet.getValue(),
-                noStore, noKomet));
-        subscriptions = komets.subscribe(() -> {
-            if (kometChoice.getValue() == null && !komets.isEmpty()) {
-                kometChoice.setValue(komets.getFirst());
-            }
-        });
+        ObservableValue<Entry> selected = knowledgeBaseTree.getSelectionModel().selectedItemProperty().map(TreeItem::getValue);
+        ObservableValue<Boolean> cannotOpen = selected.map(entry -> launcher(entry).isEmpty()).orElse(true);
+        open.disableProperty().bind(Bindings.createBooleanBinding(cannotOpen::getValue, cannotOpen, komets));
+        download.disableProperty().bind(selected.map(entry -> entry.kind() != Entry.Kind.AVAILABLE).orElse(true));
+        open.setOnAction(event -> selectedEntry().ifPresent(entry -> launcher(entry)
+                .ifPresent(komet -> onOpen.accept(komet, entry.copy().orElseThrow()))));
+        download.setOnAction(event -> selectedEntry().ifPresent(onDownload));
     }
 
     /**
-     * Shows the knowledge bases.
+     * Shows the knowledge bases, one row each.
      *
-     * @param knowledgeBases the knowledge bases
+     * @param families the knowledge bases
      */
-    public void setKnowledgeBases(List<KnowledgeBase> knowledgeBases) {
-        rows.setAll(knowledgeBases.stream().map(Row::new).toList());
+    public void setFamilies(List<KnowledgeBaseFamily> families) {
+        root.getChildren().setAll(families.stream().map(DashboardView::familyItem).toList());
     }
 
     /**
@@ -172,25 +219,53 @@ public final class DashboardView extends BorderPane {
      */
     public void setKomets(List<KometInstallation> installations) {
         komets.setAll(installations);
+        knowledgeBaseTree.refresh();
     }
 
     /**
-     * The knowledge bases shown.
+     * The knowledge-base rows.
      *
-     * @return the rows
+     * @return one entry per knowledge base
      */
-    public List<Row> rows() {
-        return List.copyOf(rows);
+    public List<Entry> families() {
+        return root.getChildren().stream().map(TreeItem::getValue).toList();
     }
 
     /**
-     * Selects a knowledge base by name.
+     * Records what the newer-build check found for a knowledge base; a newer build appears beneath it.
+     *
+     * @param family the knowledge base's row
+     * @param status what the check found
+     */
+    public void setStatus(Entry family, BuildStatus status) {
+        family.statusProperty().set(status);
+        root.getChildren().stream().filter(item -> item.getValue() == family).findFirst().ifPresent(item -> {
+            item.getChildren().removeIf(child -> child.getValue().kind() == Entry.Kind.AVAILABLE);
+            if (status.state() == BuildStatus.State.NEWER && status.newest().isPresent()) {
+                item.getChildren().addFirst(new TreeItem<>(new Entry(Entry.Kind.AVAILABLE, family.family(), null,
+                        status.newest().get())));
+                item.setExpanded(true);
+            }
+        });
+    }
+
+    /**
+     * Selects a knowledge base's row by name.
      *
      * @param name the knowledge base's name
      */
     public void select(String name) {
-        rows.stream().filter(row -> row.knowledgeBase().name().equals(name)).findFirst()
-                .ifPresent(row -> knowledgeBaseTable.getSelectionModel().select(row));
+        root.getChildren().stream().filter(item -> item.getValue().family().name().equals(name)).findFirst()
+                .ifPresent(item -> knowledgeBaseTree.getSelectionModel().select(item));
+    }
+
+    /**
+     * Expands or folds every knowledge base.
+     *
+     * @param expanded whether to show the older copies
+     */
+    public void setAllExpanded(boolean expanded) {
+        root.getChildren().forEach(item -> item.setExpanded(expanded));
     }
 
     /**
@@ -221,37 +296,97 @@ public final class DashboardView extends BorderPane {
     }
 
     /**
-     * What Open in Komet does, given the chosen Komet and knowledge base.
+     * What opening does, given the Komet and the copy.
      *
      * @param action the action
      */
     public void setOnOpen(BiConsumer<KometInstallation, KnowledgeBase> action) {
-        open.setOnAction(event -> {
-            Row row = knowledgeBaseTable.getSelectionModel().getSelectedItem();
-            KometInstallation komet = kometChoice.getValue();
-            if (row != null && komet != null) {
-                action.accept(komet, row.knowledgeBase());
-            }
-        });
+        onOpen = action;
     }
 
-    /** Releases the view's subscriptions. */
-    public void dispose() {
-        subscriptions.unsubscribe();
+    /**
+     * What Download does, given the row of a newer build.
+     *
+     * @param action the action
+     */
+    public void setOnDownload(Consumer<Entry> action) {
+        onDownload = action;
     }
 
-    private static TableColumn<Row, String> column(String title, double width, Function<Row, String> value) {
-        TableColumn<Row, String> column = new TableColumn<>(title);
-        column.setCellValueFactory(cell -> new ReadOnlyObjectWrapper<>(value.apply(cell.getValue())));
+    private Optional<Entry> selectedEntry() {
+        return Optional.ofNullable(knowledgeBaseTree.getSelectionModel().getSelectedItem()).map(TreeItem::getValue);
+    }
+
+    private Optional<KometInstallation> launcher(Entry entry) {
+        return entry.copy().flatMap(copy -> LauncherChoice.choose(komets, copy));
+    }
+
+    private String opensWith(Entry entry) {
+        if (entry.copy().isEmpty() || !entry.copy().get().kind().opensInKomet()) {
+            return "";
+        }
+        return launcher(entry).map(komet -> "Komet " + komet.version())
+                .orElseGet(() -> LauncherChoice.requirement(entry.copy().get()).map(need -> "needs " + need)
+                        .orElse("no Komet installed"));
+    }
+
+    private static String build(Entry entry) {
+        if (entry.kind() == Entry.Kind.AVAILABLE) {
+            return entry.deploy().map(SnapshotMetadata.Deploy::value).orElse("");
+        }
+        KnowledgeBase copy = entry.copy().orElseThrow();
+        String coordinate = copy.coordinate().map(Coordinate::toString).orElse("unidentified");
+        return copy.resolvedVersion().map(resolved -> coordinate + " (" + resolved + ")").orElse(coordinate);
+    }
+
+    private static TreeItem<Entry> familyItem(KnowledgeBaseFamily family) {
+        KnowledgeBase shown = family.latest().orElse(family.members().getFirst());
+        TreeItem<Entry> item = new TreeItem<>(new Entry(Entry.Kind.FAMILY, family, shown, null));
+        family.members().stream().filter(member -> member != shown)
+                .forEach(member -> item.getChildren().add(new TreeItem<>(new Entry(Entry.Kind.COPY, family, member, null))));
+        return item;
+    }
+
+    private static TreeTableColumn<Entry, String> column(String title, double width, Function<Entry, String> value) {
+        TreeTableColumn<Entry, String> column = new TreeTableColumn<>(title);
+        column.setCellValueFactory(cell -> new ReadOnlyObjectWrapper<>(value.apply(cell.getValue().getValue())));
         column.setPrefWidth(width);
         return column;
     }
 
-    private static TableColumn<Row, BuildStatus> statusColumn() {
-        TableColumn<Row, BuildStatus> column = new TableColumn<>("Nexus");
-        column.setCellValueFactory(cell -> cell.getValue().statusProperty());
-        column.setPrefWidth(160);
-        column.setCellFactory(table -> new TableCell<>() {
+    private static TreeTableColumn<Entry, String> nameColumn() {
+        TreeTableColumn<Entry, String> column = column("Knowledge base", 280, entry -> switch (entry.kind()) {
+            case FAMILY -> entry.family().name();
+            case COPY -> entry.copy().map(KnowledgeBase::name).orElse("");
+            case AVAILABLE -> "newer build on Nexus";
+        });
+        column.setCellFactory(table -> new TreeTableCell<>() {
+            @Override
+            protected void updateItem(String text, boolean empty) {
+                super.updateItem(text, empty);
+                Entry entry = empty || getTableRow() == null ? null : getTableRow().getItem();
+                if (entry == null) {
+                    setText(null);
+                    setTooltip(null);
+                    setStyle("");
+                    return;
+                }
+                long more = entry.family().members().size() - 1;
+                setText(entry.kind() == Entry.Kind.FAMILY && more > 0 ? text + "   (" + more + " more)" : text);
+                setTooltip(entry.copy().map(copy -> new Tooltip(copy.path().toString())).orElse(null));
+                setStyle(entry.kind() == Entry.Kind.AVAILABLE ? "-fx-font-style: italic;"
+                        : entry.latest() ? "-fx-font-weight: bold;" : "");
+            }
+        });
+        return column;
+    }
+
+    private static TreeTableColumn<Entry, BuildStatus> statusColumn() {
+        TreeTableColumn<Entry, BuildStatus> column = new TreeTableColumn<>("Nexus");
+        column.setCellValueFactory(cell -> cell.getValue().getValue().kind() == Entry.Kind.FAMILY
+                ? cell.getValue().getValue().statusProperty() : new ReadOnlyObjectWrapper<>(null));
+        column.setPrefWidth(120);
+        column.setCellFactory(table -> new TreeTableCell<>() {
             @Override
             protected void updateItem(BuildStatus status, boolean empty) {
                 super.updateItem(status, empty);
@@ -274,11 +409,24 @@ public final class DashboardView extends BorderPane {
         return column;
     }
 
-    private static final class KometCell extends ListCell<KometInstallation> {
+    /** A row with an "Open with" menu of the Komets that read its copy. */
+    private final class EntryRow extends TreeTableRow<Entry> {
         @Override
-        protected void updateItem(KometInstallation komet, boolean empty) {
-            super.updateItem(komet, empty);
-            setText(empty || komet == null ? null : komet.version() + "  " + komet.name());
+        protected void updateItem(Entry entry, boolean empty) {
+            super.updateItem(entry, empty);
+            if (empty || entry == null || entry.copy().isEmpty() || !entry.copy().get().kind().opensInKomet()) {
+                setContextMenu(null);
+                return;
+            }
+            KnowledgeBase copy = entry.copy().get();
+            Menu openWith = new Menu("Open with");
+            komets.stream().filter(komet -> LauncherChoice.reads(komet, copy)).forEach(komet -> {
+                MenuItem item = new MenuItem("Komet " + komet.version() + "  " + komet.name());
+                item.setOnAction(event -> onOpen.accept(komet, copy));
+                openWith.getItems().add(item);
+            });
+            openWith.setDisable(openWith.getItems().isEmpty());
+            setContextMenu(new ContextMenu(openWith));
         }
     }
 }

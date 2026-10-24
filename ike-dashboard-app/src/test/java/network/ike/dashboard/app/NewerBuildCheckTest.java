@@ -93,7 +93,7 @@ class NewerBuildCheckTest {
         NewerBuildCheck check = new NewerBuildCheck(java.net.http.HttpClient.newHttpClient(),
                 new RepositoryAccess("http://127.0.0.1:9/", "none", Optional.empty()));
         KnowledgeBase solorKb = new KnowledgeBase("solor-kb", Path.of("solor-kb"), StoreKind.SPINED_32, 0,
-                Optional.empty(), Map.of());
+                Optional.empty(), Map.of(), Instant.EPOCH);
 
         assertThat(check.check(solorKb).state()).isEqualTo(BuildStatus.State.UNIDENTIFIED);
     }
@@ -141,6 +141,7 @@ class NewerBuildCheckTest {
 
     private static KnowledgeBase store(Map<String, String> attributes) {
         return new KnowledgeBase("pizza-kb", Path.of("pizza-kb"), StoreKind.ROCKS, 0,
-                Optional.of(new Coordinate("network.ike.data", "pizza-kb", "20250627.1-SNAPSHOT")), attributes);
+                Optional.of(new Coordinate("network.ike.data", "pizza-kb", "20250627.1-SNAPSHOT")), attributes,
+                Instant.EPOCH);
     }
 }

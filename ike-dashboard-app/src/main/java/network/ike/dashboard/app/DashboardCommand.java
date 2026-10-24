@@ -13,6 +13,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/*
+ * Copyright © 2026 IKE Network (support@ike.network)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package network.ike.dashboard.app;
 
 import network.ike.dashboard.download.DownloadListener;
@@ -67,17 +82,37 @@ public final class DashboardCommand {
 
     private static void list(PrintStream out, DashboardSettings settings, boolean check) throws Exception {
         List<KnowledgeBase> knowledgeBases = KnowledgeBaseScanner.scan(settings.solor());
+        List<KnowledgeBaseFamily> families = KnowledgeBaseFamily.group(knowledgeBases);
+        List<KometInstallation> komets = KometInstallations.find(KometInstallations.defaultRoots(
+                Path.of(System.getProperty("user.home")), settings.installLocation()));
         NewerBuildCheck newer = check ? new NewerBuildCheck(RepositoryHttpClients.newClient(), access(settings)) : null;
-        out.printf("%d entries in %s%n", knowledgeBases.size(), settings.solor());
-        for (KnowledgeBase knowledgeBase : knowledgeBases) {
-            out.printf("%-40s %-22s %10s  %s%n", knowledgeBase.name(), knowledgeBase.kind().label(),
-                    size(knowledgeBase.sizeBytes()),
-                    knowledgeBase.coordinate().map(Coordinate::toString).orElse("unidentified"));
-            if (check && knowledgeBase.kind().opensInKomet()) {
-                BuildStatus status = newer.check(knowledgeBase);
-                out.printf("%-40s %s: %s%n", "", status.state().label(), status.detail());
+        out.printf("%d knowledge bases (%d entries) in %s%n", families.size(), knowledgeBases.size(), settings.solor());
+        for (KnowledgeBaseFamily family : families) {
+            KnowledgeBase shown = family.latest().orElse(family.members().getFirst());
+            out.printf("%-34s %-20s %9s  %-24s %s%n", family.name() + (family.latest().isPresent() ? " *" : ""),
+                    shown.kind().label(), size(shown.sizeBytes()), opensWith(komets, shown),
+                    shown.coordinate().map(Coordinate::toString).orElse("unidentified"));
+            if (check) {
+                BuildStatus status = family.latestIdentified().map(newer::check)
+                        .orElse(BuildStatus.of(BuildStatus.State.UNIDENTIFIED, "no copy says which build it is"));
+                out.printf("    nexus: %s, %s%n", status.state().label(), status.detail());
+            }
+            for (KnowledgeBase member : family.members()) {
+                if (member != shown) {
+                    out.printf("    %-30s %-20s %9s%n", member.name(), member.kind().label(), size(member.sizeBytes()));
+                }
             }
         }
+        out.println("* the bold row in the window: the newest copy Komet can open");
+    }
+
+    private static String opensWith(List<KometInstallation> komets, KnowledgeBase knowledgeBase) {
+        if (!knowledgeBase.kind().opensInKomet()) {
+            return "";
+        }
+        return LauncherChoice.choose(komets, knowledgeBase).map(komet -> "Komet " + komet.version())
+                .orElseGet(() -> LauncherChoice.requirement(knowledgeBase).map(need -> "needs " + need)
+                        .orElse("no Komet installed"));
     }
 
     private static void komets(PrintStream out, DashboardSettings settings) throws Exception {
