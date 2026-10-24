@@ -23,10 +23,12 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
+import javafx.scene.image.Image;
 import javafx.scene.input.MouseButton;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
@@ -35,8 +37,11 @@ import javafx.scene.layout.Region;
 
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
@@ -58,6 +63,7 @@ public final class NexusBrowser extends BorderPane {
     private final Button download = new Button("Download");
     private final Label message = new Label();
     private Set<String> here = Set.of();
+    private Map<String, Image> icons = Map.of();
     private BiConsumer<Coordinate, String> onDownload = (coordinate, classifier) -> { };
 
     /** Builds the browser, empty until offers are set. */
@@ -72,8 +78,18 @@ public final class NexusBrowser extends BorderPane {
         HBox top = new HBox(8, search);
         top.setPadding(new Insets(8));
 
+        TableColumn<NexusCatalog.Offer, String> name = column("Knowledge base", 220, offer -> offer.coordinate().artifactId());
+        name.setCellFactory(view -> new TableCell<>() {
+            @Override
+            protected void updateItem(String artifactId, boolean empty) {
+                super.updateItem(artifactId, empty);
+                setText(empty || artifactId == null ? null : artifactId);
+                setGraphic(empty || artifactId == null ? null : KnowledgeBaseIcon.of(artifactId,
+                        Optional.ofNullable(icons.get(artifactId.toLowerCase(Locale.ROOT))), 18));
+            }
+        });
         table.getColumns().addAll(List.of(
-                column("Knowledge base", 220, offer -> offer.coordinate().artifactId()),
+                name,
                 column("Layout", 110, NexusCatalog.Offer::label),
                 column("Size", 80, offer -> DashboardCommand.size(offer.sizeBytes())),
                 column("Deployed", 130, offer -> WHEN.format(offer.updated())),
@@ -119,6 +135,30 @@ public final class NexusBrowser extends BorderPane {
         table.refresh();
         message.setText(offers.stream().map(offer -> offer.coordinate().artifactId()).distinct().count()
                 + " knowledge bases on Nexus");
+    }
+
+    /**
+     * Shows the icons Nexus holds beside the knowledge bases they belong to; the others show their
+     * monogram.
+     *
+     * @param pngs each icon's bytes, by artifactId
+     */
+    public void setIcons(Map<String, byte[]> pngs) {
+        Map<String, Image> read = new HashMap<>();
+        pngs.forEach((artifactId, png) -> read.put(artifactId.toLowerCase(Locale.ROOT), KnowledgeBaseIcon.load(png)));
+        icons = Map.copyOf(read);
+        table.refresh();
+    }
+
+    /**
+     * Whether Nexus holds an icon for a knowledge base it offers, and it could be read.
+     *
+     * @param artifactId the knowledge base's artifactId
+     * @return whether its icon is shown
+     */
+    public boolean hasIcon(String artifactId) {
+        Image icon = icons.get(artifactId.toLowerCase(Locale.ROOT));
+        return icon != null && !icon.isError();
     }
 
     /**

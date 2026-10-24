@@ -86,6 +86,31 @@ class KnowledgeBaseScannerTest {
     }
 
     @Test
+    void aStoreNamesItsIcon() throws IOException {
+        Path store = Files.createDirectories(solor.resolve("pizza-kb"));
+        Files.createDirectories(store.resolve("rocks"));
+        Files.createDirectories(store.resolve("META-INF/ike"));
+        Files.write(store.resolve("META-INF/ike/icon.png"), new byte[] {(byte) 0x89, 'P', 'N', 'G'});
+        Files.writeString(store.resolve("META-INF/MANIFEST.MF"), """
+                Manifest-Version: 1.0
+                Ike-Icon: META-INF/ike/icon.png
+
+                """);
+        Path escaping = Files.createDirectories(solor.resolve("other-kb"));
+        Files.createDirectories(escaping.resolve("META-INF"));
+        Files.writeString(escaping.resolve("META-INF/MANIFEST.MF"), "Manifest-Version: 1.0\nIke-Icon: ../pizza-kb/META-INF/ike/icon.png\n\n");
+
+        KnowledgeBase pizza = KnowledgeBaseScanner.inspect(store);
+
+        assertThat(pizza.attributes()).containsEntry("Ike-Icon", "META-INF/ike/icon.png");
+        assertThat(pizza.icon()).contains(store.resolve("META-INF/ike/icon.png"));
+        assertThat(KnowledgeBaseFamily.group(List.of(pizza)).getFirst().icon()).contains(store.resolve("META-INF/ike/icon.png"));
+        assertThat(KnowledgeBaseScanner.inspect(escaping).icon()).as("a name leading out of the store is not followed").isEmpty();
+        Files.delete(store.resolve("META-INF/ike/icon.png"));
+        assertThat(KnowledgeBaseScanner.inspect(store).icon()).as("named but missing").isEmpty();
+    }
+
+    @Test
     void aMissingFolderHasNoKnowledgeBases() throws IOException {
         assertThat(KnowledgeBaseScanner.scan(solor.resolve("absent"))).isEmpty();
     }

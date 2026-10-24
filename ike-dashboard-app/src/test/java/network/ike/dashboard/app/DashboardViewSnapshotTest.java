@@ -25,7 +25,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Renders the dashboard window headless, under Monocle, from a knowledge-base folder built for the
  * test, and writes it to {@code target/dashboard-view.png} so a person can see what it shows: one line
- * per knowledge base on the left, the selected one's detail on the right.
+ * per knowledge base on the left, each with its icon or monogram, the selected one's detail on the
+ * right; the Nexus window goes to {@code target/nexus-browser.png}.
  */
 class DashboardViewSnapshotTest {
 
@@ -46,6 +47,7 @@ class DashboardViewSnapshotTest {
     @Test
     void eachKnowledgeBaseIsOneLineAndTheSelectedOneFillsTheDetail(@TempDir Path solor) throws Exception {
         store(solor, "pizza-kb", "20250627.1-20261023.232318-6");
+        icon(solor.resolve("pizza-kb"));
         rocks(solor, "*DeX-4-17-2026", "2026-06-29T21:21:00Z");
         rocks(solor, "*DeX-4-17-2026-64bit-2", "2026-10-09T03:26:00Z");
         Files.writeString(solor.resolve("DeX-2026-10-08-pb.zip"), "zip");
@@ -61,7 +63,11 @@ class DashboardViewSnapshotTest {
                 offer("solor-gudid-kb", "rkb"),
                 offer("solor-gudid-kb", "reasoned-sa"));
 
+        java.io.ByteArrayOutputStream gudidIcon = new java.io.ByteArrayOutputStream();
+        ImageIO.write(drawn(64, new java.awt.Color(0x1565c0)), "png", gudidIcon);
+
         CompletableFuture<WritableImage> rendered = new CompletableFuture<>();
+        CompletableFuture<WritableImage> nexus = new CompletableFuture<>();
         CompletableFuture<DashboardView> built = new CompletableFuture<>();
         Platform.runLater(() -> {
             try {
@@ -69,6 +75,7 @@ class DashboardViewSnapshotTest {
                 view.setKomets(List.of(komet));
                 view.setFamilies(families);
                 view.setOffers(offers);
+                view.setNexusIcons(java.util.Map.of("solor-gudid-kb", gudidIcon.toByteArray()));
                 view.setStatus("pizza-kb", new BuildStatus(BuildStatus.State.NEWER, "newer build",
                         Optional.of(new SnapshotMetadata.Deploy("20250627.1-20261024.001942-7", Instant.parse("2026-10-24T00:20:14Z")))));
                 view.setKometRelease(Optional.of(new KometRelease("26.1024.1324", KometRelease.Source.NEXUS,
@@ -81,8 +88,13 @@ class DashboardViewSnapshotTest {
                 view.layout();
                 built.complete(view);
                 rendered.complete(scene.snapshot(null));
+                Scene browserScene = new Scene(view.browser(), 720, 200);
+                view.browser().applyCss();
+                view.browser().layout();
+                nexus.complete(browserScene.snapshot(null));
             } catch (RuntimeException e) {
                 rendered.completeExceptionally(e);
+                nexus.completeExceptionally(e);
             }
         });
         WritableImage image = rendered.get(30, TimeUnit.SECONDS);
@@ -96,9 +108,18 @@ class DashboardViewSnapshotTest {
                         org.assertj.core.groups.Tuple.tuple("solor-gudid-kb", false),
                         org.assertj.core.groups.Tuple.tuple("solor-gudid-kb", false));
         assertThat(view.status("pizza-kb").state()).isEqualTo(BuildStatus.State.NEWER);
+        assertThat(families).filteredOn(family -> family.name().equals("pizza-kb")).singleElement()
+                .satisfies(pizza -> assertThat(pizza.icon()).isPresent());
+        assertThat(view.lookupAll(".image-view")).as("pizza-kb's icon in its list line and in the detail").hasSize(2);
+        assertThat(monograms(view)).as("the others are told apart by colour")
+                .contains(KnowledgeBaseIcon.color("DeX"), KnowledgeBaseIcon.color("solor-kb"))
+                .doesNotContain(KnowledgeBaseIcon.color("pizza-kb"));
+        assertThat(view.browser().hasIcon("solor-gudid-kb")).isTrue();
+        assertThat(view.browser().hasIcon("pizza-kb")).as("Nexus holds none for it here").isFalse();
         Path png = Path.of("target", "dashboard-view.png");
         write(image, png);
         assertThat(png).isNotEmptyFile();
+        write(nexus.get(30, TimeUnit.SECONDS), Path.of("target", "nexus-browser.png"));
     }
 
     private static NexusCatalog.Offer offer(String artifactId, String classifier) {
@@ -113,6 +134,40 @@ class DashboardViewSnapshotTest {
                 "artifactId=pizza-kb\ngroupId=network.ike.data\nversion=20250627.1-SNAPSHOT\n");
         Files.writeString(store.getParent().resolve("META-INF/MANIFEST.MF"), "Manifest-Version: 1.0\n"
                 + "Ike-Entity-Format: 3\nIke-Resolved-Version: " + resolvedVersion + "\n\n");
+    }
+
+    /** The fills of the monograms shown, read from the rounded squares they are drawn on. */
+    private static List<javafx.scene.paint.Paint> monograms(javafx.scene.Parent parent) {
+        List<javafx.scene.paint.Paint> fills = new java.util.ArrayList<>();
+        for (javafx.scene.Node child : parent.getChildrenUnmodifiable()) {
+            if (child instanceof javafx.scene.shape.Rectangle square && square.getArcWidth() > 0) {
+                fills.add(square.getFill());
+            } else if (child instanceof javafx.scene.Parent inner) {
+                fills.addAll(monograms(inner));
+            }
+        }
+        return fills;
+    }
+
+    /** Gives a store an icon as ike:kb-assemble writes it. */
+    private static void icon(Path store) throws IOException {
+        Path ike = Files.createDirectories(store.resolve("META-INF/ike"));
+        ImageIO.write(drawn(64, new java.awt.Color(0xe65100)), "png", ike.resolve("icon.png").toFile());
+        Path manifest = store.resolve("META-INF/MANIFEST.MF");
+        Files.writeString(manifest, Files.readString(manifest).stripTrailing() + "\nIke-Icon: META-INF/ike/icon.png\n\n");
+    }
+
+    /** A round icon with a lighter centre, so it reads as an image and not a monogram. */
+    private static BufferedImage drawn(int size, java.awt.Color color) {
+        BufferedImage icon = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        java.awt.Graphics2D graphics = icon.createGraphics();
+        graphics.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+        graphics.setColor(color);
+        graphics.fillOval(2, 2, size - 4, size - 4);
+        graphics.setColor(new java.awt.Color(0xffe0b2));
+        graphics.fillOval(size / 4, size / 4, size / 2, size / 2);
+        graphics.dispose();
+        return icon;
     }
 
     private static void rocks(Path solor, String name, String modified) throws IOException {

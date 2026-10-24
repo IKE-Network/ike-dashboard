@@ -49,6 +49,30 @@ class NexusCatalogTest {
     }
 
     @Test
+    void iconsAreReadFromTheirSearchAnswer() {
+        String answer = """
+                {
+                  "items" : [ {
+                    "downloadUrl" : "https://nexus.tinkar.org/repository/ike-restricted-snapshots/network/ike/data/pizza-kb/20250627.1-SNAPSHOT/pizza-kb-20250627.1-20261024.140000-8-icon.png",
+                    "path" : "/network/ike/data/pizza-kb/20250627.1-SNAPSHOT/pizza-kb-20250627.1-20261024.140000-8-icon.png",
+                    "lastModified" : "2026-10-24T14:00:10.000+00:00",
+                    "maven2" : { "classifier" : "icon", "extension" : "png", "artifactId" : "pizza-kb",
+                                 "version" : "20250627.1-20261024.140000-8", "groupId" : "network.ike.data" }
+                  }, {
+                    "downloadUrl" : "https://nexus.tinkar.org/repository/ike-restricted-snapshots/network/ike/data/pizza-kb/20250627.1-SNAPSHOT/pizza-kb-20250627.1-20261024.140000-8-icon.png.sha1",
+                    "path" : "/network/ike/data/pizza-kb/20250627.1-SNAPSHOT/pizza-kb-20250627.1-20261024.140000-8-icon.png.sha1",
+                    "maven2" : { "classifier" : "icon", "extension" : "png.sha1", "artifactId" : "pizza-kb",
+                                 "version" : "20250627.1-20261024.140000-8", "groupId" : "network.ike.data" }
+                  } ]
+                }
+                """;
+
+        assertThat(NexusCatalog.parseIcons(answer)).containsExactly(new NexusCatalog.IconAsset("pizza-kb",
+                java.net.URI.create("https://nexus.tinkar.org/repository/ike-restricted-snapshots/network/ike/data/pizza-kb/20250627.1-SNAPSHOT/pizza-kb-20250627.1-20261024.140000-8-icon.png"),
+                Instant.parse("2026-10-24T14:00:10Z")));
+    }
+
+    @Test
     void theNewestDeployOfEachStoreIsKept() {
         Coordinate pizza = new Coordinate("network.ike.data", "pizza-kb", "20250627.1-SNAPSHOT");
         NexusCatalog.Offer older = new NexusCatalog.Offer(pizza, "rkb", 1, Instant.parse("2026-10-16T15:32:40Z"), "r");

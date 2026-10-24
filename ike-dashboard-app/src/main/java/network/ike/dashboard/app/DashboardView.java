@@ -45,6 +45,7 @@ import javafx.scene.control.TitledPane;
 import javafx.scene.control.ToggleButton;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.control.Tooltip;
+import javafx.scene.image.Image;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.MouseButton;
@@ -112,6 +113,7 @@ public final class DashboardView extends BorderPane {
     private List<NexusCatalog.Offer> offers = List.of();
     private List<KometInstallation> komets = List.of();
     private final Map<String, BuildStatus> statuses = new HashMap<>();
+    private final Map<Path, Image> icons = new HashMap<>();
     private Function<String, Optional<Instant>> lastOpened = name -> Optional.empty();
     private Path lastLog;
 
@@ -218,9 +220,20 @@ public final class DashboardView extends BorderPane {
      */
     public void setFamilies(List<KnowledgeBaseFamily> families) {
         this.families = List.copyOf(families);
+        // A store may have been replaced by one with another icon at the same path.
+        icons.clear();
         statuses.keySet().retainAll(families.stream().map(KnowledgeBaseFamily::name).collect(Collectors.toSet()));
         rebuild();
         browser.setOffers(offers, here());
+    }
+
+    /**
+     * Gives the Nexus window the icons Nexus holds for the knowledge bases it offers.
+     *
+     * @param pngs each icon's bytes, by artifactId
+     */
+    public void setNexusIcons(Map<String, byte[]> pngs) {
+        browser.setIcons(pngs);
     }
 
     /**
@@ -544,7 +557,9 @@ public final class DashboardView extends BorderPane {
         }
         Label title = new Label(chosen.get().name());
         title.setStyle("-fx-font-size: 20px; -fx-font-weight: bold;");
-        detail.getChildren().add(title);
+        HBox heading = new HBox(12, icon(chosen.get(), 48), title);
+        heading.setAlignment(Pos.CENTER_LEFT);
+        detail.getChildren().add(heading);
         showFamily(chosen.get());
     }
 
@@ -752,6 +767,12 @@ public final class DashboardView extends BorderPane {
         alert.showAndWait().filter(ButtonType.OK::equals).ifPresent(ok -> onTrash.accept(copies));
     }
 
+    /** A knowledge base's icon, read once per refresh, or its monogram. */
+    private Node icon(KnowledgeBaseFamily family, double size) {
+        return KnowledgeBaseIcon.of(family.name(), family.icon().map(file -> icons.computeIfAbsent(file, KnowledgeBaseIcon::load)),
+                size);
+    }
+
     private static Label muted(String text) {
         Label label = new Label(text);
         label.setStyle(MUTED);
@@ -759,7 +780,7 @@ public final class DashboardView extends BorderPane {
         return label;
     }
 
-    /** A line of the list: the name, and a mark only when something needs attention. */
+    /** A line of the list: the icon, the name, and a mark only when something needs attention. */
     private final class ListingCell extends ListCell<KnowledgeBaseFamily> {
         @Override
         protected void updateItem(KnowledgeBaseFamily family, boolean empty) {
@@ -786,7 +807,7 @@ public final class DashboardView extends BorderPane {
             }
             Region gap = new Region();
             HBox.setHgrow(gap, Priority.ALWAYS);
-            HBox line = new HBox(6, name, gap, mark);
+            HBox line = new HBox(6, icon(family, 20), name, gap, mark);
             line.setAlignment(Pos.CENTER_LEFT);
             line.setMinWidth(0);
             line.prefWidthProperty().bind(list.widthProperty().subtract(36));

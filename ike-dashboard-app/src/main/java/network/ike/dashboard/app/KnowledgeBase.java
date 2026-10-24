@@ -15,6 +15,8 @@
  */
 package network.ike.dashboard.app;
 
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -55,6 +57,9 @@ public record KnowledgeBase(String name, Path path, StoreKind kind, long sizeByt
     /** The manifest attribute naming the "Open …" provider. */
     public static final String OPEN_CONTROLLER = "Ike-Open-Controller";
 
+    /** The manifest attribute naming the store's icon, a path relative to the store. */
+    public static final String ICON = "Ike-Icon";
+
     /**
      * Copies the attributes.
      *
@@ -77,6 +82,25 @@ public record KnowledgeBase(String name, Path path, StoreKind kind, long sizeByt
      */
     public boolean identified() {
         return coordinate.isPresent();
+    }
+
+    /**
+     * The store's icon, if its manifest names one and the file is there. A name that leads out of the
+     * store is not followed.
+     *
+     * @return the icon file, a PNG
+     */
+    public Optional<Path> icon() {
+        String value = attributes.get(ICON);
+        if (value == null || value.isBlank() || !Files.isDirectory(path)) {
+            return Optional.empty();
+        }
+        try {
+            Path icon = path.resolve(value.strip()).normalize();
+            return icon.startsWith(path.normalize()) && Files.isRegularFile(icon) ? Optional.of(icon) : Optional.empty();
+        } catch (InvalidPathException e) {
+            return Optional.empty();
+        }
     }
 
     /**

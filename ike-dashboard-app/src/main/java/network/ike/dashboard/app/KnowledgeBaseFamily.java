@@ -15,6 +15,7 @@
  */
 package network.ike.dashboard.app;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -78,6 +79,15 @@ public record KnowledgeBaseFamily(String name, List<KnowledgeBase> members) {
      */
     public Optional<KnowledgeBase> latestIdentified() {
         return members.stream().filter(member -> member.kind().opensInKomet() && member.identified()).findFirst();
+    }
+
+    /**
+     * The knowledge base's icon: the one the newest copy that carries one names.
+     *
+     * @return the icon file, or empty when no copy carries one
+     */
+    public Optional<Path> icon() {
+        return members.stream().map(KnowledgeBase::icon).flatMap(Optional::stream).findFirst();
     }
 
     /**

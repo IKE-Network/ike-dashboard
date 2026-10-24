@@ -24,6 +24,7 @@ import network.ike.dashboard.download.RepositoryHttpClients;
 import java.net.http.HttpClient;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -159,6 +160,13 @@ public final class DashboardApp extends Application {
                 Platform.runLater(() -> view.setOffers(offers));
             } catch (Exception e) {
                 Platform.runLater(() -> view.setOffersProblem("Could not ask Nexus: " + e.getMessage()));
+                return;
+            }
+            try {
+                Map<String, byte[]> icons = NexusCatalog.icons(RepositoryHttpClients.newClient(), DashboardCommand.access(settings));
+                Platform.runLater(() -> view.setNexusIcons(icons));
+            } catch (Exception e) {
+                // Without icons the Nexus window shows each knowledge base's monogram.
             }
         });
     }

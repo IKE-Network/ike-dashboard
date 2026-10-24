@@ -47,6 +47,9 @@ public final class NexusCatalog {
     /** The classifiers of stores Komet opens, Rocks first. */
     public static final List<String> CLASSIFIERS = List.of("rkb", "reasoned-sa");
 
+    /** The classifier a knowledge base's icon deploys under, a PNG beside its store zips. */
+    public static final String ICON_CLASSIFIER = "icon";
+
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
 
     /**
@@ -68,6 +71,16 @@ public final class NexusCatalog {
         public String label() {
             return "rkb".equals(classifier) ? "Rocks" : "spined array";
         }
+    }
+
+    /**
+     * A knowledge base's icon on Nexus.
+     *
+     * @param artifactId  the knowledge base
+     * @param downloadUrl where its PNG is
+     * @param updated     when it was deployed
+     */
+    record IconAsset(String artifactId, URI downloadUrl, Instant updated) {
     }
 
     /**
@@ -157,6 +170,82 @@ public final class NexusCatalog {
                     (String) asset.get("repository")));
         }
         return new Page(offers, Optional.ofNullable((String) answer.get("continuationToken")));
+    }
+
+    /**
+     * The icons Nexus holds for knowledge bases, the newest deploy of each, fetched.
+     *
+     * @param http       the client
+     * @param repository the repository and its credentials
+     * @return each icon's bytes, by artifactId; an icon that cannot be fetched is left out
+     * @throws IOException          if Nexus cannot be asked
+     * @throws InterruptedException if interrupted
+     */
+    public static Map<String, byte[]> icons(HttpClient http, RepositoryAccess repository) throws IOException, InterruptedException {
+        List<IconAsset> all = new ArrayList<>();
+        Optional<String> token = Optional.empty();
+        do {
+            Map<String, String> query = new LinkedHashMap<>();
+            query.put("group", GROUP);
+            query.put("maven.extension", "png");
+            query.put("maven.classifier", ICON_CLASSIFIER);
+            token.ifPresent(value -> query.put("continuationToken", value));
+            HttpResponse<String> response = http.send(authorized(searchUri(repository.url(), query), repository),
+                    HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                throw new IOException("Nexus search answered " + response.statusCode());
+            }
+            all.addAll(parseIcons(response.body()));
+            token = Optional.ofNullable(continuation(response.body()));
+        } while (token.isPresent());
+
+        Map<String, IconAsset> newest = new LinkedHashMap<>();
+        all.forEach(icon -> newest.merge(icon.artifactId(), icon, (a, b) -> a.updated().isAfter(b.updated()) ? a : b));
+        Map<String, byte[]> fetched = new LinkedHashMap<>();
+        for (IconAsset icon : newest.values()) {
+            HttpResponse<byte[]> response = http.send(authorized(icon.downloadUrl(), repository),
+                    HttpResponse.BodyHandlers.ofByteArray());
+            if (response.statusCode() == 200) {
+                fetched.put(icon.artifactId(), response.body());
+            }
+        }
+        return fetched;
+    }
+
+    private static HttpRequest authorized(URI uri, RepositoryAccess repository) {
+        HttpRequest.Builder request = HttpRequest.newBuilder(uri).timeout(TIMEOUT).GET();
+        repository.credentials().ifPresent(credentials -> request.header("Authorization", NewerBuildCheck.basic(credentials)));
+        return request.build();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String continuation(String json) {
+        return (String) ((Map<String, Object>) Json.parse(json)).get("continuationToken");
+    }
+
+    /**
+     * Reads the icons on one page of a search answer.
+     *
+     * @param json the answer
+     * @return the {@code png:icon} assets on it
+     */
+    @SuppressWarnings("unchecked")
+    static List<IconAsset> parseIcons(String json) {
+        Map<String, Object> answer = (Map<String, Object>) Json.parse(json);
+        List<IconAsset> icons = new ArrayList<>();
+        for (Object item : (List<Object>) answer.getOrDefault("items", List.of())) {
+            Map<String, Object> asset = (Map<String, Object>) item;
+            Map<String, Object> maven = (Map<String, Object>) asset.get("maven2");
+            String url = (String) asset.get("downloadUrl");
+            if (maven == null || url == null || !ICON_CLASSIFIER.equals(maven.get("classifier"))
+                    || !"png".equals(maven.get("extension"))) {
+                continue;
+            }
+            Object modified = asset.get("lastModified");
+            icons.add(new IconAsset((String) maven.get("artifactId"), URI.create(url),
+                    modified instanceof String text ? OffsetDateTime.parse(text).toInstant() : Instant.EPOCH));
+        }
+        return icons;
     }
 
     /**
