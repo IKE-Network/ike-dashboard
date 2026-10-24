@@ -15,6 +15,10 @@
  */
 package network.ike.dashboard.app;
 
+import javafx.animation.Animation;
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
+import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -35,6 +39,7 @@ import javafx.scene.control.ListView;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.ProgressBar;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TableColumn;
@@ -64,6 +69,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -88,7 +94,9 @@ import java.util.stream.Collectors;
  *
  * <p>Above the list, Notices is the landing page and the first screen (the IKE Dashboard design,
  * decision 14): one card per finding of the dashboard's checks, work at risk first, each with one
- * action and a Dismiss.
+ * action and a Dismiss. Above the footer, each download or install under way, or waiting its turn, has a
+ * row as Komet shows its own: the step, a bar, how far it has come and about how long is left, how long
+ * it has run, and Cancel.
  */
 public final class DashboardView extends BorderPane {
 
@@ -149,6 +157,11 @@ public final class DashboardView extends BorderPane {
     private boolean catalogLoaded;
     private Predicate<String> dismissed = id -> false;
     private Consumer<String> onDismiss = id -> { };
+    private final VBox transfers = new VBox(6);
+    private final Map<Transfer, TransferRow> transferRows = new LinkedHashMap<>();
+    private final Map<String, Transfer> transferring = new HashMap<>();
+    private final Timeline ticker = new Timeline(new KeyFrame(javafx.util.Duration.seconds(1),
+            event -> transferRows.forEach((transfer, row) -> row.update(transfer.snapshot()))));
 
     /** Builds the view, empty until data is set. */
     public DashboardView() {
@@ -261,7 +274,11 @@ public final class DashboardView extends BorderPane {
         HBox footer = new HBox(10, message, kometMenu, showLog);
         footer.setAlignment(Pos.CENTER_LEFT);
         footer.setPadding(new Insets(4, 8, 6, 8));
-        setBottom(footer);
+        transfers.setPadding(new Insets(6, 8, 0, 8));
+        transfers.managedProperty().bind(transfers.visibleProperty());
+        transfers.setVisible(false);
+        ticker.setCycleCount(Animation.INDEFINITE);
+        setBottom(new VBox(transfers, footer));
         setKomets(List.of());
         showDetail();
     }
@@ -645,7 +662,10 @@ public final class DashboardView extends BorderPane {
         HBox row = new HBox(10, text);
         row.setAlignment(Pos.CENTER_LEFT);
         notice.action().ifPresent(action -> {
-            Button button = new Button(action.label());
+            boolean running = action instanceof NoticeAction.Download(Coordinate coordinate, String classifier)
+                    && transferring(downloadKey(coordinate, classifier));
+            Button button = new Button(running ? "Downloading …" : action.label());
+            button.setDisable(running);
             button.setMinWidth(Region.USE_PREF_SIZE);
             button.setOnAction(event -> act(action));
             row.getChildren().add(button);
@@ -676,6 +696,182 @@ public final class DashboardView extends BorderPane {
             case NoticeAction.InstallKomet(KometRelease release) -> onInstallKomet.accept(release);
             case NoticeAction.Show(String family) -> select(family);
             case NoticeAction.Browse() -> openBrowser();
+        }
+    }
+
+    /**
+     * The key a download is known by while it runs, so it is not started twice.
+     *
+     * @param coordinate the knowledge base
+     * @param classifier the store's classifier
+     * @return the key
+     */
+    public static String downloadKey(Coordinate coordinate, String classifier) {
+        return coordinate + ":" + classifier;
+    }
+
+    /**
+     * The name a person reads for a knowledge base: its descriptor's display name, from a copy here or
+     * from Nexus, else its artifactId.
+     *
+     * @param coordinate the knowledge base
+     * @return the name
+     */
+    public String nameOf(Coordinate coordinate) {
+        return families.stream()
+                .filter(family -> family.members().stream().anyMatch(member -> member.coordinate()
+                        .map(named -> named.artifactId().equals(coordinate.artifactId())).orElse(false)))
+                .map(KnowledgeBaseFamily::displayName).findFirst()
+                .or(() -> catalog.described().entrySet().stream()
+                        .filter(entry -> entry.getKey().artifactId().equals(coordinate.artifactId()))
+                        .map(entry -> entry.getValue().descriptor().displayName()).findFirst())
+                .orElse(coordinate.artifactId());
+    }
+
+    /**
+     * Shows a download or install, as a row above the footer, until it ends: a finished one goes away, and
+     * one that failed or was cancelled stays, saying why, until the person closes it.
+     *
+     * @param transfer the transfer; its changes may come on any thread
+     * @param key      what it downloads, if it is a store download, so its buttons wait for it
+     */
+    public void showTransfer(Transfer transfer, Optional<String> key) {
+        TransferRow row = new TransferRow(transfer);
+        transferRows.put(transfer, row);
+        key.ifPresent(name -> transferring.put(name, transfer));
+        transfers.getChildren().add(row);
+        transfers.setVisible(true);
+        ticker.play();
+        transfer.onChange(snapshot -> {
+            if (Platform.isFxApplicationThread()) {
+                transferChanged(transfer, snapshot);
+            } else {
+                Platform.runLater(() -> transferChanged(transfer, snapshot));
+            }
+        });
+        refreshAfterTransfer();
+    }
+
+    /**
+     * Whether a store download is under way or waiting.
+     *
+     * @param key the download's {@link #downloadKey}
+     * @return {@code true} while it is
+     */
+    public boolean transferring(String key) {
+        Transfer transfer = transferring.get(key);
+        return transfer != null && !transfer.snapshot().state().ended();
+    }
+
+    /**
+     * The transfers shown, in order.
+     *
+     * @return what each shows now
+     */
+    public List<Transfer.Snapshot> transfersShown() {
+        return transferRows.keySet().stream().map(Transfer::snapshot).toList();
+    }
+
+    private void transferChanged(Transfer transfer, Transfer.Snapshot snapshot) {
+        TransferRow row = transferRows.get(transfer);
+        if (row == null) {
+            return;
+        }
+        if (snapshot.state() == Transfer.State.DONE) {
+            removeTransfer(transfer);
+            return;
+        }
+        row.update(snapshot);
+        if (snapshot.state().ended()) {
+            transferring.values().removeIf(transfer::equals);
+            refreshAfterTransfer();
+        }
+    }
+
+    private void removeTransfer(Transfer transfer) {
+        TransferRow row = transferRows.remove(transfer);
+        if (row != null) {
+            transfers.getChildren().remove(row);
+        }
+        transferring.values().removeIf(transfer::equals);
+        if (transferRows.isEmpty()) {
+            transfers.setVisible(false);
+            ticker.stop();
+        }
+        refreshAfterTransfer();
+    }
+
+    /** The Download buttons wait for a download under way, so the notices and the detail are drawn again. */
+    private void refreshAfterTransfer() {
+        refreshNotices();
+        if (!showingNotices) {
+            showDetail();
+        }
+    }
+
+    /**
+     * One transfer's row, laid out as Komet's progress row: what it is and how long it has run, the bar,
+     * then the step, how far it has come and about how long is left.
+     */
+    private final class TransferRow extends VBox {
+        private final Label title = new Label();
+        private final Label clock = new Label();
+        private final ProgressBar bar = new ProgressBar(0);
+        private final Label status = new Label();
+        private final Button cancel = new Button("Cancel");
+        private final Hyperlink close = new Hyperlink("Close");
+
+        TransferRow(Transfer transfer) {
+            super(4);
+            title.setStyle("-fx-font-weight: bold;");
+            clock.setStyle("-fx-font-size: 11px;" + MUTED);
+            status.setStyle(MUTED);
+            status.setWrapText(true);
+            bar.setMaxWidth(Double.MAX_VALUE);
+            bar.setStyle("-fx-accent: #2e7d32;");
+            cancel.setOnAction(event -> transfer.cancel());
+            close.setOnAction(event -> removeTransfer(transfer));
+            close.setVisible(false);
+            close.managedProperty().bind(close.visibleProperty());
+            cancel.managedProperty().bind(cancel.visibleProperty());
+            Region gap = new Region();
+            HBox.setHgrow(gap, Priority.ALWAYS);
+            HBox heading = new HBox(10, title, gap, clock, cancel, close);
+            heading.setAlignment(Pos.CENTER_LEFT);
+            getChildren().addAll(heading, bar, status);
+            setPadding(new Insets(8, 10, 8, 10));
+            setStyle("-fx-background-color: #f4f6f8; -fx-background-radius: 6;");
+        }
+
+        void update(Transfer.Snapshot snapshot) {
+            title.setText(snapshot.title());
+            clock.setText(snapshot.state() == Transfer.State.WAITING ? "" : snapshot.elapsedText());
+            boolean ended = snapshot.state().ended();
+            bar.setVisible(!ended);
+            bar.setManaged(!ended);
+            bar.setProgress(switch (snapshot.state()) {
+                case WAITING -> 0;
+                case RUNNING, CANCELLING -> snapshot.fraction() > 0 ? snapshot.fraction() : ProgressBar.INDETERMINATE_PROGRESS;
+                case CANCELLED, FAILED, DONE -> 1;
+            });
+            cancel.setVisible(!ended);
+            cancel.setDisable(snapshot.state() == Transfer.State.CANCELLING);
+            close.setVisible(ended);
+            if (ended) {
+                status.setText(snapshot.outcome());
+                status.setStyle(snapshot.state() == Transfer.State.FAILED ? PROBLEM : MUTED);
+                return;
+            }
+            List<String> parts = new ArrayList<>();
+            parts.add(snapshot.phase() + (snapshot.note().isBlank() ? "" : " (" + snapshot.note() + ")"));
+            if (snapshot.state() == Transfer.State.RUNNING && snapshot.fraction() > 0) {
+                parts.add(snapshot.percent());
+            }
+            if (!snapshot.remainingText().isEmpty()) {
+                parts.add(snapshot.remainingText());
+            }
+            status.setText(String.join("  ·  ", parts));
+            status.setStyle(MUTED);
         }
     }
 
@@ -849,6 +1045,7 @@ public final class DashboardView extends BorderPane {
 
     private void download(KnowledgeBaseFamily family) {
         family.latestIdentified().ifPresent(identified -> identified.coordinate()
+                .filter(coordinate -> !transferring(downloadKey(coordinate, identified.kind().classifier())))
                 .ifPresent(coordinate -> onDownload.accept(coordinate, identified.kind().classifier())));
     }
 
@@ -949,8 +1146,11 @@ public final class DashboardView extends BorderPane {
         BuildStatus status = status(family.name());
         if (status.state() == BuildStatus.State.NEWER && status.newest().isPresent()) {
             Label newer = new Label("A newer build is on Nexus, deployed " + WHEN.format(status.newest().get().updated()));
-            Button download = new Button("Download");
             KnowledgeBase identified = family.latestIdentified().orElse(copy);
+            boolean running = identified.coordinate()
+                    .map(coordinate -> transferring(downloadKey(coordinate, identified.kind().classifier()))).orElse(false);
+            Button download = new Button(running ? "Downloading …" : "Download");
+            download.setDisable(running);
             download.setOnAction(event -> identified.coordinate()
                     .ifPresent(coordinate -> onDownload.accept(coordinate, identified.kind().classifier())));
             Region gap = new Region();

@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -327,41 +328,61 @@ public final class DashboardApp extends Application {
         });
     }
 
+    /**
+     * Downloads a store on the work thread, one at a time, each shown as a transfer the person can watch
+     * and cancel: a download waiting its turn says so, and one cancelled before its turn never starts.
+     */
     private void download(Coordinate coordinate, String classifier) {
-        view.setMessage("Downloading " + coordinate + " " + classifier + " …");
+        String layout = "rkb".equals(classifier) ? "Rocks" : "spined array";
+        Transfer transfer = new Transfer(view.nameOf(coordinate) + " (" + layout + ")");
+        view.showTransfer(transfer, Optional.of(DashboardView.downloadKey(coordinate, classifier)));
         work.submit(() -> {
+            if (!transfer.started()) {
+                return;
+            }
             try {
                 Path store = StoreDownload.download(RepositoryHttpClients.newClient(), DashboardCommand.access(settings),
-                        coordinate, classifier, settings.solor(), settings.localRepository(), null);
+                        coordinate, classifier, settings.solor(), settings.localRepository(), transfer);
+                transfer.finished(Transfer.State.DONE, "Downloaded " + store.getFileName());
                 Platform.runLater(() -> {
                     selectAfterRefresh = coordinate.artifactId();
                     refresh();
                     view.setMessage("Downloaded " + store.getFileName());
                 });
+            } catch (CancellationException e) {
+                transfer.finished(Transfer.State.CANCELLED, "Cancelled. What had downloaded is kept, so downloading it"
+                        + " again picks up where this one stopped.");
             } catch (Exception e) {
-                Platform.runLater(() -> view.setMessage("Could not download " + coordinate + ": " + e.getMessage()));
+                transfer.finished(Transfer.State.FAILED, "Could not download: " + e.getMessage());
             }
         });
     }
 
     private void installKomet(KometRelease release) {
         view.setInstalling(true);
-        view.setMessage("Installing Komet " + release.version() + " from " + release.source().label() + " …");
+        Transfer transfer = new Transfer("Komet " + release.version() + " from " + release.source().label());
+        view.showTransfer(transfer, Optional.empty());
         work.submit(() -> {
+            if (!transfer.started()) {
+                Platform.runLater(() -> view.setInstalling(false));
+                return;
+            }
             try {
                 KometInstallation installed = KometInstaller.install(RepositoryHttpClients.newClient(), release,
-                        settings.installLocation(), settings.localRepository(),
-                        text -> Platform.runLater(() -> view.setMessage(text)));
+                        settings.installLocation(), settings.localRepository(), transfer);
+                transfer.finished(Transfer.State.DONE, "Installed Komet " + installed.version());
                 Platform.runLater(() -> {
                     view.setInstalling(false);
                     refresh();
                     view.setMessage("Installed Komet " + installed.version() + " in " + installed.bundle().getParent());
                 });
+            } catch (CancellationException e) {
+                transfer.finished(Transfer.State.CANCELLED, "Cancelled. What had downloaded is kept, so installing it"
+                        + " again picks up where this one stopped.");
+                Platform.runLater(() -> view.setInstalling(false));
             } catch (Exception e) {
-                Platform.runLater(() -> {
-                    view.setInstalling(false);
-                    view.setMessage("Could not install Komet " + release.version() + ": " + e.getMessage());
-                });
+                transfer.finished(Transfer.State.FAILED, "Could not install Komet " + release.version() + ": " + e.getMessage());
+                Platform.runLater(() -> view.setInstalling(false));
             }
         });
     }

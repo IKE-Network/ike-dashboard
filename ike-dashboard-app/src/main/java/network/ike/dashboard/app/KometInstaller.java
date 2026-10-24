@@ -73,15 +73,41 @@ public final class KometInstaller {
      */
     public static KometInstallation install(HttpClient http, KometRelease release, Path installLocation,
                                             Path localRepository, Consumer<String> progress) throws Exception {
+        return install(http, release, installLocation, localRepository, progress,
+                new Progress(progress, "Downloading Komet " + release.version()), cancel -> { });
+    }
+
+    /**
+     * Installs a Komet build, showing its progress on a transfer the person can cancel while it downloads.
+     *
+     * @param http            the client
+     * @param release         the build
+     * @param installLocation where Komets are installed
+     * @param localRepository the local Maven repository, which keeps a Nexus download
+     * @param transfer        shows the progress, and cancels the download when asked
+     * @return the installed Komet
+     * @throws Exception if it cannot be downloaded, checked or unpacked, or was cancelled
+     */
+    public static KometInstallation install(HttpClient http, KometRelease release, Path installLocation,
+                                            Path localRepository, Transfer transfer) throws Exception {
+        return install(http, release, installLocation, localRepository, transfer::phase, transfer, transfer::cancelWith);
+    }
+
+    private static KometInstallation install(HttpClient http, KometRelease release, Path installLocation,
+                                             Path localRepository, Consumer<String> progress,
+                                             DownloadListener<Path> listener, Consumer<Runnable> cancelWith)
+            throws Exception {
         Files.createDirectories(installLocation);
         return switch (release.source()) {
-            case NEXUS -> installImage(http, release, installLocation, localRepository, progress);
+            case NEXUS -> installImage(http, release, installLocation, localRepository, progress, listener, cancelWith);
             case GITHUB -> installPackage(release, installLocation, progress);
         };
     }
 
     private static KometInstallation installImage(HttpClient http, KometRelease release, Path installLocation,
-                                                  Path localRepository, Consumer<String> progress) throws Exception {
+                                                  Path localRepository, Consumer<String> progress,
+                                                  DownloadListener<Path> listener, Consumer<Runnable> cancelWith)
+            throws Exception {
         Path target = installLocation.resolve(imageFolder(release.version()));
         refuseExisting(target);
         if (target.toAbsolutePath().toString().chars().anyMatch(Character::isWhitespace)) {
@@ -99,7 +125,8 @@ public final class KometInstaller {
             Path zip = staging.resolve("komet-app.zip");
             MavenDataStoreDownloadTask task = MavenDataStoreDownloadTask.placeAsFileTask(http, release.uri(), cached, zip,
                     MavenDataStoreDownloadTask.AssetVerification.NONE);
-            task.addListener(new Progress(progress, "Downloading Komet " + release.version()));
+            task.addListener(listener);
+            cancelWith.accept(task::cancel);
             task.call();
             verify(cached, release);
             progress.accept("Unpacking Komet " + release.version() + " …");

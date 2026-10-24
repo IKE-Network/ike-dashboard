@@ -34,13 +34,17 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.concurrent.CancellationException;
+import java.util.function.Consumer;
 import java.util.jar.Attributes;
 import java.util.jar.Manifest;
+import java.util.stream.Stream;
 
 /**
  * Downloads a knowledge base's store from Nexus into a new folder of {@code ~/Solor}, through the
@@ -81,6 +85,34 @@ public final class StoreDownload {
      */
     public static Path download(HttpClient http, RepositoryAccess repository, Coordinate coordinate, String classifier,
                                 Path solor, Path localRepository, DownloadListener<Path> listener) throws Exception {
+        return download(http, repository, coordinate, classifier, solor, localRepository, listener, cancel -> { });
+    }
+
+    /**
+     * Downloads the newest deploy of a store as {@link #download(HttpClient, RepositoryAccess, Coordinate, String,
+     * Path, Path, DownloadListener)} does, showing its progress on a transfer the person can cancel. A cancelled
+     * download leaves no partial store in the knowledge-base folder; the bytes already downloaded stay in the
+     * local repository, so the next download of the same deploy resumes them.
+     *
+     * @param http            the client to download with
+     * @param repository      the repository and its login
+     * @param coordinate      the knowledge base's coordinate
+     * @param classifier      the store's classifier
+     * @param solor           the knowledge-base folder
+     * @param localRepository the local Maven repository the zip is cached in
+     * @param transfer        shows the progress, and cancels the download when asked
+     * @return the unpacked store
+     * @throws CancellationException if the person cancelled it
+     * @throws Exception if that deploy is already unpacked, Nexus has no such deploy, or the download fails
+     */
+    public static Path download(HttpClient http, RepositoryAccess repository, Coordinate coordinate, String classifier,
+                                Path solor, Path localRepository, Transfer transfer) throws Exception {
+        return download(http, repository, coordinate, classifier, solor, localRepository, transfer, transfer::cancelWith);
+    }
+
+    private static Path download(HttpClient http, RepositoryAccess repository, Coordinate coordinate, String classifier,
+                                 Path solor, Path localRepository, DownloadListener<Path> listener,
+                                 Consumer<Runnable> cancelWith) throws Exception {
         String fileVersion = coordinate.version();
         if (coordinate.snapshot()) {
             fileVersion = newestDeploy(http, repository, coordinate, classifier)
@@ -101,7 +133,15 @@ public final class StoreDownload {
         if (listener != null) {
             task.addListener(listener);
         }
-        Path store = task.call();
+        cancelWith.accept(task::cancel);
+        Path store;
+        try {
+            store = task.call();
+        } catch (CancellationException e) {
+            // destination() named a folder that did not exist, so whatever is there is this download's half.
+            deleteTree(destination);
+            throw e;
+        }
         Map<String, String> attributes = new TreeMap<>();
         attributes.put(KnowledgeBase.RESOLVED_VERSION, fileVersion);
         attributes.put(RESOLVED_REPOSITORY, repository.serverId());
@@ -110,6 +150,19 @@ public final class StoreDownload {
         addToManifest(store, attributes);
         UsageJournal.record(localRepository, UsageJournal.DASHBOARD, LocalDate.now(), List.of(cached));
         return store;
+    }
+
+    private static void deleteTree(Path root) throws IOException {
+        if (!Files.exists(root)) {
+            return;
+        }
+        List<Path> paths;
+        try (Stream<Path> walk = Files.walk(root)) {
+            paths = new ArrayList<>(walk.toList());
+        }
+        for (int i = paths.size() - 1; i >= 0; i--) {
+            Files.deleteIfExists(paths.get(i));
+        }
     }
 
     /**

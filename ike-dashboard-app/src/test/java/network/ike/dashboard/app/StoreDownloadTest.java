@@ -1,16 +1,24 @@
 package network.ike.dashboard.app;
 
+import network.ike.dashboard.download.ArtifactCoordinates;
+import network.ike.dashboard.download.MavenDataStoreDownloadTask;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.http.HttpClient;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CancellationException;
 import java.util.jar.Manifest;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * A download adds to the store's manifest what only a download knows, keeping what the build wrote.
@@ -45,6 +53,38 @@ class StoreDownloadTest {
 
         assertThat(KnowledgeBaseScanner.ikeAttributes(store)).containsOnly(
                 Map.entry("Ike-Downloaded-At", "2026-10-24T02:40:17Z"));
+    }
+
+    @Test
+    void aDownloadCancelledWhileUnpackingLeavesNoStoreAndKeepsWhatWasDownloaded(@TempDir Path temp) throws IOException {
+        Coordinate coordinate = new Coordinate("network.ike.data", "pizza-kb", "20250627.1");
+        Path localRepository = temp.resolve("m2");
+        Path cached = MavenDataStoreDownloadTask.localRepositoryPath(localRepository,
+                new ArtifactCoordinates(coordinate.groupId(), coordinate.artifactId()), coordinate.version(), "rkb");
+        Files.createDirectories(cached.getParent());
+        try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(cached))) {
+            for (int part = 0; part < 50; part++) {
+                zip.putNextEntry(new ZipEntry("pizza-kb/part-" + part));
+                zip.write(new byte[1024]);
+                zip.closeEntry();
+            }
+        }
+        Path solor = Files.createDirectories(temp.resolve("Solor"));
+        Transfer transfer = new Transfer("Pizza Knowledge Base (Rocks)");
+        transfer.onChange(snapshot -> {
+            if (snapshot.phase().equals("Unpacking")) {
+                transfer.cancel();
+            }
+        });
+        transfer.started();
+
+        assertThatThrownBy(() -> StoreDownload.download(HttpClient.newHttpClient(),
+                new RepositoryAccess("https://nexus.invalid/repository/ike-public", "ike-public", Optional.empty()),
+                coordinate, "rkb", solor, localRepository, transfer))
+                .isInstanceOf(CancellationException.class);
+
+        assertThat(solor.resolve("pizza-kb")).as("no half-unpacked store for the dashboard to list").doesNotExist();
+        assertThat(cached).as("the zip stays, so the next download reuses it").exists();
     }
 
     @Test
