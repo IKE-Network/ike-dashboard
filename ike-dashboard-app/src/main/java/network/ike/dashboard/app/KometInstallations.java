@@ -161,7 +161,7 @@ public final class KometInstallations {
         }
         String version = read.getProperty("version");
         return version == null ? Optional.empty()
-                : Optional.of(new KometInstallation(folder.getFileName().toString(), version, folder, launcher));
+                : Optional.of(new KometInstallation("Komet " + version, version, folder, launcher));
     }
 
     static Map<String, String> plistStrings(InputStream plist)

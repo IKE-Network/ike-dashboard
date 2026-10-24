@@ -57,7 +57,7 @@ class KometReleasesTest {
 
     @Test
     void anInstalledImageIsAKomet(@TempDir Path install) throws IOException {
-        Path image = Files.createDirectories(install.resolve("Komet 26.1024.999/bin"));
+        Path image = Files.createDirectories(install.resolve(KometInstaller.imageFolder("26.1024.999") + "/bin"));
         Path launcher = Files.writeString(image.resolve("launchKomet"), "#!/bin/sh\n");
         Files.setPosixFilePermissions(launcher, Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_EXECUTE));
         Files.writeString(image.getParent().resolve(KometInstaller.PROPERTIES), "version=26.1024.999\n");
@@ -65,6 +65,8 @@ class KometReleasesTest {
 
         assertThat(KometInstallations.find(java.util.List.of(install))).singleElement().satisfies(komet -> {
             assertThat(komet.version()).isEqualTo("26.1024.999");
+            assertThat(komet.name()).isEqualTo("Komet 26.1024.999");
+            assertThat(komet.bundle().toString()).as("the launcher cannot run from a path with a space").doesNotContain(" ");
             assertThat(komet.executable()).isEqualTo(launcher);
             assertThat(KometLauncher.command(komet, new KnowledgeBase("pizza-kb", Path.of("/s/pizza-kb"), StoreKind.ROCKS, 0,
                     Optional.empty(), java.util.Map.of(), java.time.Instant.EPOCH)))

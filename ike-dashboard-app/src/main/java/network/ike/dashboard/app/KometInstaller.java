@@ -45,7 +45,7 @@ import java.util.stream.Stream;
 /**
  * Installs a Komet build beside the ones already installed, never over one, so any version stays
  * available to open what it reads. A jlink image from Nexus is unpacked into
- * {@code <install location>/Komet <version>} and run by its own launcher; an installer package from
+ * {@code <install location>/komet-<version>} and run by its own launcher; an installer package from
  * GitHub has its application taken out, signature checked, and placed in the install location, with
  * no installer and no administrator password. Unpacking uses the macOS tools, which keep the
  * launcher's execute bit and the image's symbolic links.
@@ -82,8 +82,14 @@ public final class KometInstaller {
 
     private static KometInstallation installImage(HttpClient http, KometRelease release, Path installLocation,
                                                   Path localRepository, Consumer<String> progress) throws Exception {
-        Path target = installLocation.resolve("Komet " + release.version());
+        Path target = installLocation.resolve(imageFolder(release.version()));
         refuseExisting(target);
+        if (target.toAbsolutePath().toString().chars().anyMatch(Character::isWhitespace)) {
+            // JReleaser's launchKomet puts $APP_HOME/conf/log4j2.xml in its Java options unquoted, so a
+            // space anywhere in the path splits it and Java takes the rest for the main class.
+            throw new IOException("Komet's launcher cannot run from a path with a space in it: " + target
+                    + ". Choose an install location without one.");
+        }
         Coordinate coordinate = release.coordinate().orElseThrow();
         ArtifactCoordinates artifact = new ArtifactCoordinates(coordinate.groupId(), coordinate.artifactId());
         Path cached = MavenDataStoreDownloadTask.localRepositoryPath(localRepository, artifact, coordinate.version(),
@@ -151,6 +157,17 @@ public final class KometInstaller {
         } finally {
             deleteTree(staging);
         }
+    }
+
+    /**
+     * The folder an image of a version is installed in: no spaces, which the image's launcher cannot run
+     * from.
+     *
+     * @param version the app version
+     * @return such as {@code komet-26.1024.1356}
+     */
+    static String imageFolder(String version) {
+        return "komet-" + version;
     }
 
     /**
