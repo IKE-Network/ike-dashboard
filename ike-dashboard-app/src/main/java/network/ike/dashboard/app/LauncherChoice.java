@@ -32,7 +32,36 @@ public final class LauncherChoice {
     /** The first Komet version that reads 64-bit spined-array stores and entity format 3. */
     static final String FORMAT_3_SINCE = "26.1021";
 
+    /**
+     * The first Komet version that upgrades change sets with no window,
+     * {@code --upgrade-change-sets} (IKE-Network/ike-issues#1313): the first build after the
+     * change landed. An older Komet does not know the option and would open its window instead.
+     */
+    static final String UPGRADE_CHANGE_SETS_SINCE = "26.1024.1820";
+
     private LauncherChoice() {
+    }
+
+    /**
+     * The Komet that upgrades a store's change sets: the newest that reads the store and knows
+     * {@code --upgrade-change-sets}.
+     *
+     * @param komets        the Komets installed, newest first
+     * @param knowledgeBase the store
+     * @return the Komet, or empty when none installed can
+     */
+    public static Optional<KometInstallation> chooseForUpgrade(List<KometInstallation> komets, KnowledgeBase knowledgeBase) {
+        return choose(komets, knowledgeBase).filter(LauncherChoice::upgradesChangeSets);
+    }
+
+    /**
+     * Whether a Komet upgrades change sets with no window.
+     *
+     * @param komet the Komet
+     * @return {@code true} from {@value #UPGRADE_CHANGE_SETS_SINCE} on
+     */
+    public static boolean upgradesChangeSets(KometInstallation komet) {
+        return KometInstallations.compareVersions(komet.version(), UPGRADE_CHANGE_SETS_SINCE) >= 0;
     }
 
     /**

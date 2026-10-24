@@ -40,6 +40,7 @@ import javafx.scene.control.SplitPane;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
+import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TitledPane;
 import javafx.scene.control.ToggleButton;
@@ -132,6 +133,9 @@ public final class DashboardView extends BorderPane {
     private Consumer<KometRelease> onInstallKomet = release -> { };
     private Optional<KometRelease> kometRelease = Optional.empty();
     private boolean installing;
+    private final Map<Path, ChangeSetCheck.Finding> changeSets = new HashMap<>();
+    private final Set<Path> upgrading = new java.util.HashSet<>();
+    private BiConsumer<KometInstallation, KnowledgeBase> onUpgradeChangeSets = (komet, knowledgeBase) -> { };
 
     /** Builds the view, empty until data is set. */
     public DashboardView() {
@@ -404,6 +408,96 @@ public final class DashboardView extends BorderPane {
      */
     public BuildStatus status(String name) {
         return statuses.getOrDefault(name, BuildStatus.UNCHECKED);
+    }
+
+    /**
+     * Records which of a store's change sets need an upgrade (IKE-Network/ike-issues#1313).
+     *
+     * @param store   the store's folder
+     * @param finding what its change-set folder holds
+     */
+    public void setChangeSets(Path store, ChangeSetCheck.Finding finding) {
+        changeSets.put(store, finding);
+        selected().filter(family -> family.latest().map(KnowledgeBase::path).filter(store::equals).isPresent())
+                .ifPresent(family -> showDetail());
+    }
+
+    /**
+     * What the check last found in a store's change-set folder.
+     *
+     * @param store the store's folder
+     * @return the finding; {@link ChangeSetCheck.Finding#NONE} before a check
+     */
+    public ChangeSetCheck.Finding changeSets(Path store) {
+        return changeSets.getOrDefault(store, ChangeSetCheck.Finding.NONE);
+    }
+
+    /**
+     * Marks a store's change-set upgrade as running, so it is not started twice.
+     *
+     * @param store   the store's folder
+     * @param running whether its upgrade is running
+     */
+    public void setUpgrading(Path store, boolean running) {
+        if (running) {
+            upgrading.add(store);
+        } else {
+            upgrading.remove(store);
+        }
+        showDetail();
+    }
+
+    /**
+     * What Upgrade change sets does, once confirmed, given the Komet and the store.
+     *
+     * @param action the action
+     */
+    public void setOnUpgradeChangeSets(BiConsumer<KometInstallation, KnowledgeBase> action) {
+        onUpgradeChangeSets = action;
+    }
+
+    /**
+     * Shows what an upgrade run reported, in a window of its own.
+     *
+     * @param knowledgeBase the store
+     * @param run           what the run did
+     */
+    public void showUpgradeReport(KnowledgeBase knowledgeBase, KometLauncher.UpgradeRun run) {
+        Stage window = new Stage();
+        window.setTitle("Change-set upgrade — " + knowledgeBase.displayName());
+        if (getScene() != null) {
+            window.initOwner(getScene().getWindow());
+        }
+        window.setScene(new Scene(upgradeReport(run), 820, 560));
+        window.show();
+    }
+
+    /**
+     * The report of an upgrade run: its outcome, then the report's text, selectable.
+     *
+     * @param run what the run did
+     * @return the pane
+     */
+    static BorderPane upgradeReport(KometLauncher.UpgradeRun run) {
+        Label outcome = new Label(switch (run.exitStatus()) {
+            case 0 -> "Every change set is upgraded or current. The originals replaced are in ~/ike-archive.";
+            case 1 -> "Some change sets are left as they were; the report names what their knowledge base does not hold.";
+            default -> "Komet did not upgrade: status " + run.exitStatus() + ".";
+        });
+        outcome.setWrapText(true);
+        outcome.setStyle(run.clean() ? "-fx-text-fill: #2e7d32;" : run.exitStatus() == 1 ? ATTENTION : PROBLEM);
+        TextArea text = new TextArea(run.text());
+        text.setEditable(false);
+        text.setWrapText(true);
+        text.setStyle("-fx-font-family: 'Menlo', monospace;");
+        Label log = muted("Log  " + run.log());
+        BorderPane pane = new BorderPane(text);
+        pane.setTop(outcome);
+        pane.setBottom(log);
+        BorderPane.setMargin(outcome, new Insets(12, 12, 8, 12));
+        BorderPane.setMargin(text, new Insets(0, 12, 0, 12));
+        BorderPane.setMargin(log, new Insets(8, 12, 12, 12));
+        return pane;
     }
 
     /**
@@ -681,6 +775,8 @@ public final class DashboardView extends BorderPane {
             detail.getChildren().add(box);
         }
 
+        changeSetBox(copy).ifPresent(detail.getChildren()::add);
+
         Optional<KometInstallation> komet = launcher(copy);
         Button open = new Button("Open");
         open.setDefaultButton(true);
@@ -725,6 +821,53 @@ public final class DashboardView extends BorderPane {
         if (!changeSets.isEmpty()) {
             detail.getChildren().add(section("Change sets", changeSets, false, false));
         }
+    }
+
+    /** The offer to upgrade a store's change sets, when some need it. */
+    private Optional<Node> changeSetBox(KnowledgeBase copy) {
+        ChangeSetCheck.Finding finding = changeSets(copy.path());
+        if (finding.needed() == 0) {
+            return Optional.empty();
+        }
+        Label text = new Label(finding.text() + ".");
+        text.setWrapText(true);
+        Optional<KometInstallation> komet = LauncherChoice.chooseForUpgrade(komets, copy);
+        boolean running = upgrading.contains(copy.path());
+        Button upgrade = new Button(running ? "Upgrading change sets …" : "Upgrade change sets");
+        upgrade.setDisable(running || komet.isEmpty());
+        upgrade.setOnAction(event -> komet.ifPresent(chosen -> confirmUpgrade(chosen, copy, finding)));
+        upgrade.setMinWidth(Region.USE_PREF_SIZE);
+        Region gap = new Region();
+        HBox.setHgrow(gap, Priority.ALWAYS);
+        HBox row = new HBox(10, text, gap, upgrade);
+        row.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(text, Priority.ALWAYS);
+        VBox box = new VBox(4, row);
+        if (komet.isEmpty()) {
+            Label need = muted("Needs Komet " + LauncherChoice.UPGRADE_CHANGE_SETS_SINCE + " or later, which upgrades"
+                    + " change sets with no window.");
+            box.getChildren().add(need);
+        }
+        box.setPadding(new Insets(8, 10, 8, 10));
+        box.setStyle("-fx-background-color: #fff3e0; -fx-background-radius: 6;");
+        return Optional.of(box);
+    }
+
+    private void confirmUpgrade(KometInstallation komet, KnowledgeBase copy, ChangeSetCheck.Finding finding) {
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.setTitle("Upgrade change sets");
+        alert.setHeaderText("Upgrade " + finding.needed() + " change set" + (finding.needed() == 1 ? "" : "s") + " of "
+                + copy.displayName() + "?");
+        alert.setContentText("Komet " + komet.version() + " opens " + copy.name() + " with no window, rewrites each"
+                + " change set in format 3 with the pattern of every component it refers to, as the store holds it,"
+                + " and replaces the originals, which it first archives in ~/ike-archive. A change set that refers to"
+                + " a component the store does not hold is left as it was. Quit any Komet that has this store open"
+                + " first.");
+        alert.getButtonTypes().setAll(ButtonType.CANCEL, ButtonType.OK);
+        if (getScene() != null) {
+            alert.initOwner(getScene().getWindow());
+        }
+        alert.showAndWait().filter(ButtonType.OK::equals).ifPresent(ok -> onUpgradeChangeSets.accept(komet, copy));
     }
 
     private static String nexusNote(BuildStatus status) {

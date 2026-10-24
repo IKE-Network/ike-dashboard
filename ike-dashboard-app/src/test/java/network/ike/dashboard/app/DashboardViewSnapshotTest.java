@@ -155,6 +155,91 @@ class DashboardViewSnapshotTest {
         assertThat(icons.get(30, TimeUnit.SECONDS)).as("each managed line's icon and the detail's").isEqualTo(3);
     }
 
+    @Test
+    void aStoreWhoseChangeSetsNeedAnUpgradeOffersIt(@TempDir Path solor) throws Exception {
+        store(solor, "pizza-kb", "20250627.1-20261023.232318-6");
+        describe(solor.resolve("pizza-kb"), "pizza-kb", "Pizza Knowledge Base", "rocks", new java.awt.Color(0xe65100), true);
+        Path changeSets = Files.createDirectories(ChangeSetCheck.folder(solor.resolve("pizza-kb")));
+        try (java.io.InputStream in = getClass().getResourceAsStream("/change-sets/format-3-without-patterns.zip")) {
+            Files.copy(in, changeSets.resolve("Author 20261023T183430PDT EVY ike-cs.zip"));
+        }
+        List<KnowledgeBaseFamily> families = KnowledgeBaseFamily.managed(KnowledgeBaseScanner.scan(solor));
+        Path store = families.getFirst().latest().orElseThrow().path();
+        ChangeSetCheck.Finding finding = ChangeSetCheck.check(store);
+        KometInstallation upgrades = new KometInstallation("Komet 26.1101.900", "26.1101.900",
+                Path.of("/Applications/IKE/Komet/komet-26.1101.900"), Path.of("/Applications/IKE/Komet/komet-26.1101.900/bin/launchKomet"));
+        KometInstallation tooOld = new KometInstallation("Komet 26.1024.1356", "26.1024.1356",
+                Path.of("/Applications/IKE/Komet/komet-26.1024.1356"), Path.of("/Applications/IKE/Komet/komet-26.1024.1356/bin/launchKomet"));
+        Path log = Files.writeString(solor.resolve("komet-upgrade.log"), "log");
+        KometLauncher.UpgradeRun run = new KometLauncher.UpgradeRun(0, """
+                # Change-set upgrade
+
+                Knowledge base: /Users/kec/Solor/pizza-kb
+
+                - 1 file(s) chosen
+                - 1 change set(s) upgraded to format 3 (1 from format 3 without patterns)
+                - 0 already current
+                - 0 empty file(s) skipped (sessions that wrote nothing)
+                - 0 other file(s) skipped, not change sets
+                - 0 left as they were, naming components the knowledge base does not hold
+
+                ## Replaced
+
+                1 change set(s) replaced by their upgrades; the originals are in
+                `/Users/kec/ike-archive/2026-10-24-change-set-originals.tar.gz`.""", log);
+
+        CompletableFuture<WritableImage> offered = new CompletableFuture<>();
+        CompletableFuture<List<String>> offeredButtons = new CompletableFuture<>();
+        CompletableFuture<List<String>> oldKometTexts = new CompletableFuture<>();
+        CompletableFuture<WritableImage> report = new CompletableFuture<>();
+        Platform.runLater(() -> {
+            try {
+                DashboardView view = new DashboardView();
+                view.setKomets(List.of(upgrades));
+                view.setFamilies(families);
+                view.setChangeSets(store, finding);
+                view.select("pizza-kb");
+                Scene scene = new Scene(view, 1080, 480);
+                view.applyCss();
+                view.layout();
+                offered.complete(scene.snapshot(null));
+                offeredButtons.complete(view.lookupAll(".button").stream()
+                        .map(node -> (javafx.scene.control.Button) node)
+                        .filter(button -> !button.isDisable()).map(javafx.scene.control.Button::getText).toList());
+
+                DashboardView old = new DashboardView();
+                old.setKomets(List.of(tooOld));
+                old.setFamilies(families);
+                old.setChangeSets(store, finding);
+                old.select("pizza-kb");
+                new Scene(old, 1080, 480);
+                old.applyCss();
+                old.layout();
+                oldKometTexts.complete(old.lookupAll(".label").stream()
+                        .map(node -> ((javafx.scene.control.Label) node).getText()).toList());
+
+                Scene reportScene = new Scene(DashboardView.upgradeReport(run), 820, 420);
+                reportScene.getRoot().applyCss();
+                reportScene.getRoot().layout();
+                report.complete(reportScene.snapshot(null));
+            } catch (RuntimeException e) {
+                offered.completeExceptionally(e);
+                offeredButtons.completeExceptionally(e);
+                oldKometTexts.completeExceptionally(e);
+                report.completeExceptionally(e);
+            }
+        });
+
+        assertThat(finding.needed()).isEqualTo(1);
+        assertThat(offeredButtons.get(30, TimeUnit.SECONDS)).contains("Upgrade change sets");
+        assertThat(oldKometTexts.get(30, TimeUnit.SECONDS))
+                .contains("1 change set needs an upgrade to load in a 64-bit store: 1 in format 3 naming no pattern.")
+                .anyMatch(text -> text.startsWith("Needs Komet " + LauncherChoice.UPGRADE_CHANGE_SETS_SINCE));
+        write(offered.get(30, TimeUnit.SECONDS), Path.of("target", "dashboard-change-sets.png"));
+        write(report.get(30, TimeUnit.SECONDS), Path.of("target", "change-set-upgrade-report.png"));
+        assertThat(Path.of("target", "dashboard-change-sets.png")).isNotEmptyFile();
+    }
+
     private static Coordinate coordinate(String artifactId) {
         return new Coordinate("network.ike.data", artifactId, "1-SNAPSHOT");
     }

@@ -77,6 +77,7 @@ public final class DashboardApp extends Application {
         view.setOnTrash(this::trash);
         view.setOnBrowse(this::loadCatalog);
         view.setOnInstallKomet(this::installKomet);
+        view.setOnUpgradeChangeSets(this::upgradeChangeSets);
         view.setOnReveal(path -> run(() -> Finder.reveal(path), "Could not show " + path));
         view.setOnOpenFile(path -> run(() -> Finder.open(path), "Could not open " + path));
         stage.setTitle("IKE Dashboard");
@@ -117,6 +118,7 @@ public final class DashboardApp extends Application {
                 Platform.runLater(() -> view.setMessage("Could not read " + settings.solor() + ": " + e.getMessage()));
                 return;
             }
+            checkChangeSets(families);
             checkNexus(families);
         });
     }
@@ -150,6 +152,46 @@ public final class DashboardApp extends Application {
                 + (newer == 0 ? " · all current with Nexus" : " · " + newer + " with a newer build")
                 + (problem == null ? "" : " · " + problem);
         Platform.runLater(() -> view.setMessage(summary));
+    }
+
+    /** Runs on the work thread: which change sets of each store need an upgrade (IKE-Network/ike-issues#1313). */
+    private void checkChangeSets(List<KnowledgeBaseFamily> families) {
+        for (KnowledgeBaseFamily family : families) {
+            family.latest().filter(copy -> copy.kind().opensInKomet()).ifPresent(copy -> {
+                try {
+                    ChangeSetCheck.Finding finding = ChangeSetCheck.check(copy.path());
+                    Platform.runLater(() -> view.setChangeSets(copy.path(), finding));
+                } catch (Exception e) {
+                    Platform.runLater(() -> view.setMessage("Could not read the change sets of " + copy.name() + ": "
+                            + e.getMessage()));
+                }
+            });
+        }
+    }
+
+    /** Upgrades a store's change sets in a Komet with no window, on a thread of its own, and shows the report. */
+    private void upgradeChangeSets(KometInstallation komet, KnowledgeBase knowledgeBase) {
+        view.setUpgrading(knowledgeBase.path(), true);
+        view.setMessage("Upgrading the change sets of " + knowledgeBase.name() + " in Komet " + komet.version() + " …");
+        Thread.ofVirtual().name("ike-dashboard-upgrade").start(() -> {
+            try {
+                KometLauncher.UpgradeRun run = KometLauncher.upgradeChangeSets(komet, knowledgeBase, settings.logFolder());
+                ChangeSetCheck.Finding finding = ChangeSetCheck.check(knowledgeBase.path());
+                Platform.runLater(() -> {
+                    view.setUpgrading(knowledgeBase.path(), false);
+                    view.setChangeSets(knowledgeBase.path(), finding);
+                    view.setLastLog(run.log());
+                    view.setMessage(run.clean() ? "Upgraded the change sets of " + knowledgeBase.name()
+                            : "The change-set upgrade of " + knowledgeBase.name() + " ended with status " + run.exitStatus());
+                    view.showUpgradeReport(knowledgeBase, run);
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    view.setUpgrading(knowledgeBase.path(), false);
+                    view.setMessage("Could not upgrade the change sets of " + knowledgeBase.name() + ": " + e.getMessage());
+                });
+            }
+        });
     }
 
     /** Asks Nexus which knowledge bases it offers, for the Nexus window. */
