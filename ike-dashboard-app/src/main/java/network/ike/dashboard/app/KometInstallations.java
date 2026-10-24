@@ -75,6 +75,8 @@ public final class KometInstallations {
                 for (Path entry : entries.toList()) {
                     if (entry.getFileName().toString().endsWith(".app")) {
                         read(entry).ifPresent(found::add);
+                    } else if (Files.isDirectory(entry) && readImage(entry).isPresent()) {
+                        readImage(entry).ifPresent(found::add);
                     } else if (Files.isDirectory(entry)) {
                         try (Stream<Path> versions = Files.list(entry)) {
                             for (Path bundle : versions.filter(path -> path.getFileName().toString().endsWith(".app"))
@@ -98,6 +100,9 @@ public final class KometInstallations {
      * @return the installation, or empty when the bundle is not Komet or cannot be read
      */
     static Optional<KometInstallation> read(Path bundle) {
+        if (!bundle.getFileName().toString().endsWith(".app")) {
+            return readImage(bundle);
+        }
         Path plist = bundle.resolve("Contents").resolve("Info.plist");
         if (!Files.isRegularFile(plist)) {
             return Optional.empty();
@@ -135,6 +140,30 @@ public final class KometInstallations {
      * @throws SAXException                 if it is not XML
      * @throws ParserConfigurationException if no parser can be made
      */
+    /**
+     * Reads a Komet jlink image the dashboard installed: a folder with {@code bin/launchKomet} and the
+     * {@value KometInstaller#PROPERTIES} the installer writes.
+     *
+     * @param folder the folder
+     * @return the Komet, if the folder is one
+     */
+    static Optional<KometInstallation> readImage(Path folder) {
+        Path launcher = folder.resolve("bin").resolve("launchKomet");
+        Path properties = folder.resolve(KometInstaller.PROPERTIES);
+        if (!Files.isExecutable(launcher) || !Files.isRegularFile(properties)) {
+            return Optional.empty();
+        }
+        java.util.Properties read = new java.util.Properties();
+        try (InputStream in = Files.newInputStream(properties)) {
+            read.load(in);
+        } catch (IOException e) {
+            return Optional.empty();
+        }
+        String version = read.getProperty("version");
+        return version == null ? Optional.empty()
+                : Optional.of(new KometInstallation(folder.getFileName().toString(), version, folder, launcher));
+    }
+
     static Map<String, String> plistStrings(InputStream plist)
             throws IOException, SAXException, ParserConfigurationException {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();

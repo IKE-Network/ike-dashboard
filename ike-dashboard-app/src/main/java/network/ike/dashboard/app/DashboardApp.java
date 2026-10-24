@@ -24,6 +24,7 @@ import network.ike.dashboard.download.RepositoryHttpClients;
 import java.net.http.HttpClient;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.prefs.Preferences;
@@ -75,6 +76,7 @@ public final class DashboardApp extends Application {
         view.setOnDownload(this::download);
         view.setOnTrash(this::trash);
         view.setOnBrowse(this::loadCatalog);
+        view.setOnInstallKomet(this::installKomet);
         view.setOnReveal(path -> run(() -> Finder.reveal(path), "Could not show " + path));
         view.setOnOpenFile(path -> run(() -> Finder.open(path), "Could not open " + path));
         stage.setTitle("IKE Dashboard");
@@ -136,6 +138,12 @@ public final class DashboardApp extends Application {
         } catch (Exception e) {
             problem = "could not check Nexus: " + e.getMessage();
         }
+        try {
+            Optional<KometRelease> release = KometReleases.newest(RepositoryHttpClients.newClient());
+            Platform.runLater(() -> view.setKometRelease(release));
+        } catch (Exception e) {
+            problem = (problem == null ? "" : problem + "; ") + "could not look for a newer Komet: " + e.getMessage();
+        }
         String summary = families.size() + " knowledge bases"
                 + (newer == 0 ? " · all current with Nexus" : " · " + newer + " with a newer build")
                 + (problem == null ? "" : " · " + problem);
@@ -168,6 +176,28 @@ public final class DashboardApp extends Application {
                 });
             } catch (Exception e) {
                 Platform.runLater(() -> view.setMessage("Could not download " + coordinate + ": " + e.getMessage()));
+            }
+        });
+    }
+
+    private void installKomet(KometRelease release) {
+        view.setInstalling(true);
+        view.setMessage("Installing Komet " + release.version() + " from " + release.source().label() + " …");
+        work.submit(() -> {
+            try {
+                KometInstallation installed = KometInstaller.install(RepositoryHttpClients.newClient(), release,
+                        settings.installLocation(), settings.localRepository(),
+                        text -> Platform.runLater(() -> view.setMessage(text)));
+                Platform.runLater(() -> {
+                    view.setInstalling(false);
+                    refresh();
+                    view.setMessage("Installed Komet " + installed.version() + " in " + installed.bundle().getParent());
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    view.setInstalling(false);
+                    view.setMessage("Could not install Komet " + release.version() + ": " + e.getMessage());
+                });
             }
         });
     }

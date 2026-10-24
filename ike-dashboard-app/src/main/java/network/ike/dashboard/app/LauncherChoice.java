@@ -67,8 +67,19 @@ public final class LauncherChoice {
      * @return {@code true} when the Komet is new enough
      */
     public static boolean reads(KometInstallation komet, KnowledgeBase knowledgeBase) {
+        return reads(komet.version(), knowledgeBase);
+    }
+
+    /**
+     * Whether a Komet version reads a store, installed or not.
+     *
+     * @param version       the Komet's version
+     * @param knowledgeBase the store
+     * @return {@code true} when the version is new enough
+     */
+    public static boolean reads(String version, KnowledgeBase knowledgeBase) {
         return minimumVersion(knowledgeBase)
-                .map(minimum -> KometInstallations.compareVersions(komet.version(), minimum) >= 0)
+                .map(minimum -> KometInstallations.compareVersions(version, minimum) >= 0)
                 .orElse(true);
     }
 

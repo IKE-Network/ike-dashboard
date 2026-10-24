@@ -71,7 +71,10 @@ class DashboardViewSnapshotTest {
                 view.setOffers(offers);
                 view.setStatus("pizza-kb", new BuildStatus(BuildStatus.State.NEWER, "newer build",
                         Optional.of(new SnapshotMetadata.Deploy("20250627.1-20261024.001942-7", Instant.parse("2026-10-24T00:20:14Z")))));
-                view.select("DeX");
+                view.setKometRelease(Optional.of(new KometRelease("26.1024.1324", KometRelease.Source.NEXUS,
+                        java.net.URI.create("https://nexus.tinkar.org/x.zip"), 234_000_000, Optional.empty(), Optional.empty(),
+                        Optional.empty(), "osx-aarch64")));
+                view.select("pizza-kb");
                 view.setMessage(families.size() + " knowledge bases · 1 with a newer build");
                 Scene scene = new Scene(view, 1080, 480);
                 view.applyCss();
@@ -86,9 +89,8 @@ class DashboardViewSnapshotTest {
         DashboardView view = built.get();
 
         assertThat(view.listed()).as("only what is downloaded").containsExactly("DeX", "pizza-kb", "solor-kb");
-        assertThat(view.selected()).map(KnowledgeBaseFamily::name).contains("DeX");
-        assertThat(view.selected().flatMap(KnowledgeBaseFamily::latest))
-                .map(KnowledgeBase::name).contains("*DeX-4-17-2026-64bit-2");
+        assertThat(view.selected()).map(KnowledgeBaseFamily::name).contains("pizza-kb");
+        assertThat(families.getFirst().latest()).map(KnowledgeBase::name).contains("*DeX-4-17-2026-64bit-2");
         assertThat(view.browser().shown()).extracting(offer -> offer.coordinate().artifactId(), view.browser()::isHere)
                 .containsExactly(org.assertj.core.groups.Tuple.tuple("pizza-kb", true),
                         org.assertj.core.groups.Tuple.tuple("solor-gudid-kb", false),

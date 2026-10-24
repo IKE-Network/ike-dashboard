@@ -22,6 +22,7 @@ import java.io.PrintStream;
 import java.net.http.HttpClient;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import java.util.Locale;
 
 /**
@@ -33,6 +34,8 @@ import java.util.Locale;
  * check                                 the same, with the newer-build check against Nexus
  * komets                                the Komet versions installed
  * nexus                                 the knowledge bases Nexus offers
+ * komet-latest [repository-url]         the newest Komet build: Nexus's komet-app, else GitHub's
+ * komet-install [folder] [repository-url] install it beside the others (default: the install location)
  * download &lt;g:a:v&gt; &lt;classifier&gt;          the newest deploy of a store, into ~/Solor/&lt;artifactId&gt;
  * </pre>
  */
@@ -56,6 +59,18 @@ public final class DashboardCommand {
             case "check" -> list(out, settings, true);
             case "komets" -> komets(out, settings);
             case "nexus" -> nexus(out, settings);
+            case "komet-latest" -> kometLatest(out, args.length > 1 ? args[1] : null).ifPresentOrElse(
+                    release -> out.printf("Komet %s from %s: %s (%s)%n", release.version(), release.source().label(),
+                            release.uri(), release.sizeBytes() > 0 ? size(release.sizeBytes()) : "size unknown"),
+                    () -> out.println("No Komet build found"));
+            case "komet-install" -> {
+                KometRelease release = kometLatest(out, args.length > 2 ? args[2] : null)
+                        .orElseThrow(() -> new IllegalStateException("No Komet build found"));
+                Path folder = args.length > 1 ? Path.of(args[1]) : settings.installLocation();
+                KometInstallation installed = KometInstaller.install(RepositoryHttpClients.newClient(), release, folder,
+                        settings.localRepository(), out::println);
+                out.printf("Installed Komet %s: %s%n", installed.version(), installed.executable());
+            }
             case "download" -> {
                 if (args.length != 3) {
                     throw new IllegalArgumentException("download <groupId:artifactId:version> <classifier>");
@@ -109,6 +124,16 @@ public final class DashboardCommand {
         for (KometInstallation komet : komets) {
             out.printf("%-14s %s%n", komet.version(), komet.bundle());
         }
+    }
+
+    private static Optional<KometRelease> kometLatest(PrintStream out, String repositoryUrl) throws Exception {
+        HttpClient http = RepositoryHttpClients.newClient();
+        if (repositoryUrl == null) {
+            return KometReleases.newest(http);
+        }
+        Optional<KometRelease> nexus = KometReleases.newestOnNexus(http, repositoryUrl, KometReleases.platformClassifier());
+        return nexus.isPresent() ? nexus
+                : KometReleases.newestOnGitHub(http, KometReleases.GITHUB_REPOSITORY, KometReleases.platformClassifier());
     }
 
     private static void nexus(PrintStream out, DashboardSettings settings) throws Exception {

@@ -122,6 +122,9 @@ public final class DashboardView extends BorderPane {
     private Consumer<Path> onOpenFile = path -> { };
     private Consumer<Boolean> onSortChange = recent -> { };
     private Runnable onBrowse = () -> { };
+    private Consumer<KometRelease> onInstallKomet = release -> { };
+    private Optional<KometRelease> kometRelease = Optional.empty();
+    private boolean installing;
 
     /** Builds the view, empty until data is set. */
     public DashboardView() {
@@ -255,19 +258,62 @@ public final class DashboardView extends BorderPane {
      */
     public void setKomets(List<KometInstallation> installations) {
         komets = List.copyOf(installations);
+        kometChanged();
+    }
+
+    /**
+     * Offers the newest Komet build there is, where a store needs it and in the footer when it is
+     * newer than any installed.
+     *
+     * @param release the newest build, if one was found
+     */
+    public void setKometRelease(Optional<KometRelease> release) {
+        kometRelease = release;
+        kometChanged();
+    }
+
+    /**
+     * Marks a Komet install as running, so it is not started twice.
+     *
+     * @param running whether an install is running
+     */
+    public void setInstalling(boolean running) {
+        installing = running;
+        kometChanged();
+    }
+
+    /**
+     * What installing a Komet build does.
+     *
+     * @param action the action
+     */
+    public void setOnInstallKomet(Consumer<KometRelease> action) {
+        onInstallKomet = action;
+    }
+
+    private Optional<KometRelease> newerKomet() {
+        return kometRelease.filter(release -> komets.isEmpty() || release.newerThan(komets.getFirst().version()));
+    }
+
+    private void kometChanged() {
         kometMenu.getItems().clear();
-        if (komets.isEmpty()) {
-            kometMenu.setText("No Komet installed");
-        } else {
-            kometMenu.setText("Komet " + komets.getFirst().version()
-                    + (komets.size() > 1 ? " and " + (komets.size() - 1) + " older" : ""));
-            komets.forEach(komet -> {
-                MenuItem item = new MenuItem("Komet " + komet.version() + "  —  " + komet.name());
-                item.setOnAction(event -> onReveal.accept(komet.bundle()));
-                kometMenu.getItems().add(item);
-            });
-        }
-        kometMenu.setDisable(komets.isEmpty());
+        Optional<KometRelease> newer = newerKomet();
+        String installed = komets.isEmpty() ? "No Komet installed" : "Komet " + komets.getFirst().version()
+                + (komets.size() > 1 ? " and " + (komets.size() - 1) + " older" : "");
+        kometMenu.setText(newer.map(release -> installed + "  ·  " + release.version() + " available").orElse(installed));
+        kometMenu.setStyle(newer.isPresent() ? ATTENTION : "");
+        newer.ifPresent(release -> {
+            MenuItem install = new MenuItem("Install Komet " + release.version() + " from " + release.source().label());
+            install.setDisable(installing);
+            install.setOnAction(event -> onInstallKomet.accept(release));
+            kometMenu.getItems().add(install);
+        });
+        komets.forEach(komet -> {
+            MenuItem item = new MenuItem("Komet " + komet.version() + "  —  " + komet.name());
+            item.setOnAction(event -> onReveal.accept(komet.bundle()));
+            kometMenu.getItems().add(item);
+        });
+        kometMenu.setDisable(kometMenu.getItems().isEmpty());
         list.refresh();
         showDetail();
     }
@@ -551,10 +597,24 @@ public final class DashboardView extends BorderPane {
         actions.setPadding(new Insets(6, 0, 0, 0));
         detail.getChildren().add(actions);
         if (komet.isEmpty()) {
+            Optional<KometRelease> fix = kometRelease.filter(release -> LauncherChoice.reads(release.version(), copy));
             Label need = new Label(LauncherChoice.requirement(copy).map(requirement -> "Needs " + requirement
-                    + "; none installed reads it.").orElse("No Komet installed."));
+                    + (fix.isPresent() ? "." : "; none installed reads it, and no newer build was found."))
+                    .orElse(fix.isPresent() ? "No Komet installed." : "No Komet installed, and none was found to install."));
             need.setStyle(PROBLEM);
             detail.getChildren().add(need);
+            fix.ifPresent(release -> {
+                Button install = new Button(installing ? "Installing Komet " + release.version() + " …"
+                        : "Install Komet " + release.version());
+                install.setDisable(installing);
+                install.setOnAction(event -> onInstallKomet.accept(release));
+                Label from = muted("from " + release.source().label()
+                        + (release.sizeBytes() > 0 ? ", " + DashboardCommand.size(release.sizeBytes()) : "")
+                        + "; installed beside the Komets you have");
+                HBox row = new HBox(10, install, from);
+                row.setAlignment(Pos.CENTER_LEFT);
+                detail.getChildren().add(row);
+            });
         } else if (komet.get() != komets.getFirst()) {
             detail.getChildren().add(muted("Opens in Komet " + komet.get().version()));
         }
