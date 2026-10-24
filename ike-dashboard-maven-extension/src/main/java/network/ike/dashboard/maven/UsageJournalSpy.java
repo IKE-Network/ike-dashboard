@@ -19,6 +19,11 @@ import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import javax.inject.Named;
 import javax.inject.Singleton;
@@ -35,6 +40,11 @@ import org.slf4j.LoggerFactory;
 /**
  * Records every artifact a build resolves into the local repository's usage journal, once, at the
  * end of the build.
+ *
+ * <p>IntelliJ's Maven import is the exception: it runs Maven embedded in IntelliJ's own Maven server,
+ * which never ends a session and keeps the embedder alive between imports. There the spy writes once
+ * the resolver has been quiet for {@link #QUIET_MILLIS}, on a daemon thread, and records under the
+ * tool name {@code intellij}.
  *
  * <p>It never fails a build and never throws out of {@link #onEvent(Object)}: a journal that cannot
  * be written costs a log line, not the build. {@code -Dike.usageJournal.skip=true} turns it off for
@@ -54,7 +64,14 @@ public class UsageJournalSpy implements EventSpy {
 
     private static final Logger LOG = LoggerFactory.getLogger(UsageJournalSpy.class);
 
+    /** How long the resolver stays quiet, inside IntelliJ's Maven server, before the journal is written. */
+    static final long QUIET_MILLIS = 15_000;
+
     private final UsageCollector collector = new UsageCollector();
+    private final String tool = tool(System.getProperty(IDEA_VERSION_PROPERTY));
+    private final AtomicLong lastResolvedNanos = new AtomicLong();
+    private final AtomicBoolean writePending = new AtomicBoolean();
+    private ScheduledExecutorService quietWriter;
 
     /** Creates the spy; the Maven container instantiates it through the sisu index. */
     public UsageJournalSpy() {
@@ -113,6 +130,38 @@ public class UsageJournalSpy implements EventSpy {
             return;
         }
         collector.resolved(session.getLocalRepository().getBasePath(), artifact.getPath());
+        if (UsageJournal.INTELLIJ.equals(tool)) {
+            lastResolvedNanos.set(System.nanoTime());
+            if (writePending.compareAndSet(false, true)) {
+                scheduleQuietWrite(QUIET_MILLIS);
+            }
+        }
+    }
+
+    private synchronized void scheduleQuietWrite(long delayMillis) {
+        if (quietWriter == null) {
+            quietWriter = Executors.newSingleThreadScheduledExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "ike-dashboard-usage-journal");
+                thread.setDaemon(true);
+                return thread;
+            });
+        }
+        quietWriter.schedule(this::writeIfQuiet, delayMillis, TimeUnit.MILLISECONDS);
+    }
+
+    private void writeIfQuiet() {
+        try {
+            long quietFor = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - lastResolvedNanos.get());
+            if (quietFor < QUIET_MILLIS) {
+                scheduleQuietWrite(QUIET_MILLIS - quietFor);
+                return;
+            }
+            writePending.set(false);
+            write();
+        } catch (RuntimeException e) {
+            writePending.set(false);
+            LOG.warn("ike-dashboard usage journal: not written ({})", e.toString());
+        }
     }
 
     /**
@@ -130,8 +179,7 @@ public class UsageJournalSpy implements EventSpy {
         LocalDate today = LocalDate.now();
         for (Map.Entry<Path, Set<Path>> entry : collector.drain().entrySet()) {
             try {
-                int lines = UsageJournal.record(entry.getKey(), tool(System.getProperty(IDEA_VERSION_PROPERTY)), today,
-                        entry.getValue());
+                int lines = UsageJournal.record(entry.getKey(), tool, today, entry.getValue());
                 LOG.debug("ike-dashboard usage journal: {} files recorded in {}", lines,
                         UsageJournal.file(entry.getKey()));
             } catch (Exception e) {
