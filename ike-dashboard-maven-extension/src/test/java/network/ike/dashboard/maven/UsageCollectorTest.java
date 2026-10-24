@@ -43,6 +43,13 @@ class UsageCollectorTest {
     }
 
     @Test
+    void intellijsImportIsNamedApartFromMavenBuilds() {
+        assertThat(UsageJournalSpy.tool("2026.2.3")).isEqualTo("intellij");
+        assertThat(UsageJournalSpy.tool(null)).isEqualTo("maven");
+        assertThat(UsageJournalSpy.tool(" ")).isEqualTo("maven");
+    }
+
+    @Test
     void resolvingFromManyThreadsLosesNothing() {
         UsageCollector collector = new UsageCollector();
         List<Path> files = new ArrayList<>();

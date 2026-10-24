@@ -60,6 +60,9 @@ public final class UsageJournal {
     /** The tool name Maven builds record under. */
     public static final String MAVEN = "maven";
 
+    /** The tool name IntelliJ's Maven import records under: Maven embedded in IntelliJ's Maven server. */
+    public static final String INTELLIJ = "intellij";
+
     /** The tool name the dashboard records its own downloads under. */
     public static final String DASHBOARD = "dashboard";
 

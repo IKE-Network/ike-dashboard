@@ -46,6 +46,9 @@ import org.slf4j.LoggerFactory;
 @Singleton
 public class UsageJournalSpy implements EventSpy {
 
+    /** The system property IntelliJ sets in the Maven server it runs its import in. */
+    static final String IDEA_VERSION_PROPERTY = "idea.version";
+
     /** The system property that turns the journal off for one build. */
     public static final String SKIP_PROPERTY = "ike.usageJournal.skip";
 
@@ -112,11 +115,23 @@ public class UsageJournalSpy implements EventSpy {
         collector.resolved(session.getLocalRepository().getBasePath(), artifact.getPath());
     }
 
+    /**
+     * The tool the journal names: IntelliJ's import when Maven runs inside IntelliJ's Maven server,
+     * Maven otherwise.
+     *
+     * @param ideaVersion the {@code idea.version} system property, or {@code null}
+     * @return the tool name
+     */
+    static String tool(String ideaVersion) {
+        return ideaVersion == null || ideaVersion.isBlank() ? UsageJournal.MAVEN : UsageJournal.INTELLIJ;
+    }
+
     private void write() {
         LocalDate today = LocalDate.now();
         for (Map.Entry<Path, Set<Path>> entry : collector.drain().entrySet()) {
             try {
-                int lines = UsageJournal.record(entry.getKey(), UsageJournal.MAVEN, today, entry.getValue());
+                int lines = UsageJournal.record(entry.getKey(), tool(System.getProperty(IDEA_VERSION_PROPERTY)), today,
+                        entry.getValue());
                 LOG.debug("ike-dashboard usage journal: {} files recorded in {}", lines,
                         UsageJournal.file(entry.getKey()));
             } catch (Exception e) {
