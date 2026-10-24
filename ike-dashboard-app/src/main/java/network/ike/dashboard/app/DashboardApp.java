@@ -21,18 +21,22 @@ import javafx.scene.Scene;
 import javafx.stage.Stage;
 import network.ike.dashboard.download.RepositoryHttpClients;
 
+import java.net.http.HttpClient;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.prefs.Preferences;
 
 /**
  * The IKE Dashboard: one window, in its own process, that lists the knowledge bases in
- * {@code ~/Solor}, asks Nexus whether newer builds exist, and opens any of them in any installed
- * Komet as an independent process. Its design is the {@code dev-ike-dashboard} topic in
- * {@code ike-lab-documents}.
+ * {@code ~/Solor} and those Nexus has, asks Nexus whether newer builds exist, and opens any of them
+ * in an installed Komet as an independent process. Its design is the {@code dev-ike-dashboard} topic
+ * in {@code ike-lab-documents}.
  */
 public final class DashboardApp extends Application {
+
+    private static final String SORT_RECENT = "sortRecent";
 
     private final ExecutorService work = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "ike-dashboard-work");
@@ -40,7 +44,9 @@ public final class DashboardApp extends Application {
         return thread;
     });
     private DashboardSettings settings;
+    private OpenHistory history;
     private DashboardView view;
+    private volatile String selectAfterRefresh;
 
     /** Creates the application; JavaFX instantiates it. */
     public DashboardApp() {
@@ -58,13 +64,21 @@ public final class DashboardApp extends Application {
     @Override
     public void start(Stage stage) {
         settings = DashboardSettings.current();
+        history = OpenHistory.current();
+        Preferences preferences = Preferences.userRoot().node(DashboardSettings.NODE);
         view = new DashboardView();
+        view.setLastOpened(history::lastOpened);
+        view.setSortRecent(preferences.getBoolean(SORT_RECENT, false));
+        view.setOnSortChange(recent -> preferences.putBoolean(SORT_RECENT, recent));
         view.setOnRefresh(this::refresh);
-        view.setOnCheckNexus(this::checkNexus);
         view.setOnOpen(this::open);
         view.setOnDownload(this::download);
+        view.setOnTrash(this::trash);
+        view.setOnBrowse(this::loadCatalog);
+        view.setOnReveal(path -> run(() -> Finder.reveal(path), "Could not show " + path));
+        view.setOnOpenFile(path -> run(() -> Finder.open(path), "Could not open " + path));
         stage.setTitle("IKE Dashboard");
-        stage.setScene(new Scene(view, 1180, 660));
+        stage.setScene(new Scene(view, 1080, 640));
         stage.show();
         refresh();
     }
@@ -74,70 +88,83 @@ public final class DashboardApp extends Application {
         work.shutdownNow();
     }
 
+    /** Reads {@code ~/Solor} and the installed Komets, then asks Nexus, in the background. */
     private void refresh() {
         view.setMessage("Reading " + settings.solor() + " …");
         work.submit(() -> {
+            List<KnowledgeBaseFamily> families;
             try {
                 List<KnowledgeBase> knowledgeBases = KnowledgeBaseScanner.scan(settings.solor());
                 List<KometInstallation> komets = KometInstallations.find(KometInstallations.defaultRoots(
                         Path.of(System.getProperty("user.home")), settings.installLocation()));
-                List<KnowledgeBaseFamily> families = KnowledgeBaseFamily.group(knowledgeBases);
-                long identified = knowledgeBases.stream().filter(KnowledgeBase::identified).count();
-                long other = knowledgeBases.stream().filter(knowledgeBase -> knowledgeBase.kind() == StoreKind.UNKNOWN).count();
+                families = KnowledgeBaseFamily.group(knowledgeBases);
+                List<KnowledgeBaseFamily> found = families;
                 Platform.runLater(() -> {
                     view.setKomets(komets);
-                    view.setFamilies(families);
-                    view.setMessage(families.size() + " knowledge bases in " + settings.solor() + " (" + knowledgeBases.size()
-                            + " entries, " + identified + " saying which build they are" + (other == 0 ? ""
-                            : ", " + other + " other folders not shown") + "); " + komets.size() + " Komet versions installed");
+                    view.setFamilies(found);
+                    String select = selectAfterRefresh;
+                    if (select != null) {
+                        selectAfterRefresh = null;
+                        view.select(select);
+                    }
+                    view.setMessage(found.size() + " knowledge bases · checking Nexus …");
                 });
             } catch (Exception e) {
                 Platform.runLater(() -> view.setMessage("Could not read " + settings.solor() + ": " + e.getMessage()));
+                return;
             }
+            checkNexus(families);
         });
     }
 
-    private void checkNexus() {
-        List<DashboardView.Entry> rows = view.families();
-        view.setMessage("Asking " + settings.repositoryUrl() + " about " + rows.size() + " knowledge bases …");
+    /** Runs on the work thread: the newer-build check for each knowledge base. */
+    private void checkNexus(List<KnowledgeBaseFamily> families) {
+        int newer = 0;
+        String problem = null;
+        try {
+            HttpClient http = RepositoryHttpClients.newClient();
+            RepositoryAccess access = DashboardCommand.access(settings);
+            NewerBuildCheck check = new NewerBuildCheck(http, access);
+            for (KnowledgeBaseFamily family : families) {
+                BuildStatus status = family.latestIdentified().map(check::check)
+                        .orElse(BuildStatus.of(BuildStatus.State.UNIDENTIFIED, "no copy says which build it is"));
+                if (status.state() == BuildStatus.State.NEWER) {
+                    newer++;
+                }
+                Platform.runLater(() -> view.setStatus(family.name(), status));
+            }
+        } catch (Exception e) {
+            problem = "could not check Nexus: " + e.getMessage();
+        }
+        String summary = families.size() + " knowledge bases"
+                + (newer == 0 ? " · all current with Nexus" : " · " + newer + " with a newer build")
+                + (problem == null ? "" : " · " + problem);
+        Platform.runLater(() -> view.setMessage(summary));
+    }
+
+    /** Asks Nexus which knowledge bases it offers, for the Nexus window. */
+    private void loadCatalog() {
         work.submit(() -> {
             try {
-                NewerBuildCheck check = new NewerBuildCheck(RepositoryHttpClients.newClient(),
+                List<NexusCatalog.Offer> offers = NexusCatalog.list(RepositoryHttpClients.newClient(),
                         DashboardCommand.access(settings));
-                int newer = 0;
-                for (DashboardView.Entry row : rows) {
-                    BuildStatus status = row.family().latestIdentified().map(check::check)
-                            .orElse(BuildStatus.of(BuildStatus.State.UNIDENTIFIED, "no copy says which build it is"));
-                    if (status.state() == BuildStatus.State.NEWER) {
-                        newer++;
-                    }
-                    Platform.runLater(() -> view.setStatus(row, status));
-                }
-                int found = newer;
-                Platform.runLater(() -> view.setMessage(found == 0 ? "No newer builds found"
-                        : found + (found == 1 ? " knowledge base has" : " knowledge bases have") + " a newer build on Nexus"));
+                Platform.runLater(() -> view.setOffers(offers));
             } catch (Exception e) {
-                Platform.runLater(() -> view.setMessage("Could not check Nexus: " + e.getMessage()));
+                Platform.runLater(() -> view.setOffersProblem("Could not ask Nexus: " + e.getMessage()));
             }
         });
     }
 
-    private void download(DashboardView.Entry available) {
-        KnowledgeBase identified = available.family().latestIdentified().orElse(null);
-        if (identified == null) {
-            view.setMessage("No copy of " + available.family().name() + " says which build it is");
-            return;
-        }
-        Coordinate coordinate = identified.coordinate().orElseThrow();
-        String classifier = identified.kind().classifier();
+    private void download(Coordinate coordinate, String classifier) {
         view.setMessage("Downloading " + coordinate + " " + classifier + " …");
         work.submit(() -> {
             try {
                 Path store = StoreDownload.download(RepositoryHttpClients.newClient(), DashboardCommand.access(settings),
                         coordinate, classifier, settings.solor(), settings.localRepository(), null);
                 Platform.runLater(() -> {
-                    view.setMessage("Downloaded " + store);
+                    selectAfterRefresh = coordinate.artifactId();
                     refresh();
+                    view.setMessage("Downloaded " + store.getFileName());
                 });
             } catch (Exception e) {
                 Platform.runLater(() -> view.setMessage("Could not download " + coordinate + ": " + e.getMessage()));
@@ -145,12 +172,41 @@ public final class DashboardApp extends Application {
         });
     }
 
+    private void trash(List<KnowledgeBase> copies) {
+        view.setMessage("Moving " + copies.size() + (copies.size() == 1 ? " copy" : " copies") + " to the Trash …");
+        work.submit(() -> {
+            try {
+                Finder.trash(copies.stream().map(KnowledgeBase::path).toList());
+                Platform.runLater(this::refresh);
+            } catch (Exception e) {
+                Platform.runLater(() -> view.setMessage(e.getMessage()));
+            }
+        });
+    }
+
     private void open(KometInstallation komet, KnowledgeBase knowledgeBase) {
         try {
             Path log = KometLauncher.launch(komet, knowledgeBase, settings.logFolder());
-            view.setMessage("Opening " + knowledgeBase.name() + " in Komet " + komet.version() + "; its log is " + log);
+            history.opened(KnowledgeBaseFamily.familyName(knowledgeBase));
+            view.setLastOpened(history::lastOpened);
+            view.setLastLog(log);
+            view.setMessage("Opening " + knowledgeBase.name() + " in Komet " + komet.version());
         } catch (Exception e) {
             view.setMessage("Could not start Komet " + komet.version() + ": " + e.getMessage());
         }
+    }
+
+    private void run(Action action, String failure) {
+        try {
+            action.run();
+        } catch (Exception e) {
+            view.setMessage(failure + ": " + e.getMessage());
+        }
+    }
+
+    /** Something that may fail. */
+    @FunctionalInterface
+    private interface Action {
+        void run() throws Exception;
     }
 }

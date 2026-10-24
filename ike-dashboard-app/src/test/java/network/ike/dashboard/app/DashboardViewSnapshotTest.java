@@ -24,8 +24,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Renders the dashboard window headless, under Monocle, from a knowledge-base folder built for the
- * test, and writes it to {@code target/dashboard-view.png} so a person can see what it shows: one row
- * per knowledge base, its newest openable copy in bold, the rest folded beneath.
+ * test, and writes it to {@code target/dashboard-view.png} so a person can see what it shows: one line
+ * per knowledge base on the left, the selected one's detail on the right.
  */
 class DashboardViewSnapshotTest {
 
@@ -44,7 +44,7 @@ class DashboardViewSnapshotTest {
     }
 
     @Test
-    void eachKnowledgeBaseIsOneRowWithItsCopiesFoldedBeneath(@TempDir Path solor) throws Exception {
+    void eachKnowledgeBaseIsOneLineAndTheSelectedOneFillsTheDetail(@TempDir Path solor) throws Exception {
         store(solor, "pizza-kb", "20250627.1-20261023.232318-6");
         rocks(solor, "*DeX-4-17-2026", "2026-06-29T21:21:00Z");
         rocks(solor, "*DeX-4-17-2026-64bit-2", "2026-10-09T03:26:00Z");
@@ -56,6 +56,10 @@ class DashboardViewSnapshotTest {
         KometInstallation komet = new KometInstallation("Komet Desktop 2026-10-16 346s", "26.1016.346",
                 Path.of("/Applications/Komet Desktop 2026-10-16 346s.app"),
                 Path.of("/Applications/Komet Desktop 2026-10-16 346s.app/Contents/MacOS/Komet Desktop 2026-10-16 346s"));
+        List<NexusCatalog.Offer> offers = List.of(
+                offer("pizza-kb", "rkb"),
+                offer("solor-gudid-kb", "rkb"),
+                offer("solor-gudid-kb", "reasoned-sa"));
 
         CompletableFuture<WritableImage> rendered = new CompletableFuture<>();
         CompletableFuture<DashboardView> built = new CompletableFuture<>();
@@ -64,14 +68,12 @@ class DashboardViewSnapshotTest {
                 DashboardView view = new DashboardView();
                 view.setKomets(List.of(komet));
                 view.setFamilies(families);
-                view.setAllExpanded(true);
-                view.families().stream().filter(row -> row.family().name().equals("pizza-kb")).findFirst()
-                        .ifPresent(row -> view.setStatus(row, new BuildStatus(BuildStatus.State.NEWER,
-                                "newer build", Optional.of(new SnapshotMetadata.Deploy("20250627.1-20261024.001942-7",
-                                Instant.parse("2026-10-24T00:20:14Z"))))));
+                view.setOffers(offers);
+                view.setStatus("pizza-kb", new BuildStatus(BuildStatus.State.NEWER, "newer build",
+                        Optional.of(new SnapshotMetadata.Deploy("20250627.1-20261024.001942-7", Instant.parse("2026-10-24T00:20:14Z")))));
                 view.select("DeX");
-                view.setMessage(families.size() + " knowledge bases in " + solor.getFileName());
-                Scene scene = new Scene(view, 1240, 330);
+                view.setMessage(families.size() + " knowledge bases · 1 with a newer build");
+                Scene scene = new Scene(view, 1080, 480);
                 view.applyCss();
                 view.layout();
                 built.complete(view);
@@ -83,13 +85,23 @@ class DashboardViewSnapshotTest {
         WritableImage image = rendered.get(30, TimeUnit.SECONDS);
         DashboardView view = built.get();
 
-        assertThat(view.families()).extracting(row -> row.family().name()).containsExactly("DeX", "pizza-kb", "solor-kb");
-        DashboardView.Entry dex = view.families().getFirst();
-        assertThat(dex.copy()).map(KnowledgeBase::name).contains("*DeX-4-17-2026-64bit-2");
-        assertThat(dex.family().members()).hasSize(3);
+        assertThat(view.listed()).as("only what is downloaded").containsExactly("DeX", "pizza-kb", "solor-kb");
+        assertThat(view.selected()).map(KnowledgeBaseFamily::name).contains("DeX");
+        assertThat(view.selected().flatMap(KnowledgeBaseFamily::latest))
+                .map(KnowledgeBase::name).contains("*DeX-4-17-2026-64bit-2");
+        assertThat(view.browser().shown()).extracting(offer -> offer.coordinate().artifactId(), view.browser()::isHere)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("pizza-kb", true),
+                        org.assertj.core.groups.Tuple.tuple("solor-gudid-kb", false),
+                        org.assertj.core.groups.Tuple.tuple("solor-gudid-kb", false));
+        assertThat(view.status("pizza-kb").state()).isEqualTo(BuildStatus.State.NEWER);
         Path png = Path.of("target", "dashboard-view.png");
         write(image, png);
         assertThat(png).isNotEmptyFile();
+    }
+
+    private static NexusCatalog.Offer offer(String artifactId, String classifier) {
+        return new NexusCatalog.Offer(new Coordinate("network.ike.data", artifactId, "1-SNAPSHOT"), classifier,
+                3_920_000, Instant.parse("2026-10-24T00:19:42Z"), "ike-restricted-snapshots");
     }
 
     private static void store(Path solor, String name, String resolvedVersion) throws IOException {
