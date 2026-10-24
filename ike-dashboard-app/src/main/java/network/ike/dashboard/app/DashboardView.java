@@ -72,6 +72,7 @@ import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /**
@@ -84,6 +85,10 @@ import java.util.stream.Collectors;
  * one Open, a newer build to download, and the older copies and change sets folded into sections, with
  * the space they take. What is not yet here is found in a window of its own, the {@link NexusBrowser}.
  * It holds no IO of its own; {@link DashboardApp} supplies the data and the actions.
+ *
+ * <p>Above the list, Notices is the landing page and the first screen (the IKE Dashboard design,
+ * decision 14): one card per finding of the dashboard's checks, work at risk first, each with one
+ * action and a Dismiss.
  */
 public final class DashboardView extends BorderPane {
 
@@ -136,6 +141,14 @@ public final class DashboardView extends BorderPane {
     private final Map<Path, ChangeSetCheck.Finding> changeSets = new HashMap<>();
     private final Set<Path> upgrading = new java.util.HashSet<>();
     private BiConsumer<KometInstallation, KnowledgeBase> onUpgradeChangeSets = (komet, knowledgeBase) -> { };
+    private final Button home = new Button("Notices");
+    private boolean showingNotices = true;
+    private List<Notice> notices = List.of();
+    private final Map<Path, List<RepositorySync.Status>> sync = new HashMap<>();
+    private Optional<Notice.Freshness> nexusChecked = Optional.empty();
+    private boolean catalogLoaded;
+    private Predicate<String> dismissed = id -> false;
+    private Consumer<String> onDismiss = id -> { };
 
     /** Builds the view, empty until data is set. */
     public DashboardView() {
@@ -176,7 +189,13 @@ public final class DashboardView extends BorderPane {
         updateBar.managedProperty().bind(updateBar.visibleProperty());
         updateBar.setVisible(false);
         updateAll.setOnAction(event -> newerBuilds().forEach(family -> download(family)));
-        VBox masterTop = new VBox(listBar, updateBar);
+        home.setMaxWidth(Double.MAX_VALUE);
+        home.setAlignment(Pos.CENTER_LEFT);
+        home.setOnAction(event -> showNotices());
+        HBox.setHgrow(home, Priority.ALWAYS);
+        HBox homeBar = new HBox(home);
+        homeBar.setPadding(new Insets(8, 8, 0, 8));
+        VBox masterTop = new VBox(homeBar, listBar, updateBar);
 
         fromNexus.setOnAction(event -> openBrowser());
         browser.setOnDownload((coordinate, classifier) -> onDownload.accept(coordinate, classifier));
@@ -185,7 +204,12 @@ public final class DashboardView extends BorderPane {
 
         list.setCellFactory(view -> new ListingCell());
         list.setPlaceholder(new Label("No managed knowledge bases downloaded"));
-        list.getSelectionModel().selectedItemProperty().addListener((observable, was, now) -> showDetail());
+        list.getSelectionModel().selectedItemProperty().addListener((observable, was, now) -> {
+            if (now != null) {
+                showingNotices = false;
+            }
+            showDetail();
+        });
         search.textProperty().addListener((observable, was, now) -> {
             String needle = now == null ? "" : now.strip().toLowerCase(Locale.ROOT);
             shown.setPredicate(family -> needle.isEmpty() || family.name().toLowerCase(Locale.ROOT).contains(needle)
@@ -195,6 +219,7 @@ public final class DashboardView extends BorderPane {
         unmanagedList.setPrefHeight(150);
         unmanagedList.getSelectionModel().selectedItemProperty().addListener((observable, was, now) -> {
             if (now != null) {
+                showingNotices = false;
                 list.getSelectionModel().clearSelection();
             }
             showDetail();
@@ -266,6 +291,7 @@ public final class DashboardView extends BorderPane {
         String keep = Optional.ofNullable(unmanagedList.getSelectionModel().getSelectedItem()).map(KnowledgeBase::name).orElse(null);
         unmanaged.setAll(entries);
         unmanagedPane.setText("Not managed (" + entries.size() + ")");
+        refreshNotices();
         unmanagedPane.setVisible(!entries.isEmpty());
         unmanaged.stream().filter(entry -> entry.name().equals(keep)).findFirst()
                 .ifPresent(entry -> unmanagedList.getSelectionModel().select(entry));
@@ -299,7 +325,9 @@ public final class DashboardView extends BorderPane {
      */
     public void setCatalog(NexusCatalog.Catalog catalog) {
         this.catalog = catalog;
+        catalogLoaded = true;
         browser.setCatalog(catalog, here());
+        refreshNotices();
     }
 
     /**
@@ -384,6 +412,7 @@ public final class DashboardView extends BorderPane {
         });
         kometMenu.setDisable(kometMenu.getItems().isEmpty());
         list.refresh();
+        refreshNotices();
         showDetail();
     }
 
@@ -397,6 +426,7 @@ public final class DashboardView extends BorderPane {
         statuses.put(name, status);
         list.refresh();
         updateBanner();
+        refreshNotices();
         selected().filter(family -> family.name().equals(name)).ifPresent(family -> showDetail());
     }
 
@@ -418,6 +448,7 @@ public final class DashboardView extends BorderPane {
      */
     public void setChangeSets(Path store, ChangeSetCheck.Finding finding) {
         changeSets.put(store, finding);
+        refreshNotices();
         selected().filter(family -> family.latest().map(KnowledgeBase::path).filter(store::equals).isPresent())
                 .ifPresent(family -> showDetail());
     }
@@ -498,6 +529,154 @@ public final class DashboardView extends BorderPane {
         BorderPane.setMargin(text, new Insets(0, 12, 0, 12));
         BorderPane.setMargin(log, new Insets(8, 12, 12, 12));
         return pane;
+    }
+
+    /**
+     * Shows the landing page: the notices, in place of a knowledge base's detail.
+     */
+    public void showNotices() {
+        showingNotices = true;
+        list.getSelectionModel().clearSelection();
+        unmanagedList.getSelectionModel().clearSelection();
+        showDetail();
+    }
+
+    /**
+     * Whether the landing page is shown.
+     *
+     * @return {@code true} when the notices are
+     */
+    public boolean showingNotices() {
+        return showingNotices;
+    }
+
+    /**
+     * The notices the landing page shows, most urgent first.
+     *
+     * @return the notices
+     */
+    public List<Notice> notices() {
+        return notices;
+    }
+
+    /**
+     * Records the sync state of the git repositories inside a store.
+     *
+     * @param store    the store's folder
+     * @param statuses its repositories' states; none when it holds no repository
+     */
+    public void setSync(Path store, List<RepositorySync.Status> statuses) {
+        sync.put(store, List.copyOf(statuses));
+        refreshNotices();
+    }
+
+    /**
+     * Records when Nexus was last asked, and whether that worked.
+     *
+     * @param freshness when, and whether it was current
+     */
+    public void setNexusChecked(Notice.Freshness freshness) {
+        nexusChecked = Optional.of(freshness);
+        refreshNotices();
+    }
+
+    /**
+     * Which notices the person dismissed.
+     *
+     * @param dismissed whether a notice's id was dismissed
+     */
+    public void setDismissed(Predicate<String> dismissed) {
+        this.dismissed = dismissed;
+        refreshNotices();
+    }
+
+    /**
+     * What dismissing a notice does, given its id; the notices are recomputed after.
+     *
+     * @param action the action
+     */
+    public void setOnDismiss(Consumer<String> action) {
+        onDismiss = action;
+    }
+
+    private void refreshNotices() {
+        notices = Notices.compute(new Notices.Inputs(families, List.copyOf(unmanaged), statuses, nexusChecked, changeSets, komets, kometRelease,
+                catalogLoaded ? Optional.of(catalog) : Optional.empty(), sync, Instant.now()), dismissed);
+        long atRisk = notices.stream().filter(notice -> notice.urgency() == Notice.Urgency.AT_RISK).count();
+        home.setText(notices.isEmpty() ? "Notices" : "Notices  ·  " + notices.size()
+                + (atRisk == 0 ? "" : "  (" + atRisk + " at risk)"));
+        home.setStyle(atRisk > 0 ? PROBLEM : notices.isEmpty() ? "" : ATTENTION);
+        if (showingNotices && unmanagedList.getSelectionModel().getSelectedItem() == null) {
+            showDetail();
+        }
+    }
+
+    private void showNoticesPane() {
+        Label title = new Label("Notices");
+        title.setStyle("-fx-font-size: 20px; -fx-font-weight: bold;");
+        detail.getChildren().add(title);
+        if (notices.isEmpty()) {
+            detail.getChildren().add(muted(families.isEmpty()
+                    ? "No knowledge bases downloaded. Get one from Nexus to begin." : "Nothing needs your attention."));
+        }
+        notices.forEach(notice -> detail.getChildren().add(noticeCard(notice)));
+        detail.getChildren().add(muted(nexusChecked
+                .map(checked -> checked.current() ? "Nexus checked " + WHEN.format(checked.checkedAt())
+                        : "Nexus could not be reached; what it showed as of " + WHEN.format(checked.checkedAt()))
+                .orElse("Nexus not checked yet")));
+    }
+
+    private Node noticeCard(Notice notice) {
+        Label heading = new Label(notice.title());
+        heading.setStyle("-fx-font-weight: bold;");
+        heading.setWrapText(true);
+        VBox text = new VBox(2, heading);
+        if (!notice.detail().isBlank()) {
+            text.getChildren().add(muted(notice.detail()));
+        }
+        notice.freshness().ifPresent(freshness -> {
+            Label checked = muted(freshness.current() ? "checked " + WHEN.format(freshness.checkedAt())
+                    : "as of " + WHEN.format(freshness.checkedAt()) + "; the last check failed");
+            checked.setStyle("-fx-font-size: 11px;" + MUTED);
+            text.getChildren().add(checked);
+        });
+        HBox.setHgrow(text, Priority.ALWAYS);
+        text.setMaxWidth(Double.MAX_VALUE);
+        HBox row = new HBox(10, text);
+        row.setAlignment(Pos.CENTER_LEFT);
+        notice.action().ifPresent(action -> {
+            Button button = new Button(action.label());
+            button.setMinWidth(Region.USE_PREF_SIZE);
+            button.setOnAction(event -> act(action));
+            row.getChildren().add(button);
+        });
+        Hyperlink dismiss = new Hyperlink("Dismiss");
+        dismiss.setMinWidth(Region.USE_PREF_SIZE);
+        dismiss.setOnAction(event -> {
+            onDismiss.accept(notice.id());
+            refreshNotices();
+        });
+        row.getChildren().add(dismiss);
+        row.setPadding(new Insets(8, 10, 8, 10));
+        row.setStyle("-fx-background-radius: 6; -fx-background-color: " + switch (notice.urgency()) {
+            case AT_RISK -> "#fdecea;";
+            case ACTION -> "#fff3e0;";
+            case NEWS -> "#eef3f8;";
+        });
+        return row;
+    }
+
+    private void act(NoticeAction action) {
+        switch (action) {
+            case NoticeAction.Download(Coordinate coordinate, String classifier) -> onDownload.accept(coordinate, classifier);
+            case NoticeAction.UpgradeChangeSets(KnowledgeBase store) -> LauncherChoice.chooseForUpgrade(komets, store)
+                    .ifPresentOrElse(komet -> confirmUpgrade(komet, store, changeSets(store.path())),
+                            () -> setMessage("Upgrading change sets needs Komet " + LauncherChoice.UPGRADE_CHANGE_SETS_SINCE
+                                    + " or later"));
+            case NoticeAction.InstallKomet(KometRelease release) -> onInstallKomet.accept(release);
+            case NoticeAction.Show(String family) -> select(family);
+            case NoticeAction.Browse() -> openBrowser();
+        }
     }
 
     /**
@@ -682,6 +861,10 @@ public final class DashboardView extends BorderPane {
                 : byNameOrder;
         listings.setAll(families.stream().sorted(order).toList());
         updateBanner();
+        refreshNotices();
+        if (showingNotices && keep == null) {
+            return;
+        }
         Optional<KnowledgeBaseFamily> again = shown.stream().filter(family -> family.name().equals(keep)).findFirst()
                 .or(() -> shown.stream().findFirst());
         again.ifPresentOrElse(family -> list.getSelectionModel().select(family), this::showDetail);
@@ -696,6 +879,10 @@ public final class DashboardView extends BorderPane {
         KnowledgeBase loose = unmanagedList.getSelectionModel().getSelectedItem();
         if (loose != null) {
             showUnmanaged(loose);
+            return;
+        }
+        if (showingNotices) {
+            showNoticesPane();
             return;
         }
         Optional<KnowledgeBaseFamily> chosen = selected();

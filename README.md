@@ -33,7 +33,10 @@ The design is the `dev-ike-dashboard` topic in `ike-lab-documents`.
 - `ike-dashboard-app`: the window. It lists the knowledge bases in `~/Solor` with what each store
   says about itself, asks Nexus whether a newer build is deployed, lists the Komet versions
   installed, and opens a knowledge base in a chosen Komet as an independent process. Also a headless
-  `DashboardCommand` (`list`, `check`, `komets`, `download <g:a:v> <classifier>`).
+  `DashboardCommand` (`list`, `check`, `notices`, `komets`, `download <g:a:v> <classifier>`). Its first
+  screen is Notices: one card per finding of its checks (newer builds, knowledge bases not yet downloaded,
+  change sets to upgrade, a newer Komet, the sync state of the git repositories inside each store),
+  work at risk first, each with one action.
 
 ## Run
 

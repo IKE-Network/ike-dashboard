@@ -23,10 +23,17 @@ import network.ike.dashboard.download.RepositoryHttpClients;
 
 import java.net.http.HttpClient;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.prefs.Preferences;
 
 /**
@@ -34,16 +41,34 @@ import java.util.prefs.Preferences;
  * {@code ~/Solor} and those Nexus has, asks Nexus whether newer builds exist, and opens any of them
  * in an installed Komet as an independent process. Its design is the {@code dev-ike-dashboard} topic
  * in {@code ike-lab-documents}.
+ *
+ * <p>It uses the network whenever it can and fails gracefully without it (decision 14): what needs the
+ * network, Nexus and the remotes of the repositories inside stores, is checked on start and every
+ * {@link #NETWORK_CHECK_INTERVAL} after; a check that fails keeps what the last one found, shown as of
+ * then.
  */
 public final class DashboardApp extends Application {
 
     private static final String SORT_RECENT = "sortRecent";
+
+    /** How often what needs the network is checked again while the dashboard runs. */
+    static final Duration NETWORK_CHECK_INTERVAL = Duration.ofHours(1);
 
     private final ExecutorService work = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "ike-dashboard-work");
         thread.setDaemon(true);
         return thread;
     });
+    private final ScheduledExecutorService clock = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "ike-dashboard-clock");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private final Optional<RepositorySync.Git> git = RepositorySync.Git.find();
+    private final Map<Path, Notice.Freshness> remoteChecked = new ConcurrentHashMap<>();
+    private volatile List<KnowledgeBaseFamily> current = List.of();
+    private volatile Instant nexusChecked;
+    private final Map<String, BuildStatus> lastStatuses = new ConcurrentHashMap<>();
     private DashboardSettings settings;
     private OpenHistory history;
     private DashboardView view;
@@ -80,14 +105,20 @@ public final class DashboardApp extends Application {
         view.setOnUpgradeChangeSets(this::upgradeChangeSets);
         view.setOnReveal(path -> run(() -> Finder.reveal(path), "Could not show " + path));
         view.setOnOpenFile(path -> run(() -> Finder.open(path), "Could not open " + path));
+        NoticeDismissals dismissals = NoticeDismissals.current();
+        view.setDismissed(dismissals::dismissed);
+        view.setOnDismiss(dismissals::dismiss);
         stage.setTitle("IKE Dashboard");
         stage.setScene(new Scene(view, 1080, 640));
         stage.show();
         refresh();
+        long interval = NETWORK_CHECK_INTERVAL.toMinutes();
+        clock.scheduleAtFixedRate(() -> work.submit(() -> checkNetwork(current)), interval, interval, TimeUnit.MINUTES);
     }
 
     @Override
     public void stop() {
+        clock.shutdownNow();
         work.shutdownNow();
     }
 
@@ -118,14 +149,82 @@ public final class DashboardApp extends Application {
                 Platform.runLater(() -> view.setMessage("Could not read " + settings.solor() + ": " + e.getMessage()));
                 return;
             }
+            current = families;
             checkChangeSets(families);
-            checkNexus(families);
+            checkNetwork(families);
         });
     }
 
-    /** Runs on the work thread: the newer-build check for each knowledge base. */
+    /**
+     * Runs on the work thread: everything that needs the network. Nexus first, for newer builds, a newer
+     * Komet and what is not yet downloaded; then each store's repositories against their remotes.
+     */
+    private void checkNetwork(List<KnowledgeBaseFamily> families) {
+        checkNexus(families);
+        checkCatalog();
+        checkSync(families);
+    }
+
+    /** Runs on the work thread: what Nexus offers, for the notices of knowledge bases not yet downloaded. */
+    private void checkCatalog() {
+        try {
+            NexusCatalog.Catalog catalog = NexusCatalog.catalog(RepositoryHttpClients.newClient(),
+                    DashboardCommand.access(settings));
+            Platform.runLater(() -> view.setCatalog(catalog));
+        } catch (Exception e) {
+            // The notices keep what the last catalog showed; checkNexus has already said Nexus failed.
+        }
+    }
+
+    /**
+     * Runs on the work thread: the sync state of every git repository inside each store, first from its
+     * files, then against its remote.
+     */
+    private void checkSync(List<KnowledgeBaseFamily> families) {
+        if (git.isEmpty()) {
+            return;
+        }
+        for (KnowledgeBaseFamily family : families) {
+            Optional<KnowledgeBase> latest = family.latest().filter(copy -> copy.kind().opensInKomet());
+            if (latest.isEmpty()) {
+                continue;
+            }
+            Path store = latest.get().path();
+            try {
+                List<RepositorySync.Status> local = new ArrayList<>();
+                for (RepositorySync.Repository repository : RepositorySync.find(store)) {
+                    local.add(RepositorySync.local(git.get(), repository));
+                }
+                List<RepositorySync.Status> shown = List.copyOf(local);
+                Platform.runLater(() -> view.setSync(store, shown));
+                List<RepositorySync.Status> checked = new ArrayList<>();
+                Instant now = Instant.now();
+                for (RepositorySync.Status status : local) {
+                    Path folder = status.repository().folder();
+                    RepositorySync.Status remote = RepositorySync.remote(git.get(), status,
+                            Optional.ofNullable(remoteChecked.get(folder)), now);
+                    remote.freshness().filter(Notice.Freshness::current).ifPresent(fresh -> remoteChecked.put(folder, fresh));
+                    checked.add(remote);
+                }
+                List<RepositorySync.Status> answered = List.copyOf(checked);
+                Platform.runLater(() -> view.setSync(store, answered));
+            } catch (Exception e) {
+                Platform.runLater(() -> view.setMessage("Could not read the repositories in " + family.name() + ": "
+                        + e.getMessage()));
+            }
+        }
+    }
+
+    /**
+     * Runs on the work thread: the newer-build check for each knowledge base, and the newest Komet. A
+     * knowledge base whose check fails keeps the status the last check found, and Nexus counts as
+     * reached only when some check was answered, so offline the notices show the last findings as of
+     * then rather than errors.
+     */
     private void checkNexus(List<KnowledgeBaseFamily> families) {
         int newer = 0;
+        int answered = 0;
+        int failed = 0;
         String problem = null;
         try {
             HttpClient http = RepositoryHttpClients.newClient();
@@ -134,13 +233,34 @@ public final class DashboardApp extends Application {
             for (KnowledgeBaseFamily family : families) {
                 BuildStatus status = family.latestIdentified().map(check::check)
                         .orElse(BuildStatus.of(BuildStatus.State.UNIDENTIFIED, "no copy says which build it is"));
+                if (status.state() == BuildStatus.State.ERROR) {
+                    failed++;
+                    problem = "could not check Nexus: " + status.detail();
+                    BuildStatus last = lastStatuses.get(family.name());
+                    if (last != null) {
+                        status = last;
+                    }
+                } else {
+                    answered++;
+                    lastStatuses.put(family.name(), status);
+                }
                 if (status.state() == BuildStatus.State.NEWER) {
                     newer++;
                 }
-                Platform.runLater(() -> view.setStatus(family.name(), status));
+                BuildStatus shown = status;
+                Platform.runLater(() -> view.setStatus(family.name(), shown));
             }
         } catch (Exception e) {
+            failed++;
             problem = "could not check Nexus: " + e.getMessage();
+        }
+        if (answered > 0 || failed == 0) {
+            nexusChecked = Instant.now();
+            Notice.Freshness fresh = new Notice.Freshness(nexusChecked, true);
+            Platform.runLater(() -> view.setNexusChecked(fresh));
+        } else if (nexusChecked != null) {
+            Notice.Freshness stale = new Notice.Freshness(nexusChecked, false);
+            Platform.runLater(() -> view.setNexusChecked(stale));
         }
         try {
             Optional<KometRelease> release = KometReleases.newest(RepositoryHttpClients.newClient());

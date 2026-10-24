@@ -21,7 +21,11 @@ import network.ike.dashboard.download.RepositoryHttpClients;
 import java.io.PrintStream;
 import java.net.http.HttpClient;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Locale;
 
@@ -32,6 +36,7 @@ import java.util.Locale;
  * <pre>
  * list                                  the knowledge bases in ~/Solor
  * check                                 the same, with the newer-build check against Nexus
+ * notices                               the landing page's notices, with every check the window makes
  * komets                                the Komet versions installed
  * nexus                                 the knowledge bases Nexus offers
  * komet-latest [repository-url]         the newest Komet build: Nexus's komet-app, else GitHub's
@@ -57,6 +62,7 @@ public final class DashboardCommand {
         switch (command) {
             case "list" -> list(out, settings, false);
             case "check" -> list(out, settings, true);
+            case "notices" -> notices(out, settings);
             case "komets" -> komets(out, settings);
             case "nexus" -> nexus(out, settings);
             case "komet-latest" -> kometLatest(out, args.length > 1 ? args[1] : null).ifPresentOrElse(
@@ -78,7 +84,7 @@ public final class DashboardCommand {
                 download(out, settings, Coordinate.parse(args[1]), args[2]);
             }
             default -> throw new IllegalArgumentException("Unknown command " + command
-                    + "; use list, check, komets or download");
+                    + "; use list, check, notices, komets or download");
         }
     }
 
@@ -114,6 +120,61 @@ public final class DashboardCommand {
             }
         }
         out.println("* the bold row in the window: the newest copy Komet can open");
+    }
+
+    private static void notices(PrintStream out, DashboardSettings settings) throws Exception {
+        List<KnowledgeBase> knowledgeBases = KnowledgeBaseScanner.scan(settings.solor());
+        List<KnowledgeBaseFamily> families = KnowledgeBaseFamily.managed(knowledgeBases);
+        List<KometInstallation> komets = KometInstallations.find(KometInstallations.defaultRoots(
+                Path.of(System.getProperty("user.home")), settings.installLocation()));
+        HttpClient http = RepositoryHttpClients.newClient();
+        RepositoryAccess access = access(settings);
+        NewerBuildCheck newer = new NewerBuildCheck(http, access);
+        Map<String, BuildStatus> statuses = new HashMap<>();
+        Map<Path, ChangeSetCheck.Finding> changeSets = new HashMap<>();
+        Map<Path, List<RepositorySync.Status>> sync = new HashMap<>();
+        Optional<RepositorySync.Git> git = RepositorySync.Git.find();
+        Instant now = Instant.now();
+        for (KnowledgeBaseFamily family : families) {
+            family.latestIdentified().map(newer::check).ifPresent(status -> statuses.put(family.name(), status));
+            Optional<KnowledgeBase> latest = family.latest().filter(copy -> copy.kind().opensInKomet());
+            if (latest.isPresent()) {
+                changeSets.put(latest.get().path(), ChangeSetCheck.check(latest.get().path()));
+                List<RepositorySync.Status> states = new ArrayList<>();
+                if (git.isPresent()) {
+                    for (RepositorySync.Repository repository : RepositorySync.find(latest.get().path())) {
+                        states.add(RepositorySync.remote(git.get(), RepositorySync.local(git.get(), repository),
+                                Optional.empty(), now));
+                    }
+                }
+                sync.put(latest.get().path(), states);
+            }
+        }
+        Optional<NexusCatalog.Catalog> catalog;
+        try {
+            catalog = Optional.of(NexusCatalog.catalog(http, access));
+        } catch (Exception e) {
+            out.println("Could not ask Nexus what it offers: " + e.getMessage());
+            catalog = Optional.empty();
+        }
+        Optional<KometRelease> release;
+        try {
+            release = KometReleases.newest(http);
+        } catch (Exception e) {
+            out.println("Could not look for a newer Komet: " + e.getMessage());
+            release = Optional.empty();
+        }
+        List<Notice> notices = Notices.compute(new Notices.Inputs(families, KnowledgeBaseFamily.unmanaged(knowledgeBases), statuses,
+                Optional.of(new Notice.Freshness(now, true)), changeSets, komets, release, catalog, sync, now),
+                NoticeDismissals.current()::dismissed);
+        out.printf("%d notices%s%n", notices.size(), git.isPresent() ? "" : " (no git found: repository sync not checked)");
+        for (Notice notice : notices) {
+            out.printf("%-8s %s%n", notice.urgency(), notice.title());
+            if (!notice.detail().isBlank()) {
+                out.printf("         %s%n", notice.detail());
+            }
+            notice.action().ifPresent(action -> out.printf("         [%s]%n", action.label()));
+        }
     }
 
     private static String opensWith(List<KometInstallation> komets, KnowledgeBase knowledgeBase) {
