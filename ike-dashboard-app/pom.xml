@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.1.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.1.0 https://maven.apache.org/xsd/maven-4.1.0.xsd">
+    <modelVersion>4.1.0</modelVersion>
+
+    <parent>
+        <groupId>network.ike.dashboard</groupId>
+        <artifactId>ike-dashboard</artifactId>
+    </parent>
+
+    <artifactId>ike-dashboard-app</artifactId>
+    <packaging>jar</packaging>
+
+    <name>IKE Dashboard App</name>
+    <description>
+        The IKE Dashboard window: the knowledge bases in ~/Solor with what each store says about
+        itself, a newer-build check against Nexus, the Komet versions installed, and the launch of
+        a Komet on a knowledge base as an independent process. Also a headless command for the
+        same list, check and download.
+    </description>
+
+    <properties>
+        <!-- Komet's working set is on JavaFX 27 (komet-bom). -->
+        <javafx.version>27</javafx.version>
+        <openjfx-monocle.version>21.0.2-jpms</openjfx-monocle.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>network.ike.dashboard</groupId>
+            <artifactId>ike-dashboard-download</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>network.ike.dashboard</groupId>
+            <artifactId>ike-dashboard-journal</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-controls</artifactId>
+            <version>${javafx.version}</version>
+        </dependency>
+        <!-- The download code logs through SLF4J; the dashboard sends it to java.util.logging. -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-jdk14</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Headless JavaFX, so a test renders the window to an image without a display. -->
+        <dependency>
+            <groupId>one.jpro.platform.jpms</groupId>
+            <artifactId>openjfx-monocle</artifactId>
+            <version>${openjfx-monocle.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-maven-plugin</artifactId>
+                <version>0.0.8</version>
+                <configuration>
+                    <mainClass>network.ike.dashboard.app/network.ike.dashboard.app.DashboardApp</mainClass>
+                    <options>
+                        <option>--enable-preview</option>
+                        <option>--enable-native-access=javafx.graphics</option>
+                    </options>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -30,6 +30,21 @@ The design is the `dev-ike-dashboard` topic in `ike-lab-documents`.
   </extensions>
   ```
 
+- `ike-dashboard-app`: the window. It lists the knowledge bases in `~/Solor` with what each store
+  says about itself, asks Nexus whether a newer build is deployed, lists the Komet versions
+  installed, and opens a knowledge base in a chosen Komet as an independent process. Also a headless
+  `DashboardCommand` (`list`, `check`, `komets`, `download <g:a:v> <classifier>`).
+
+## Run
+
+```bash
+./mvnw install -DskipTests
+./mvnw -pl ike-dashboard-app javafx:run
+```
+
+The Nexus check reads the `ike-restricted` login from `~/.m2/settings.xml`, filling `${env.…}`
+placeholders from the environment, so run it from a shell that has them.
+
 ## Build
 
 ```bash

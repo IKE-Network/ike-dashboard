@@ -50,6 +50,14 @@
             <artifactId>maven-core</artifactId>
             <version>${maven-core.version}</version>
             <scope>provided</scope>
+            <exclusions>
+                <!-- Maven's own SLF4J provider; beside the test provider ike-parent adds, the test
+                     JVM would find two and warn. The running Maven supplies it. -->
+                <exclusion>
+                    <groupId>org.apache.maven</groupId>
+                    <artifactId>maven-logging</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <!-- Resolver events (RepositoryEvent) arrive through EventSpy. -->
         <dependency>

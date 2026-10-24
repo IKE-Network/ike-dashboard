@@ -1,0 +1,150 @@
+/*
+ * Copyright © 2026 IKE Network (support@ike.network)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package network.ike.dashboard.app;
+
+import network.ike.dashboard.download.DownloadListener;
+import network.ike.dashboard.download.RepositoryHttpClients;
+
+import java.io.PrintStream;
+import java.net.http.HttpClient;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Locale;
+
+/**
+ * The dashboard without its window, for scripts, machines without a display, and checking what the
+ * window shows:
+ *
+ * <pre>
+ * list                                  the knowledge bases in ~/Solor
+ * check                                 the same, with the newer-build check against Nexus
+ * komets                                the Komet versions installed
+ * download &lt;g:a:v&gt; &lt;classifier&gt;          the newest deploy of a store, into ~/Solor/&lt;artifactId&gt;
+ * </pre>
+ */
+public final class DashboardCommand {
+
+    private DashboardCommand() {
+    }
+
+    /**
+     * Runs one command.
+     *
+     * @param args the command and its arguments
+     * @throws Exception if the command fails
+     */
+    public static void main(String[] args) throws Exception {
+        PrintStream out = System.out;
+        DashboardSettings settings = DashboardSettings.current();
+        String command = args.length == 0 ? "list" : args[0];
+        switch (command) {
+            case "list" -> list(out, settings, false);
+            case "check" -> list(out, settings, true);
+            case "komets" -> komets(out, settings);
+            case "download" -> {
+                if (args.length != 3) {
+                    throw new IllegalArgumentException("download <groupId:artifactId:version> <classifier>");
+                }
+                download(out, settings, Coordinate.parse(args[1]), args[2]);
+            }
+            default -> throw new IllegalArgumentException("Unknown command " + command
+                    + "; use list, check, komets or download");
+        }
+    }
+
+    private static void list(PrintStream out, DashboardSettings settings, boolean check) throws Exception {
+        List<KnowledgeBase> knowledgeBases = KnowledgeBaseScanner.scan(settings.solor());
+        NewerBuildCheck newer = check ? new NewerBuildCheck(RepositoryHttpClients.newClient(), access(settings)) : null;
+        out.printf("%d entries in %s%n", knowledgeBases.size(), settings.solor());
+        for (KnowledgeBase knowledgeBase : knowledgeBases) {
+            out.printf("%-40s %-22s %10s  %s%n", knowledgeBase.name(), knowledgeBase.kind().label(),
+                    size(knowledgeBase.sizeBytes()),
+                    knowledgeBase.coordinate().map(Coordinate::toString).orElse("unidentified"));
+            if (check && knowledgeBase.kind().opensInKomet()) {
+                BuildStatus status = newer.check(knowledgeBase);
+                out.printf("%-40s %s: %s%n", "", status.state().label(), status.detail());
+            }
+        }
+    }
+
+    private static void komets(PrintStream out, DashboardSettings settings) throws Exception {
+        List<KometInstallation> komets = KometInstallations.find(KometInstallations.defaultRoots(
+                Path.of(System.getProperty("user.home")), settings.installLocation()));
+        out.printf("%d Komet versions%n", komets.size());
+        for (KometInstallation komet : komets) {
+            out.printf("%-14s %s%n", komet.version(), komet.bundle());
+        }
+    }
+
+    private static void download(PrintStream out, DashboardSettings settings, Coordinate coordinate, String classifier)
+            throws Exception {
+        HttpClient http = RepositoryHttpClients.newClient();
+        Path store = StoreDownload.download(http, access(settings), coordinate, classifier, settings.solor(),
+                settings.localRepository(), new DownloadListener<>() {
+                    @Override
+                    public void updateValue(Path result) {
+                    }
+
+                    @Override
+                    public void updateMessage(String message) {
+                        if (message != null) {
+                            out.println(message);
+                        }
+                    }
+
+                    @Override
+                    public void updateTitle(String title) {
+                        if (title != null) {
+                            out.println(title);
+                        }
+                    }
+
+                    @Override
+                    public void updateProgress(double workDone, double max) {
+                    }
+                });
+        KnowledgeBase knowledgeBase = KnowledgeBaseScanner.inspect(store);
+        out.printf("%s: %s, %s, %s%n", store, knowledgeBase.kind().label(), size(knowledgeBase.sizeBytes()),
+                knowledgeBase.coordinate().map(Coordinate::toString).orElse("unidentified"));
+        knowledgeBase.attributes().forEach((name, value) -> out.printf("  %s: %s%n", name, value));
+    }
+
+    static RepositoryAccess access(DashboardSettings settings) throws Exception {
+        return RepositoryAccess.fromSettings(settings.repositoryUrl(), settings.serverId(),
+                Path.of(System.getProperty("user.home"), ".m2", "settings.xml"), System.getenv());
+    }
+
+    /**
+     * A size for people: bytes, KB, MB or GB, decimal.
+     *
+     * @param bytes the size
+     * @return the size, such as {@code 1.97 MB}
+     */
+    static String size(long bytes) {
+        if (bytes < 1_000) {
+            return bytes + " B";
+        }
+        String[] units = {"KB", "MB", "GB", "TB"};
+        double value = bytes;
+        int unit = -1;
+        while (value >= 1_000 && unit < units.length - 1) {
+            value /= 1_000;
+            unit++;
+        }
+        return String.format(Locale.ROOT, value >= 100 ? "%.0f %s" : value >= 10 ? "%.1f %s" : "%.2f %s",
+                value, units[unit]);
+    }
+}
