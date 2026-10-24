@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The usage journal's Maven side: a core extension, registered user-wide in ~/.m2/extensions.xml,
+  that records every artifact a build resolves into the local repository's usage journal at the
+  end of the build. It never deletes anything and never fails a build.
+
+  Collection rides the classic EventSpy surface, as ike-build-report-extension does: resolver
+  events (RepositoryEvent) arrive through it, and Maven 4's new API has no session-event SPI yet.
+  Registration is the hand-written sisu index at META-INF/sisu/javax.inject.Named.
+-->
+<project xmlns="http://maven.apache.org/POM/4.1.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.1.0 https://maven.apache.org/xsd/maven-4.1.0.xsd">
+    <modelVersion>4.1.0</modelVersion>
+
+    <parent>
+        <groupId>network.ike.dashboard</groupId>
+        <artifactId>ike-dashboard</artifactId>
+    </parent>
+
+    <artifactId>ike-dashboard-maven-extension</artifactId>
+    <packaging>jar</packaging>
+
+    <name>IKE Dashboard Maven Extension</name>
+    <description>
+        Maven core extension that records, at the end of every build, which files of the local
+        repository the build used, into the repository's usage journal. The dashboard's collector
+        reads the journal to tell used from unused when the file system cannot.
+    </description>
+
+    <properties>
+        <!-- Loaded into every Maven build on the machine, whatever JDK runs Maven: Java 21, no
+             preview features (see ike-dashboard-journal). -->
+        <java.version>21</java.version>
+        <!-- Compiled against the Maven 4 core the IKE extensions already compile against; the
+             running Maven supplies its own. -->
+        <maven-core.version>4.0.0-rc-5</maven-core.version>
+        <maven-resolver.version>2.0.13</maven-resolver.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>network.ike.dashboard</groupId>
+            <artifactId>ike-dashboard-journal</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <!-- Classic Maven core surface: EventSpy, ExecutionEvent. Provided by the running Maven. -->
+        <dependency>
+            <groupId>org.apache.maven</groupId>
+            <artifactId>maven-core</artifactId>
+            <version>${maven-core.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <!-- Resolver events (RepositoryEvent) arrive through EventSpy. -->
+        <dependency>
+            <groupId>org.apache.maven.resolver</groupId>
+            <artifactId>maven-resolver-api</artifactId>
+            <version>${maven-resolver.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>javax.inject</groupId>
+            <artifactId>javax.inject</artifactId>
+            <version>1</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <compilerArgs combine.self="override">
+                        <arg>-parameters</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+            <plugin>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <configuration>
+                    <additionalOptions combine.self="override"/>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

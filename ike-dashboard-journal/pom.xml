@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.1.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.1.0 https://maven.apache.org/xsd/maven-4.1.0.xsd">
+    <modelVersion>4.1.0</modelVersion>
+
+    <parent>
+        <groupId>network.ike.dashboard</groupId>
+        <artifactId>ike-dashboard</artifactId>
+    </parent>
+
+    <artifactId>ike-dashboard-journal</artifactId>
+    <packaging>jar</packaging>
+
+    <name>IKE Dashboard Journal</name>
+    <description>
+        The usage journal beside a Maven local repository: which files in it were used, by which
+        tool, on which day. Maven builds write it through ike-dashboard-maven-extension, the
+        dashboard writes it for its own downloads, and the dashboard's collector reads it to decide
+        what in the local repository has gone unused. JDK only.
+    </description>
+
+    <properties>
+        <!-- The Maven extension loads this module into every Maven build on the machine, whatever
+             JDK runs Maven, so it is compiled for Java 21 and without preview features: a class
+             file compiled with preview features loads only on the exact JDK it was built for. -->
+        <java.version>21</java.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <compilerArgs combine.self="override">
+                        <arg>-parameters</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+            <plugin>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <configuration>
+                    <additionalOptions combine.self="override"/>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -68,5 +68,7 @@
 
     <subprojects>
         <subproject>ike-dashboard-download</subproject>
+        <subproject>ike-dashboard-journal</subproject>
+        <subproject>ike-dashboard-maven-extension</subproject>
     </subprojects>
 </project>
