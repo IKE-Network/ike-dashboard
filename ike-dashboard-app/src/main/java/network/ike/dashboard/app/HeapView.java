@@ -139,7 +139,9 @@ final class HeapView {
         ButtonType reduced = new ButtonType("Open with " + HeapSizing.gb(smaller.total()), ButtonBar.ButtonData.OTHER);
         List<ButtonType> buttons = new ArrayList<>();
         buttons.add(ButtonType.CANCEL);
-        if (!fixed && smaller.heap() >= HeapSizing.GIB && smaller.total() < plan.need().total()) {
+        // A spined store holds all of its data on the heap, so it must fit: only Rocks is offered less.
+        boolean shrinks = store.kind() == StoreKind.ROCKS;
+        if (!fixed && shrinks && smaller.heap() >= HeapSizing.GIB && smaller.total() < plan.need().total()) {
             buttons.add(reduced);
         }
         if (plan.fit() == HeapSizing.Fit.NOT_BESIDE_RUNNING || fixed) {
@@ -161,13 +163,14 @@ final class HeapView {
                     .map(running -> "    " + running.text()).collect(Collectors.joining("\n"))).append("\n\n");
             content.append("Opened anyway, the Komets together can claim more memory than the machine has, and macOS "
                     + "swaps or one of them runs out.");
+        } else if (shrinks) {
+            content.append("Rocks keeps its data off the heap, so a smaller heap may open and browse it, and run out "
+                    + "under a heavier load.");
         } else {
-            content.append("A smaller heap may open and browse it, and run out under a heavier load.");
-            if (store.kind() != StoreKind.ROCKS) {
-                content.append(" A Rocks copy keeps its data off the heap: the rule asks ")
-                        .append(HeapSizing.gb(HeapSizing.need(HeapSizing.Rule.DEFAULTS, StoreKind.ROCKS, plan.data()).total()))
-                        .append(" for one.");
-            }
+            content.append("A spined store holds all of its data on the heap, so it does not open in less.");
+            content.append(" A Rocks copy keeps its data off the heap: the rule asks ")
+                    .append(HeapSizing.gb(HeapSizing.need(HeapSizing.Rule.DEFAULTS, StoreKind.ROCKS, plan.data()).total()))
+                    .append(" for one.");
         }
         if (fixed) {
             content.append("\n\nKomet ").append(komet.version())
