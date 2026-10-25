@@ -35,8 +35,8 @@ import static network.ike.dashboard.app.HeapSizing.GIB;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The heap rule of decision 10: a share of the store's data, budgeted against what is left on the
- * machine beside the Komets running.
+ * The heap rule of decision 10: one percentage of the store's database size per kind, budgeted against
+ * what is left on the machine beside the Komets running.
  */
 class HeapSizingTest {
 
@@ -63,11 +63,10 @@ class HeapSizingTest {
     }
 
     @Test
-    void aSpinedStoreGetsItsShareAndRoomToClassify() {
-        // 2 GB of data: 4 × 2 to browse, 6 × 2 to classify.
-        assertThat(HeapSizing.need(RULE, StoreKind.SPINED_64, 2 * GIB)).isEqualTo(new HeapSizing.Need(20 * GIB, 0));
-        HeapSizing.Rule browsing = new HeapSizing.Rule(4.0, 0.5, 0.1, 6.0, 8 * GIB, 8 * GIB, 0.15, false);
-        assertThat(HeapSizing.need(browsing, StoreKind.SPINED_64, 2 * GIB).heap()).isEqualTo(8 * GIB);
+    void aSpinedStoreGetsFourHundredPercentOfItsSize() {
+        assertThat(HeapSizing.need(RULE, StoreKind.SPINED_64, 3 * GIB)).isEqualTo(new HeapSizing.Need(12 * GIB, 0));
+        // 2.2 GB: 8.8, rounded up to whole gigabytes.
+        assertThat(HeapSizing.need(RULE, StoreKind.SPINED_64, Math.round(2.2 * GIB)).heap()).isEqualTo(9 * GIB);
     }
 
     @Test
@@ -78,10 +77,12 @@ class HeapSizingTest {
     }
 
     @Test
-    void aRocksStoreGetsLessHeapAndACache() {
-        // 13 GB of data: (0.5 + 6) × 13 = 84.5, rounded up to whole gigabytes; a tenth of it as cache.
+    void aRocksStoreGetsFiftyPercentOfItsSizeAndACacheApart() {
+        // 40 GB: half of it as heap, a tenth as cache.
+        assertThat(HeapSizing.need(RULE, StoreKind.ROCKS, 40 * GIB)).isEqualTo(new HeapSizing.Need(20 * GIB, 4 * GIB));
+        // 13 GB: 6.5 is below the floor.
         HeapSizing.Need need = HeapSizing.need(RULE, StoreKind.ROCKS, 13 * GIB);
-        assertThat(need.heap()).isEqualTo(85 * GIB);
+        assertThat(need.heap()).isEqualTo(8 * GIB);
         assertThat(need.cache()).isEqualTo(Math.round(1.3 * GIB));
         assertThat(HeapSizing.need(RULE, StoreKind.ROCKS, GIB).cache()).isEqualTo(HeapSizing.DEFAULT_CACHE);
     }
@@ -97,7 +98,7 @@ class HeapSizingTest {
         KnowledgeBase store = store("solor-kb", StoreKind.SPINED_64);
         HeapSizing.Plan alone = HeapSizing.plan(RULE, store, 2 * GIB, Optional.empty(), sizing, IDLE);
         assertThat(alone.fit()).isEqualTo(HeapSizing.Fit.FITS);
-        assertThat(alone.environment()).containsExactly(Map.entry("KOMET_MAX_HEAP", "20g"));
+        assertThat(alone.environment()).containsExactly(Map.entry("KOMET_MAX_HEAP", "8g"));
 
         // 128 GB less a 19.2 GB reserve leaves 108.8; three Komets claim 104 of it, so 4.8 is free.
         HeapSizing.Machine busy = new HeapSizing.Machine(128 * GIB, List.of(
@@ -129,7 +130,7 @@ class HeapSizingTest {
         HeapSizing.Machine machine = new HeapSizing.Machine(32 * GIB, List.of(
                 new HeapSizing.Running(1, Optional.empty(), 15 * GIB, 0)));
         KnowledgeBase rocks = store("pizza-kb", StoreKind.ROCKS);
-        // 1 GB of data: heap max(8, 6.5) = 8, cache 1, which just fits; with 8.5 free, the cache shrinks.
+        // 1 GB of data: heap max(8, 0.5) = 8, cache 1, which just fits; with 8.5 free, the cache shrinks.
         HeapSizing.Plan plan = HeapSizing.plan(RULE, rocks, GIB, Optional.empty(), sizing, machine);
         assertThat(plan.fit()).isEqualTo(HeapSizing.Fit.FITS);
         assertThat(plan.environment()).containsEntry("KOMET_MAX_HEAP", "8g")
@@ -148,7 +149,7 @@ class HeapSizingTest {
                 fixed, IDLE);
         assertThat(plan.source()).isEqualTo(HeapSizing.Source.FIXED_BY_KOMET);
         assertThat(plan.need().heap()).isEqualTo(HeapSizing.FIXED_HEAP);
-        assertThat(plan.computed().heap()).isEqualTo(20 * GIB);
+        assertThat(plan.computed().heap()).isEqualTo(8 * GIB);
         assertThat(plan.environment()).isEmpty();
     }
 
@@ -164,11 +165,11 @@ class HeapSizingTest {
     @Test
     void theRuleAndAStoresHeapAreKeptInThePreferences() throws IOException {
         assertThat(HeapSizing.Rule.read(node)).isEqualTo(RULE);
-        HeapSizing.Rule mine = new HeapSizing.Rule(3.0, 0.5, 0.1, 6.0, 8 * GIB, 16 * GIB, 0.15, false);
+        HeapSizing.Rule mine = new HeapSizing.Rule(3.0, 0.5, 0.1, 8 * GIB, 16 * GIB, 0.15);
         mine.write(node);
         assertThat(HeapSizing.Rule.read(node)).isEqualTo(mine);
         // A term equal to its default is not kept, so a later default reaches it.
-        assertThat(List.of(keys(node))).containsExactlyInAnyOrder("spined64Share", "reserveFloor", "budgetClassification");
+        assertThat(List.of(keys(node))).containsExactlyInAnyOrder("spined64Share", "reserveFloor");
 
         Preferences stores = node.node(HeapSizing.STORES_NODE);
         KnowledgeBase rocks = store("pizza-kb", StoreKind.ROCKS);

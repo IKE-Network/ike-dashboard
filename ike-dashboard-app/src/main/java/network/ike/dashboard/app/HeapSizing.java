@@ -29,11 +29,11 @@ import java.util.prefs.Preferences;
 
 /**
  * How much memory a Komet is launched with: decision 10 of the {@code dev-ike-dashboard} design
- * (IKE-Network/ike-issues#1324). The heap is a share of the store's data, one share for 64-bit spined
- * stores, which hold everything on the heap, and one for Rocks, which keeps its data in native memory
- * and gets a block cache beside the heap. Headroom for classification is added when the person budgets
- * for the reasoner. The rule budgets what is left on the machine, not the total: physical RAM less a
- * reserve for everything else, less what the Komets already running claim.
+ * (IKE-Network/ike-issues#1324). The heap is one percentage of the store's database size per kind
+ * (KEC, 2026-10-25): 400 % for a spined store, which holds everything on the heap, and 50 % for Rocks,
+ * which keeps its data in native memory and gets a block cache beside the heap, sized apart. No store
+ * gets less than a floor. The rule budgets what is left on the machine, not the total: physical RAM
+ * less a reserve for everything else, less what the Komets already running claim.
  *
  * <p>Every term is a default the person can override, kept in {@code java.util.prefs}, as can the
  * heap and cache of one store. The defaults are provisional until the calibration runs of the design
@@ -77,26 +77,23 @@ public final class HeapSizing {
     /**
      * The terms of the rule.
      *
-     * @param spined64Share         heap per byte of a 64-bit (or 32-bit) spined store's data
-     * @param rocksShare            heap per byte of a Rocks store's data
-     * @param cacheShare            Rocks block cache per byte of data
-     * @param classifyShare         heap added per byte of data when budgeting for classification
-     * @param minimumHeap           the least heap any store is launched with: Komet's own needs
-     * @param reserveFloor          the least the machine keeps for everything but Komet
-     * @param reserveShare          the share of physical RAM the machine keeps, when more than the floor
-     * @param budgetClassification  whether every launch has room for the reasoner
+     * @param spined64Share heap per byte of a 64-bit (or 32-bit) spined store's data
+     * @param rocksShare    heap per byte of a Rocks store's data
+     * @param cacheShare    Rocks block cache per byte of data
+     * @param minimumHeap   the least heap any store is launched with: Komet's own needs
+     * @param reserveFloor  the least the machine keeps for everything but Komet
+     * @param reserveShare  the share of physical RAM the machine keeps, when more than the floor
      */
-    public record Rule(double spined64Share, double rocksShare, double cacheShare, double classifyShare,
-                       long minimumHeap, long reserveFloor, double reserveShare, boolean budgetClassification) {
+    public record Rule(double spined64Share, double rocksShare, double cacheShare, long minimumHeap,
+                       long reserveFloor, double reserveShare) {
 
         /**
-         * The shipped defaults, provisional until calibrated. A 2 GB solor-kb spined store gets 8 GB
-         * to browse and 12 GB more to classify, 20 GB in all, below the 48 GB its assembly (an import
-         * and a classification in one JVM) is given; Rocks keeps its data off the heap, so a store
-         * of any size starts at the minimum and grows by half its data. The reserve is the larger of
-         * 8 GB and 15 % of physical RAM.
+         * The shipped defaults (KEC, 2026-10-25): spined 400 % and Rocks 50 % of the database size, at
+         * least 8 GB; a Rocks cache of 10 % of it, at least 1 GB. A 2 GB solor-kb spined store gets
+         * 8 GB, and a 10 GB Rocks store the same. The reserve is the larger of 8 GB and 15 % of physical
+         * RAM. The percentages stay provisional until measured use replaces them.
          */
-        public static final Rule DEFAULTS = new Rule(4.0, 0.5, 0.1, 6.0, 8 * GIB, 8 * GIB, 0.15, true);
+        public static final Rule DEFAULTS = new Rule(4.0, 0.5, 0.1, 8 * GIB, 8 * GIB, 0.15);
 
         /**
          * The rule as the person has it: each term overridden in the preferences, else the default.
@@ -109,11 +106,9 @@ public final class HeapSizing {
                     node.getDouble("spined64Share", DEFAULTS.spined64Share),
                     node.getDouble("rocksShare", DEFAULTS.rocksShare),
                     node.getDouble("cacheShare", DEFAULTS.cacheShare),
-                    node.getDouble("classifyShare", DEFAULTS.classifyShare),
                     node.getLong("minimumHeap", DEFAULTS.minimumHeap),
                     node.getLong("reserveFloor", DEFAULTS.reserveFloor),
-                    node.getDouble("reserveShare", DEFAULTS.reserveShare),
-                    node.getBoolean("budgetClassification", DEFAULTS.budgetClassification));
+                    node.getDouble("reserveShare", DEFAULTS.reserveShare));
         }
 
         /**
@@ -126,15 +121,9 @@ public final class HeapSizing {
             putDouble(node, "spined64Share", spined64Share, DEFAULTS.spined64Share);
             putDouble(node, "rocksShare", rocksShare, DEFAULTS.rocksShare);
             putDouble(node, "cacheShare", cacheShare, DEFAULTS.cacheShare);
-            putDouble(node, "classifyShare", classifyShare, DEFAULTS.classifyShare);
             putLong(node, "minimumHeap", minimumHeap, DEFAULTS.minimumHeap);
             putLong(node, "reserveFloor", reserveFloor, DEFAULTS.reserveFloor);
             putDouble(node, "reserveShare", reserveShare, DEFAULTS.reserveShare);
-            if (budgetClassification == DEFAULTS.budgetClassification) {
-                node.remove("budgetClassification");
-            } else {
-                node.putBoolean("budgetClassification", budgetClassification);
-            }
         }
 
         /**
@@ -365,8 +354,7 @@ public final class HeapSizing {
      */
     public static Need need(Rule rule, StoreKind kind, long data) {
         double share = kind == StoreKind.ROCKS ? rule.rocksShare() : rule.spined64Share();
-        double classify = rule.budgetClassification() ? rule.classifyShare() : 0;
-        long heap = roundUp(Math.max(rule.minimumHeap(), Math.round((share + classify) * data)));
+        long heap = roundUp(Math.max(rule.minimumHeap(), Math.round(share * data)));
         long cache = kind == StoreKind.ROCKS ? Math.max(DEFAULT_CACHE, Math.round(rule.cacheShare() * data)) : 0;
         return new Need(heap, cache);
     }

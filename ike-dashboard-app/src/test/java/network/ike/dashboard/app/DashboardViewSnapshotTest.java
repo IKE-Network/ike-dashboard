@@ -159,7 +159,7 @@ class DashboardViewSnapshotTest {
         assertThat(families).extracting(KnowledgeBaseFamily::displayName).containsExactly("Pizza Knowledge Base", "SOLOR");
         assertThat(view.status("pizza-kb").state()).isEqualTo(BuildStatus.State.NEWER);
         assertThat(memoryDetail.get(30, TimeUnit.SECONDS)).as("the heap of a Komet that fixes its own, beside one running")
-                .contains("Memory  42 GB heap, fixed by Komet 26.1016.346; the rule asks 20 GB  ·  fits beside what is running");
+                .contains("Memory  42 GB heap, fixed by Komet 26.1016.346; the rule asks 8 GB  ·  fits beside what is running");
         assertThat(unmanagedDetail.get()).as("why a store is not managed")
                 .anyMatch(text -> text.contains("icon META-INF/ike/icon.png is missing"));
         assertThat(view.browser().shown()).as("only described knowledge bases on Nexus")

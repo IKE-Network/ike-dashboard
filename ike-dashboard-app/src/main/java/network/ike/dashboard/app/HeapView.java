@@ -162,7 +162,7 @@ final class HeapView {
             content.append("Opened anyway, the Komets together can claim more memory than the machine has, and macOS "
                     + "swaps or one of them runs out.");
         } else {
-            content.append("A smaller heap may open and browse it, and run out when it classifies.");
+            content.append("A smaller heap may open and browse it, and run out under a heavier load.");
             if (store.kind() != StoreKind.ROCKS) {
                 content.append(" A Rocks copy keeps its data off the heap: the rule asks ")
                         .append(HeapSizing.gb(HeapSizing.need(HeapSizing.Rule.DEFAULTS, StoreKind.ROCKS, plan.data()).total()))
@@ -225,31 +225,25 @@ final class HeapView {
             forStore.addRow(2, new Label("Cache, GB"), cache);
         }
 
-        TextField spined = number(rule.spined64Share());
-        TextField rocksShare = number(rule.rocksShare());
-        TextField cacheShare = number(rule.cacheShare());
-        TextField classify = number(rule.classifyShare());
-        CheckBox budget = new CheckBox("Leave room to classify");
-        budget.setSelected(rule.budgetClassification());
+        TextField spined = number(rule.spined64Share() * 100);
+        TextField rocksShare = number(rule.rocksShare() * 100);
+        TextField cacheShare = number(rule.cacheShare() * 100);
         TextField minimum = number(rule.minimumHeap() / (double) HeapSizing.GIB);
         TextField reserveFloor = number(rule.reserveFloor() / (double) HeapSizing.GIB);
         TextField reserveShare = number(rule.reserveShare() * 100);
         GridPane every = grid();
-        every.addRow(0, new Label("Heap per GB of a spined store's data"), spined);
-        every.addRow(1, new Label("Heap per GB of a Rocks store's data"), rocksShare);
-        every.addRow(2, new Label("Rocks cache per GB of data"), cacheShare);
-        every.addRow(3, budget, classify);
-        every.addRow(4, new Label("Least heap, GB"), minimum);
-        every.addRow(5, new Label("Kept for everything else: at least, GB"), reserveFloor);
-        every.addRow(6, new Label("… or this % of the machine's memory"), reserveShare);
+        every.addRow(0, new Label("Heap, % of a spined store's size"), spined);
+        every.addRow(1, new Label("Heap, % of a Rocks store's size"), rocksShare);
+        every.addRow(2, new Label("Rocks cache, % of its size"), cacheShare);
+        every.addRow(3, new Label("Least heap, GB"), minimum);
+        every.addRow(4, new Label("Kept for everything else: at least, GB"), reserveFloor);
+        every.addRow(5, new Label("… or this % of the machine's memory"), reserveShare);
         Hyperlink defaults = new Hyperlink("Restore the defaults");
         defaults.setOnAction(event -> {
             HeapSizing.Rule shipped = HeapSizing.Rule.DEFAULTS;
-            spined.setText(text(shipped.spined64Share()));
-            rocksShare.setText(text(shipped.rocksShare()));
-            cacheShare.setText(text(shipped.cacheShare()));
-            classify.setText(text(shipped.classifyShare()));
-            budget.setSelected(shipped.budgetClassification());
+            spined.setText(text(shipped.spined64Share() * 100));
+            rocksShare.setText(text(shipped.rocksShare() * 100));
+            cacheShare.setText(text(shipped.cacheShare() * 100));
             minimum.setText(text(shipped.minimumHeap() / (double) HeapSizing.GIB));
             reserveFloor.setText(text(shipped.reserveFloor() / (double) HeapSizing.GIB));
             reserveShare.setText(text(shipped.reserveShare() * 100));
@@ -271,8 +265,8 @@ final class HeapView {
         Edit[] result = new Edit[1];
         dialog.getDialogPane().lookupButton(ButtonType.OK).addEventFilter(javafx.event.ActionEvent.ACTION, event -> {
             try {
-                HeapSizing.Rule edited = new HeapSizing.Rule(parse(spined), parse(rocksShare), parse(cacheShare),
-                        parse(classify), gib(minimum), gib(reserveFloor), parse(reserveShare) / 100, budget.isSelected());
+                HeapSizing.Rule edited = new HeapSizing.Rule(parse(spined) / 100, parse(rocksShare) / 100,
+                        parse(cacheShare) / 100, gib(minimum), gib(reserveFloor), parse(reserveShare) / 100);
                 Optional<HeapSizing.Need> storeHeap = useRule.isSelected() ? Optional.empty()
                         : Optional.of(new HeapSizing.Need(HeapSizing.roundUp(gib(heap)), rocks ? gib(cache) : 0));
                 if (storeHeap.filter(need -> need.heap() < HeapSizing.GIB).isPresent()) {
