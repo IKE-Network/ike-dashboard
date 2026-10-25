@@ -27,7 +27,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * test, and writes it to {@code target/dashboard-view.png} so a person can see what it shows: one line
  * per managed knowledge base on the left beside its icon, the rest folded into Not managed, the
  * selected one's detail on the right; a Not managed entry's detail goes to
- * {@code target/dashboard-not-managed.png}, the Nexus window to {@code target/nexus-browser.png}.
+ * {@code target/dashboard-not-managed.png}, the Nexus window to {@code target/nexus-browser.png}, and a
+ * store's memory line to {@code target/dashboard-memory.png}.
  */
 class DashboardViewSnapshotTest {
 
@@ -81,6 +82,10 @@ class DashboardViewSnapshotTest {
         CompletableFuture<WritableImage> nexus = new CompletableFuture<>();
         CompletableFuture<DashboardView> built = new CompletableFuture<>();
         CompletableFuture<List<String>> unmanagedDetail = new CompletableFuture<>();
+        CompletableFuture<List<String>> memoryDetail = new CompletableFuture<>();
+        CompletableFuture<WritableImage> memory = new CompletableFuture<>();
+        HeapSizing.Machine machine = new HeapSizing.Machine(128 * HeapSizing.GIB, List.of(
+                new HeapSizing.Running(1, Optional.of(solor.resolve("solor-kb")), 42 * HeapSizing.GIB, 0)));
         Platform.runLater(() -> {
             try {
                 DashboardView view = new DashboardView();
@@ -122,12 +127,27 @@ class DashboardViewSnapshotTest {
                         .map(node -> ((javafx.scene.control.Label) node).getText()).toList());
                 notManaged.complete(looseScene.snapshot(null));
 
+                DashboardView sized = new DashboardView();
+                sized.setKomets(List.of(komet));
+                sized.setFamilies(families);
+                sized.setHeapPlanner((chosen, store) -> Optional.of(HeapSizing.plan(HeapSizing.Rule.DEFAULTS, store,
+                        2 * HeapSizing.GIB, Optional.empty(), chosen, machine)));
+                sized.select("solor-kb");
+                Scene sizedScene = new Scene(sized, 1080, 480);
+                sized.applyCss();
+                sized.layout();
+                memoryDetail.complete(sized.lookupAll(".label").stream()
+                        .map(node -> ((javafx.scene.control.Label) node).getText()).toList());
+                memory.complete(sizedScene.snapshot(null));
+
                 Scene browserScene = new Scene(view.browser(), 720, 200);
                 view.browser().applyCss();
                 view.browser().layout();
                 nexus.complete(browserScene.snapshot(null));
             } catch (RuntimeException e) {
                 notManaged.completeExceptionally(e);
+                memory.completeExceptionally(e);
+                memoryDetail.completeExceptionally(e);
                 nexus.completeExceptionally(e);
                 unmanagedDetail.completeExceptionally(e);
             }
@@ -138,6 +158,8 @@ class DashboardViewSnapshotTest {
                 "*DeX-4-17-2026", "*DeX-4-17-2026-64bit-2", "DeX-2026-10-08-pb.zip", "pizza-kb-2026-10-01", "solor-kb-broken");
         assertThat(families).extracting(KnowledgeBaseFamily::displayName).containsExactly("Pizza Knowledge Base", "SOLOR");
         assertThat(view.status("pizza-kb").state()).isEqualTo(BuildStatus.State.NEWER);
+        assertThat(memoryDetail.get(30, TimeUnit.SECONDS)).as("the heap of a Komet that fixes its own, beside one running")
+                .contains("Memory  42 GB heap, fixed by Komet 26.1016.346; the rule asks 20 GB  ·  fits beside what is running");
         assertThat(unmanagedDetail.get()).as("why a store is not managed")
                 .anyMatch(text -> text.contains("icon META-INF/ike/icon.png is missing"));
         assertThat(view.browser().shown()).as("only described knowledge bases on Nexus")
@@ -150,6 +172,7 @@ class DashboardViewSnapshotTest {
         assertThat(png).isNotEmptyFile();
         write(notManaged.get(30, TimeUnit.SECONDS), Path.of("target", "dashboard-not-managed.png"));
         write(nexus.get(30, TimeUnit.SECONDS), Path.of("target", "nexus-browser.png"));
+        write(memory.get(30, TimeUnit.SECONDS), Path.of("target", "dashboard-memory.png"));
         CompletableFuture<Integer> icons = new CompletableFuture<>();
         Platform.runLater(() -> icons.complete(view.lookupAll(".image-view").size()));
         assertThat(icons.get(30, TimeUnit.SECONDS)).as("each managed line's icon and the detail's").isEqualTo(3);

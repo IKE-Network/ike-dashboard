@@ -21,6 +21,7 @@ import javafx.scene.Scene;
 import javafx.stage.Stage;
 import network.ike.dashboard.download.RepositoryHttpClients;
 
+import java.io.IOException;
 import java.net.http.HttpClient;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -72,6 +73,9 @@ public final class DashboardApp extends Application {
     private final Map<String, BuildStatus> lastStatuses = new ConcurrentHashMap<>();
     private DashboardSettings settings;
     private OpenHistory history;
+    private Preferences heapPreferences;
+    private volatile List<KometInstallation> komets = List.of();
+    private final Map<Path, Long> dataBytes = new ConcurrentHashMap<>();
     private DashboardView view;
     private volatile String selectAfterRefresh;
 
@@ -93,12 +97,15 @@ public final class DashboardApp extends Application {
         settings = DashboardSettings.current();
         history = OpenHistory.current();
         Preferences preferences = Preferences.userRoot().node(DashboardSettings.NODE);
+        heapPreferences = preferences.node(HeapSizing.NODE);
         view = new DashboardView();
         view.setLastOpened(history::lastOpened);
         view.setSortRecent(preferences.getBoolean(SORT_RECENT, false));
         view.setOnSortChange(recent -> preferences.putBoolean(SORT_RECENT, recent));
         view.setOnRefresh(this::refresh);
         view.setOnOpen(this::open);
+        view.setHeapPlanner((komet, knowledgeBase) -> Optional.of(heapPlan(komet, knowledgeBase)));
+        view.setOnEditHeap(this::editHeap);
         view.setOnDownload(this::download);
         view.setOnTrash(this::trash);
         view.setOnBrowse(this::loadCatalog);
@@ -135,6 +142,8 @@ public final class DashboardApp extends Application {
                 families = KnowledgeBaseFamily.managed(knowledgeBases);
                 List<KnowledgeBaseFamily> found = families;
                 List<KnowledgeBase> unmanaged = KnowledgeBaseFamily.unmanaged(knowledgeBases);
+                dataBytes.clear();
+                this.komets = komets;
                 Platform.runLater(() -> {
                     view.setKomets(komets);
                     view.setFamilies(found);
@@ -292,11 +301,13 @@ public final class DashboardApp extends Application {
 
     /** Upgrades a store's change sets in a Komet with no window, on a thread of its own, and shows the report. */
     private void upgradeChangeSets(KometInstallation komet, KnowledgeBase knowledgeBase) {
+        Map<String, String> environment = heapPlan(komet, knowledgeBase).environment();
         view.setUpgrading(knowledgeBase.path(), true);
         view.setMessage("Upgrading the change sets of " + knowledgeBase.name() + " in Komet " + komet.version() + " …");
         Thread.ofVirtual().name("ike-dashboard-upgrade").start(() -> {
             try {
-                KometLauncher.UpgradeRun run = KometLauncher.upgradeChangeSets(komet, knowledgeBase, settings.logFolder());
+                KometLauncher.UpgradeRun run = KometLauncher.upgradeChangeSets(komet, knowledgeBase, environment,
+                        settings.logFolder());
                 ChangeSetCheck.Finding finding = ChangeSetCheck.check(knowledgeBase.path());
                 Platform.runLater(() -> {
                     view.setUpgrading(knowledgeBase.path(), false);
@@ -400,15 +411,56 @@ public final class DashboardApp extends Application {
     }
 
     private void open(KometInstallation komet, KnowledgeBase knowledgeBase) {
+        HeapSizing.Plan plan = heapPlan(komet, knowledgeBase);
+        Optional<HeapSizing.Need> need = HeapView.confirm(view.getScene().getWindow(), knowledgeBase, komet, plan);
+        if (need.isEmpty()) {
+            view.setMessage("Did not open " + knowledgeBase.name());
+            return;
+        }
+        HeapSizing.Plan launched = need.get().equals(plan.need()) ? plan : plan.with(need.get());
         try {
-            Path log = KometLauncher.launch(komet, knowledgeBase, settings.logFolder());
+            Path log = KometLauncher.launch(komet, knowledgeBase, launched.environment(), settings.logFolder());
             history.opened(KnowledgeBaseFamily.familyName(knowledgeBase));
             view.setLastOpened(history::lastOpened);
             view.setLastLog(log);
-            view.setMessage("Opening " + knowledgeBase.name() + " in Komet " + komet.version());
+            view.setMessage("Opening " + knowledgeBase.name() + " in Komet " + komet.version() + " with "
+                    + launched.need().text());
+            view.heapChanged();
         } catch (Exception e) {
             view.setMessage("Could not start Komet " + komet.version() + ": " + e.getMessage());
         }
+    }
+
+    /**
+     * What a store is launched with in a Komet, on this machine as it is now: the rule and any override
+     * from the preferences, the store's data measured once per refresh, and the Komets running.
+     */
+    private HeapSizing.Plan heapPlan(KometInstallation komet, KnowledgeBase knowledgeBase) {
+        long data = dataBytes.computeIfAbsent(knowledgeBase.path(), path -> {
+            try {
+                return HeapSizing.dataBytes(knowledgeBase);
+            } catch (IOException e) {
+                return knowledgeBase.sizeBytes();
+            }
+        });
+        return HeapSizing.plan(HeapSizing.Rule.read(heapPreferences), knowledgeBase, data,
+                HeapSizing.override(heapPreferences.node(HeapSizing.STORES_NODE), knowledgeBase), komet,
+                HeapSizing.Machine.current(komets));
+    }
+
+    /** The Memory window for a store; what the person changes is kept in the preferences. */
+    private void editHeap(KnowledgeBase knowledgeBase) {
+        HeapSizing.Rule rule = HeapSizing.Rule.read(heapPreferences);
+        Preferences stores = heapPreferences.node(HeapSizing.STORES_NODE);
+        long data = dataBytes.getOrDefault(knowledgeBase.path(), knowledgeBase.sizeBytes());
+        HeapView.edit(view.getScene().getWindow(), knowledgeBase, rule, HeapSizing.override(stores, knowledgeBase),
+                HeapSizing.need(rule, knowledgeBase.kind(), data)).ifPresent(edit -> {
+            edit.rule().write(heapPreferences);
+            HeapSizing.setOverride(stores, knowledgeBase, edit.override());
+            view.heapChanged();
+            view.setMessage(edit.override().map(need -> knowledgeBase.name() + " opens with " + need.text())
+                    .orElse(knowledgeBase.name() + " opens with the rule's heap"));
+        });
     }
 
     private void run(Action action, String failure) {

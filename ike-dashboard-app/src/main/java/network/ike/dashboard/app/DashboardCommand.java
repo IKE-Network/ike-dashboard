@@ -38,6 +38,7 @@ import java.util.Locale;
  * check                                 the same, with the newer-build check against Nexus
  * notices                               the landing page's notices, with every check the window makes
  * komets                                the Komet versions installed
+ * heap                                  what each knowledge base opens with, beside the Komets running
  * nexus                                 the knowledge bases Nexus offers
  * komet-latest [repository-url]         the newest Komet build: Nexus's komet-app, else GitHub's
  * komet-install [folder] [repository-url] install it beside the others (default: the install location)
@@ -64,6 +65,7 @@ public final class DashboardCommand {
             case "check" -> list(out, settings, true);
             case "notices" -> notices(out, settings);
             case "komets" -> komets(out, settings);
+            case "heap" -> heap(out, settings);
             case "nexus" -> nexus(out, settings);
             case "komet-latest" -> kometLatest(out, args.length > 1 ? args[1] : null).ifPresentOrElse(
                     release -> out.printf("Komet %s from %s: %s (%s)%n", release.version(), release.source().label(),
@@ -84,7 +86,7 @@ public final class DashboardCommand {
                 download(out, settings, Coordinate.parse(args[1]), args[2]);
             }
             default -> throw new IllegalArgumentException("Unknown command " + command
-                    + "; use list, check, notices, komets or download");
+                    + "; use list, check, notices, komets, heap or download");
         }
     }
 
@@ -120,6 +122,36 @@ public final class DashboardCommand {
             }
         }
         out.println("* the bold row in the window: the newest copy Komet can open");
+    }
+
+    private static void heap(PrintStream out, DashboardSettings settings) throws Exception {
+        List<KnowledgeBaseFamily> families = KnowledgeBaseFamily.managed(KnowledgeBaseScanner.scan(settings.solor()));
+        List<KometInstallation> komets = KometInstallations.find(KometInstallations.defaultRoots(
+                Path.of(System.getProperty("user.home")), settings.installLocation()));
+        java.util.prefs.Preferences heap = java.util.prefs.Preferences.userRoot().node(DashboardSettings.NODE)
+                .node(HeapSizing.NODE);
+        HeapSizing.Rule rule = HeapSizing.Rule.read(heap);
+        HeapSizing.Machine machine = HeapSizing.Machine.current(komets);
+        out.printf("%s of memory, %s kept for everything else, %s claimed by %d Komet%s running%n",
+                HeapSizing.gb(machine.physical()), HeapSizing.gb(rule.reserve(machine.physical())),
+                HeapSizing.gb(machine.claimed()), machine.running().size(), machine.running().size() == 1 ? "" : "s");
+        machine.running().forEach(running -> out.printf("    %s%n", running.text()));
+        out.println(rule.equals(HeapSizing.Rule.DEFAULTS) ? "The rule: the defaults" : "The rule: " + rule);
+        for (KnowledgeBaseFamily family : families) {
+            Optional<KnowledgeBase> latest = family.latest();
+            Optional<KometInstallation> komet = latest.flatMap(copy -> LauncherChoice.choose(komets, copy));
+            if (latest.isEmpty() || komet.isEmpty()) {
+                continue;
+            }
+            KnowledgeBase copy = latest.get();
+            HeapSizing.Plan plan = HeapSizing.plan(rule, copy, HeapSizing.dataBytes(copy),
+                    HeapSizing.override(heap.node(HeapSizing.STORES_NODE), copy), komet.get(), machine);
+            out.printf("%-34s %-20s %9s data  %-26s %-18s %s%n", family.name(), copy.kind().label(),
+                    size(plan.data()), plan.need().text(), plan.fit().name().toLowerCase(Locale.ROOT),
+                    plan.environment().isEmpty() ? "Komet " + komet.get().version() + " fixes its heap"
+                            : plan.environment().entrySet().stream().map(entry -> entry.getKey() + "=" + entry.getValue())
+                            .collect(java.util.stream.Collectors.joining(" ")));
+        }
     }
 
     private static void notices(PrintStream out, DashboardSettings settings) throws Exception {

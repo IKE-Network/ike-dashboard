@@ -21,6 +21,7 @@ module network.ike.dashboard.app {
 
     requires javafx.controls;
     requires java.net.http;
+    requires jdk.management;
     requires java.prefs;
     requires java.xml;
     requires network.ike.dashboard.download;

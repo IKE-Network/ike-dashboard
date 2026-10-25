@@ -21,11 +21,15 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Starts a Komet on a knowledge base as an independent process, through the option Komet already
  * takes ({@code --kb=<path>}, {@code LaunchOptions} in komet-desktop). Komet asks for the user and
  * password itself. Its output goes to a log of its own, so the dashboard can quit while Komet runs.
+ * Its heap is the {@link HeapSizing} plan's, through the variables a Komet image's {@code launchKomet}
+ * takes ({@code KOMET_MAX_HEAP}, {@code KOMET_JAVA_OPTS}); a Komet whose launcher takes none starts at
+ * the heap it was built with.
  */
 public final class KometLauncher {
 
@@ -39,6 +43,26 @@ public final class KometLauncher {
     static final String REPORT_END = "----- end of report -----";
 
     private KometLauncher() {
+    }
+
+    /**
+     * Whether a Komet's launcher takes its heap from {@value HeapSizing#MAX_HEAP_VARIABLE}: a jlink
+     * image whose {@code bin/launchKomet} names the variable, which images built after
+     * IKE-Network/ike-issues#1324 do. An application bundle's launcher fixes its heap at build.
+     *
+     * @param komet the Komet
+     * @return {@code true} when the launch can size its heap
+     */
+    public static boolean takesHeap(KometInstallation komet) {
+        Path launcher = komet.executable();
+        if (!launcher.getFileName().toString().equals("launchKomet") || !Files.isRegularFile(launcher)) {
+            return false;
+        }
+        try {
+            return Files.readString(launcher).contains(HeapSizing.MAX_HEAP_VARIABLE);
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     /**
@@ -109,19 +133,22 @@ public final class KometLauncher {
      *
      * @param komet         the Komet
      * @param knowledgeBase the knowledge base
+     * @param environment   the variables sizing its heap ({@link HeapSizing.Plan#environment})
      * @param logFolder     where the run's output goes
      * @return what the run did
      * @throws IOException          if Komet cannot be started
      * @throws InterruptedException if the wait is interrupted
      */
-    public static UpgradeRun upgradeChangeSets(KometInstallation komet, KnowledgeBase knowledgeBase, Path logFolder)
+    public static UpgradeRun upgradeChangeSets(KometInstallation komet, KnowledgeBase knowledgeBase,
+                                               Map<String, String> environment, Path logFolder)
             throws IOException, InterruptedException {
         Files.createDirectories(logFolder);
         Path log = logFolder.resolve("komet-upgrade-" + knowledgeBase.name() + "-" + LocalDateTime.now().format(STAMP) + ".log");
-        Process process = new ProcessBuilder(upgradeCommand(komet, knowledgeBase))
+        ProcessBuilder builder = new ProcessBuilder(upgradeCommand(komet, knowledgeBase))
                 .redirectErrorStream(true)
-                .redirectOutput(log.toFile())
-                .start();
+                .redirectOutput(log.toFile());
+        builder.environment().putAll(environment);
+        Process process = builder.start();
         int status = process.waitFor();
         return new UpgradeRun(status, report(Files.readString(log)), log);
     }
@@ -151,17 +178,20 @@ public final class KometLauncher {
      *
      * @param komet         the Komet to start
      * @param knowledgeBase the knowledge base to open
+     * @param environment   the variables sizing its heap ({@link HeapSizing.Plan#environment})
      * @param logFolder     where its log goes
      * @return the log file the process writes to
      * @throws IOException if the process cannot be started
      */
-    public static Path launch(KometInstallation komet, KnowledgeBase knowledgeBase, Path logFolder) throws IOException {
+    public static Path launch(KometInstallation komet, KnowledgeBase knowledgeBase, Map<String, String> environment,
+                              Path logFolder) throws IOException {
         Files.createDirectories(logFolder);
         Path log = logFolder.resolve("komet-" + knowledgeBase.name() + "-" + LocalDateTime.now().format(STAMP) + ".log");
-        new ProcessBuilder(command(komet, knowledgeBase))
+        ProcessBuilder builder = new ProcessBuilder(command(komet, knowledgeBase))
                 .redirectErrorStream(true)
-                .redirectOutput(log.toFile())
-                .start();
+                .redirectOutput(log.toFile());
+        builder.environment().putAll(environment);
+        builder.start();
         return log;
     }
 }

@@ -76,6 +76,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -137,6 +138,9 @@ public final class DashboardView extends BorderPane {
     private Path lastLog;
 
     private BiConsumer<KometInstallation, KnowledgeBase> onOpen = (komet, knowledgeBase) -> { };
+    private BiFunction<KometInstallation, KnowledgeBase, Optional<HeapSizing.Plan>> heapPlanner =
+            (komet, knowledgeBase) -> Optional.empty();
+    private Consumer<KnowledgeBase> onEditHeap = knowledgeBase -> { };
     private BiConsumer<Coordinate, String> onDownload = (coordinate, classifier) -> { };
     private Consumer<List<KnowledgeBase>> onTrash = copies -> { };
     private Consumer<Path> onReveal = path -> { };
@@ -962,6 +966,34 @@ public final class DashboardView extends BorderPane {
     }
 
     /**
+     * Where a store's memory line comes from: what it is launched with in a Komet, on this machine now.
+     *
+     * @param planner the plan of a store in a Komet, or empty when it cannot be worked out
+     */
+    public void setHeapPlanner(BiFunction<KometInstallation, KnowledgeBase, Optional<HeapSizing.Plan>> planner) {
+        heapPlanner = planner;
+        if (!showingNotices) {
+            showDetail();
+        }
+    }
+
+    /**
+     * What Memory… does for a store: the window that overrides the rule or the store's heap.
+     *
+     * @param action given the store
+     */
+    public void setOnEditHeap(Consumer<KnowledgeBase> action) {
+        onEditHeap = action;
+    }
+
+    /** Draws the detail again, after the rule or a store's heap changed. */
+    public void heapChanged() {
+        if (!showingNotices) {
+            showDetail();
+        }
+    }
+
+    /**
      * What Download does, given the artifact and the classifier of the store.
      *
      * @param action the action
@@ -1196,6 +1228,8 @@ public final class DashboardView extends BorderPane {
         } else if (komet.get() != komets.getFirst()) {
             detail.getChildren().add(muted("Opens in Komet " + komet.get().version()));
         }
+        komet.flatMap(chosen -> heapPlanner.apply(chosen, copy))
+                .ifPresent(plan -> detail.getChildren().add(HeapView.line(plan, komet.get())));
         Label folder = muted("Folder  " + copy.path().getFileName());
         folder.setTooltip(new Tooltip(copy.path().toString()));
         detail.getChildren().add(folder);
@@ -1341,6 +1375,9 @@ public final class DashboardView extends BorderPane {
             });
             openWith.setDisable(openWith.getItems().isEmpty());
             items.add(openWith);
+            MenuItem memory = new MenuItem("Memory…");
+            memory.setOnAction(event -> onEditHeap.accept(copy));
+            items.add(memory);
         }
         MenuItem reveal = new MenuItem("Show in Finder");
         reveal.setOnAction(event -> onReveal.accept(copy.path()));
