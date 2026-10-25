@@ -65,6 +65,21 @@ public enum StoreKind {
     }
 
     /**
+     * The kind a knowledge-base descriptor's layout names.
+     *
+     * @param layout {@code rocks}, {@code spined-64} or {@code spined-32}
+     * @return the kind, {@link #UNKNOWN} for any other
+     */
+    public static StoreKind ofLayout(String layout) {
+        return switch (layout) {
+            case "rocks" -> ROCKS;
+            case "spined-64" -> SPINED_64;
+            case "spined-32" -> SPINED_32;
+            default -> UNKNOWN;
+        };
+    }
+
+    /**
      * Whether Komet opens this kind of entry as a store.
      *
      * @return {@code true} for the three store layouts

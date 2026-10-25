@@ -33,8 +33,45 @@ import java.util.Optional;
  * @param assembledAt     when it was assembled
  * @param access          {@code public} or {@code restricted}
  * @param icon            the icon's path relative to the store; on Nexus, the {@code png:icon} beside it
+ * @param memory          what the assembly measured of the store's memory, optional at level 1
  */
 public record KnowledgeBaseDescriptor(int level, Coordinate coordinate, Optional<String> resolvedVersion,
                                       String displayName, String layout, int entityFormat, Instant assembledAt,
-                                      String access, String icon) {
+                                      String access, String icon, Memory memory) {
+
+    /**
+     * A descriptor with no memory measured.
+     *
+     * @param level           the descriptor level
+     * @param coordinate      the Maven coordinate the store is a build of
+     * @param resolvedVersion the deploy it is, when known
+     * @param displayName     the name a person reads
+     * @param layout          {@code rocks}, {@code spined-32} or {@code spined-64}
+     * @param entityFormat    the entity format the store was written in
+     * @param assembledAt     when it was assembled
+     * @param access          {@code public} or {@code restricted}
+     * @param icon            the icon's path relative to the store
+     */
+    public KnowledgeBaseDescriptor(int level, Coordinate coordinate, Optional<String> resolvedVersion,
+                                   String displayName, String layout, int entityFormat, Instant assembledAt,
+                                   String access, String icon) {
+        this(level, coordinate, resolvedVersion, displayName, layout, entityFormat, assembledAt, access, icon,
+                Memory.NONE);
+    }
+
+    /**
+     * What the assembly measured, under Flight Recorder, while its load step ran the reasoner
+     * ({@code ike-knowledge-provider}'s {@code HeapRecorder}; kb-assemble carries it here), so the heap
+     * of a store is known before it is downloaded. Each is in bytes, and absent when not measured.
+     *
+     * @param statedAxiomBytes  the size of the store's stated axioms
+     * @param loadedHeapBytes   the live heap with the store loaded
+     * @param reasonerHeapBytes what running the reasoner added to it
+     */
+    public record Memory(Optional<Long> statedAxiomBytes, Optional<Long> loadedHeapBytes,
+                         Optional<Long> reasonerHeapBytes) {
+
+        /** Nothing measured. */
+        public static final Memory NONE = new Memory(Optional.empty(), Optional.empty(), Optional.empty());
+    }
 }

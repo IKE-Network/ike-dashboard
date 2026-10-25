@@ -86,8 +86,9 @@ final class HeapView {
         };
         return switch (plan.source()) {
             case RULE -> need + "  ·  " + fit;
+            case MEASURED -> need + ", as measured at assembly  ·  " + fit;
             case OVERRIDE -> need + ", set for this store  ·  " + fit;
-            case FIXED_BY_KOMET -> need + ", fixed by Komet " + komet.version() + "; the rule asks "
+            case FIXED_BY_KOMET -> need + ", fixed by Komet " + komet.version() + "; it needs "
                     + HeapSizing.gb(plan.computed().heap()) + "  ·  " + fit;
         };
     }
@@ -101,10 +102,18 @@ final class HeapView {
     static String working(HeapSizing.Plan plan, KnowledgeBase store) {
         List<String> lines = new ArrayList<>();
         lines.add(DashboardCommand.size(plan.data()) + " of data, Lucene's index left out.");
+        store.descriptor().descriptor().map(KnowledgeBaseDescriptor::memory)
+                .filter(memory -> memory.loadedHeapBytes().isPresent()).ifPresent(memory -> lines.add(
+                        "Measured at assembly: " + DashboardCommand.size(memory.loadedHeapBytes().get())
+                        + " live with the store loaded" + memory.reasonerHeapBytes()
+                                .map(bytes -> ", " + DashboardCommand.size(bytes) + " more for the reasoner").orElse("")
+                        + (plan.source() == HeapSizing.Source.MEASURED ? "; the heap leaves the collector room above it."
+                                : "; measured on another kind of store, so the rule sizes this one.")));
         lines.add(store.statedAxiomBytes()
                 .map(bytes -> DashboardCommand.size(bytes) + " of stated axioms, which the reasoner's room follows.")
                 .orElse("The store does not say its stated axioms' size, so no room for the reasoner is added."));
-        lines.add("The rule asks " + plan.computed().text() + ".");
+        lines.add((plan.source() == HeapSizing.Source.MEASURED ? "The measurement asks " : "It needs ")
+                + plan.computed().text() + ".");
         if (plan.source() == HeapSizing.Source.FIXED_BY_KOMET) {
             lines.add("This Komet starts at 42 GB whatever its store needs; a Komet built after it takes the rule's.");
         }
@@ -206,7 +215,7 @@ final class HeapView {
      * @param store    the store
      * @param rule     the rule as it is
      * @param override this store's heap and cache, if set
-     * @param computed what the rule asks for this store
+     * @param computed what the store needs, measured or by the rule
      * @return what the person changed, or empty when cancelled
      */
     static Optional<Edit> edit(Window owner, KnowledgeBase store, HeapSizing.Rule rule,
@@ -219,7 +228,7 @@ final class HeapView {
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.CANCEL, ButtonType.OK);
 
         boolean rocks = store.kind() == StoreKind.ROCKS;
-        CheckBox useRule = new CheckBox("Use the rule: " + computed.text());
+        CheckBox useRule = new CheckBox("Use what it needs: " + computed.text());
         useRule.setSelected(override.isEmpty());
         TextField heap = number(override.map(HeapSizing.Need::heap).orElse(computed.heap()) / (double) HeapSizing.GIB);
         TextField cache = number(override.map(HeapSizing.Need::cache).orElse(computed.cache()) / (double) HeapSizing.GIB);
@@ -237,6 +246,7 @@ final class HeapView {
         TextField rocksShare = number(rule.rocksShare() * 100);
         TextField cacheShare = number(rule.cacheShare() * 100);
         TextField axiomShare = number(rule.axiomShare());
+        TextField measuredRoom = number(rule.measuredRoom());
         TextField minimum = number(rule.minimumHeap() / (double) HeapSizing.GIB);
         TextField reserveFloor = number(rule.reserveFloor() / (double) HeapSizing.GIB);
         TextField reserveShare = number(rule.reserveShare() * 100);
@@ -245,9 +255,10 @@ final class HeapView {
         every.addRow(1, new Label("Heap, % of a Rocks store's size"), rocksShare);
         every.addRow(2, new Label("Rocks cache, % of its size"), cacheShare);
         every.addRow(3, new Label("For the reasoner, × the stated axioms' size"), axiomShare);
-        every.addRow(4, new Label("Least heap, GB"), minimum);
-        every.addRow(5, new Label("Kept for everything else: at least, GB"), reserveFloor);
-        every.addRow(6, new Label("… or this % of the machine's memory"), reserveShare);
+        every.addRow(4, new Label("Measured at assembly, × the live heap"), measuredRoom);
+        every.addRow(5, new Label("Least heap, GB"), minimum);
+        every.addRow(6, new Label("Kept for everything else: at least, GB"), reserveFloor);
+        every.addRow(7, new Label("… or this % of the machine's memory"), reserveShare);
         Hyperlink defaults = new Hyperlink("Restore the defaults");
         defaults.setOnAction(event -> {
             HeapSizing.Rule shipped = HeapSizing.Rule.DEFAULTS;
@@ -255,6 +266,7 @@ final class HeapView {
             rocksShare.setText(text(shipped.rocksShare() * 100));
             cacheShare.setText(text(shipped.cacheShare() * 100));
             axiomShare.setText(text(shipped.axiomShare()));
+            measuredRoom.setText(text(shipped.measuredRoom()));
             minimum.setText(text(shipped.minimumHeap() / (double) HeapSizing.GIB));
             reserveFloor.setText(text(shipped.reserveFloor() / (double) HeapSizing.GIB));
             reserveShare.setText(text(shipped.reserveShare() * 100));
@@ -277,7 +289,7 @@ final class HeapView {
         dialog.getDialogPane().lookupButton(ButtonType.OK).addEventFilter(javafx.event.ActionEvent.ACTION, event -> {
             try {
                 HeapSizing.Rule edited = new HeapSizing.Rule(parse(spined) / 100, parse(rocksShare) / 100,
-                        parse(cacheShare) / 100, parse(axiomShare), gib(minimum), gib(reserveFloor),
+                        parse(cacheShare) / 100, parse(axiomShare), parse(measuredRoom), gib(minimum), gib(reserveFloor),
                         parse(reserveShare) / 100);
                 Optional<HeapSizing.Need> storeHeap = useRule.isSelected() ? Optional.empty()
                         : Optional.of(new HeapSizing.Need(HeapSizing.roundUp(gib(heap)), rocks ? gib(cache) : 0));

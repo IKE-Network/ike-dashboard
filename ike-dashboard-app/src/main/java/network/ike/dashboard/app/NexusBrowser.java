@@ -66,6 +66,7 @@ public final class NexusBrowser extends BorderPane {
     private Set<String> here = Set.of();
     private Map<Coordinate, Image> icons = Map.of();
     private Map<Coordinate, NexusCatalog.Described> described = Map.of();
+    private HeapSizing.Rule heapRule = HeapSizing.Rule.DEFAULTS;
     private BiConsumer<Coordinate, String> onDownload = (coordinate, classifier) -> { };
 
     /** Builds the browser, empty until offers are set. */
@@ -95,6 +96,7 @@ public final class NexusBrowser extends BorderPane {
                 name,
                 column("Layout", 110, NexusCatalog.Offer::label),
                 column("Size", 80, offer -> DashboardCommand.size(offer.sizeBytes())),
+                column("Heap", 70, offer -> heap(offer).map(HeapSizing::gb).orElse("")),
                 column("Deployed", 130, offer -> WHEN.format(offer.updated())),
                 column("In ~/Solor", 80, offer -> isHere(offer) ? "yes" : "")));
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_ALL_COLUMNS);
@@ -137,6 +139,31 @@ public final class NexusBrowser extends BorderPane {
         described.forEach((coordinate, entry) -> read.put(coordinate, KnowledgeBaseIcon.load(entry.icon())));
         icons = Map.copyOf(read);
         setOffers(catalog.offers(), here);
+    }
+
+    /**
+     * The rule the Heap column sizes by, as the person has it.
+     *
+     * @param rule the rule
+     */
+    public void setHeapRule(HeapSizing.Rule rule) {
+        heapRule = rule;
+        table.refresh();
+    }
+
+    /**
+     * The heap an offer needs, known before it is downloaded when its descriptor carries what its
+     * assembly measured for that kind of store.
+     *
+     * @param offer the offer
+     * @return the heap, or empty when nothing was measured for it
+     */
+    public Optional<Long> heap(NexusCatalog.Offer offer) {
+        NexusCatalog.Described entry = described.get(offer.coordinate());
+        StoreKind kind = java.util.Arrays.stream(StoreKind.values())
+                .filter(candidate -> candidate.classifier().equals(offer.classifier())).findFirst().orElse(StoreKind.UNKNOWN);
+        return entry == null ? Optional.empty()
+                : HeapSizing.measuredHeap(heapRule, entry.descriptor(), kind, Optional.empty());
     }
 
     /**

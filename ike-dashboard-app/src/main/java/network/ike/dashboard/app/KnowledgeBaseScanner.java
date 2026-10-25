@@ -188,7 +188,18 @@ public final class KnowledgeBaseScanner {
         return DescriptorCheck.met(new KnowledgeBaseDescriptor(number,
                 new Coordinate(field(properties, "groupId"), field(properties, "artifactId"), field(properties, "version")),
                 Optional.ofNullable(field(properties, "resolvedVersion")), field(properties, "displayName"), layout,
-                entityFormat, assembledAt, access, field(properties, "icon")));
+                entityFormat, assembledAt, access, field(properties, "icon"),
+                new KnowledgeBaseDescriptor.Memory(bytes(properties, "statedAxiomBytes"),
+                        bytes(properties, "loadedHeapBytes"), bytes(properties, "reasonerHeapBytes"))));
+    }
+
+    /** An optional size in bytes; absent when missing or not a whole number, which no level requires. */
+    private static Optional<Long> bytes(Properties properties, String name) {
+        try {
+            return Optional.ofNullable(field(properties, name)).map(Long::valueOf).filter(value -> value >= 0);
+        } catch (NumberFormatException e) {
+            return Optional.empty();
+        }
     }
 
     /** A field's value, stripped; {@code null} when absent or blank. */

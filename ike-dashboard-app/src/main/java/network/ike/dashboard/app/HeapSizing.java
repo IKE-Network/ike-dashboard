@@ -32,7 +32,10 @@ import java.util.prefs.Preferences;
  * (IKE-Network/ike-issues#1324). The heap is one percentage of the store's database size per kind
  * (KEC, 2026-10-25): 400 % for a spined store, which holds everything on the heap, and 50 % for Rocks,
  * which keeps its data in native memory and gets a block cache beside the heap, sized apart. No store
- * gets less than a floor. Room for the reasoner is added apart: a share of the store's stated axioms,
+ * gets less than a floor. When the store's knowledge-base descriptor carries what its assembly measured
+ * under Flight Recorder (the live heap with it loaded, and what the reasoner added), the heap is sized
+ * from that instead, with room above the live set for the collector; the rule stands in for a store
+ * without a measurement. Room for the reasoner is added apart: a share of the store's stated axioms,
  * which the heap the reasoner needs is proportional to (KEC, 2026-10-25), whichever kind holds them;
  * the store's manifest says their size ({@code Ike-Stated-Axiom-Bytes}), and a store that does not
  * say gets none. The rule budgets what is left on the machine, not the total: physical RAM less a
@@ -64,6 +67,12 @@ public final class HeapSizing {
      */
     public static final double DEFAULT_AXIOM_SHARE = 25.0;
 
+    /**
+     * Heap per byte of the live heap an assembly measured: the room a collector needs above the live
+     * set, the same margin {@link #DEFAULT_AXIOM_SHARE} keeps over its measurement (25 over 14.6).
+     */
+    public static final double DEFAULT_MEASURED_ROOM = 1.7;
+
     /** The smallest cache the dashboard launches a Rocks store with. */
     static final long MINIMUM_CACHE = 256L << 20;
 
@@ -92,21 +101,23 @@ public final class HeapSizing {
      * @param rocksShare    heap per byte of a Rocks store's data
      * @param cacheShare    Rocks block cache per byte of data
      * @param axiomShare    heap added for the reasoner, per byte of the store's stated axioms
+     * @param measuredRoom  heap per byte of live heap the assembly measured: room for the collector
      * @param minimumHeap   the least heap any store is launched with: Komet's own needs
      * @param reserveFloor  the least the machine keeps for everything but Komet
      * @param reserveShare  the share of physical RAM the machine keeps, when more than the floor
      */
     public record Rule(double spined64Share, double rocksShare, double cacheShare, double axiomShare,
-                       long minimumHeap, long reserveFloor, double reserveShare) {
+                       double measuredRoom, long minimumHeap, long reserveFloor, double reserveShare) {
 
         /**
          * The shipped defaults (KEC, 2026-10-25): spined 400 % and Rocks 50 % of the database size, at
          * least 8 GB; a Rocks cache of 10 % of it, at least 1 GB. A 2 GB solor-kb spined store gets
          * 8 GB, and a 10 GB Rocks store the same. Room for the reasoner is {@value #DEFAULT_AXIOM_SHARE} ×
-         * the stated axioms' size. The reserve is the larger of 8 GB and 15 % of physical RAM. The
-         * percentages stay provisional until measured use replaces them.
+         * the stated axioms' size. A measured live heap gets {@value #DEFAULT_MEASURED_ROOM} × itself.
+         * The reserve is the larger of 8 GB and 15 % of physical RAM.
          */
-        public static final Rule DEFAULTS = new Rule(4.0, 0.5, 0.1, DEFAULT_AXIOM_SHARE, 8 * GIB, 8 * GIB, 0.15);
+        public static final Rule DEFAULTS = new Rule(4.0, 0.5, 0.1, DEFAULT_AXIOM_SHARE, DEFAULT_MEASURED_ROOM,
+                8 * GIB, 8 * GIB, 0.15);
 
         /**
          * The rule as the person has it: each term overridden in the preferences, else the default.
@@ -120,6 +131,7 @@ public final class HeapSizing {
                     node.getDouble("rocksShare", DEFAULTS.rocksShare),
                     node.getDouble("cacheShare", DEFAULTS.cacheShare),
                     node.getDouble("axiomShare", DEFAULTS.axiomShare),
+                    node.getDouble("measuredRoom", DEFAULTS.measuredRoom),
                     node.getLong("minimumHeap", DEFAULTS.minimumHeap),
                     node.getLong("reserveFloor", DEFAULTS.reserveFloor),
                     node.getDouble("reserveShare", DEFAULTS.reserveShare));
@@ -136,6 +148,7 @@ public final class HeapSizing {
             putDouble(node, "rocksShare", rocksShare, DEFAULTS.rocksShare);
             putDouble(node, "cacheShare", cacheShare, DEFAULTS.cacheShare);
             putDouble(node, "axiomShare", axiomShare, DEFAULTS.axiomShare);
+            putDouble(node, "measuredRoom", measuredRoom, DEFAULTS.measuredRoom);
             putLong(node, "minimumHeap", minimumHeap, DEFAULTS.minimumHeap);
             putLong(node, "reserveFloor", reserveFloor, DEFAULTS.reserveFloor);
             putDouble(node, "reserveShare", reserveShare, DEFAULTS.reserveShare);
@@ -353,6 +366,8 @@ public final class HeapSizing {
     public enum Source {
         /** The rule's, from the store's kind and data. */
         RULE,
+        /** What the store's assembly measured, with room for the collector. */
+        MEASURED,
         /** The person set it for this store. */
         OVERRIDE,
         /** The Komet's launcher takes no heap: it starts at 42 GB, whatever the store needs. */
@@ -402,7 +417,8 @@ public final class HeapSizing {
      */
     public static Plan plan(Rule rule, KnowledgeBase store, long data, Optional<Need> override, KometInstallation komet,
                             Machine machine) {
-        Need computed = need(rule, store.kind(), data, store.statedAxiomBytes().orElse(0L));
+        Optional<Long> measured = measuredHeap(rule, store);
+        Need computed = needed(rule, store, data);
         long ceiling = Math.max(0, machine.physical() - rule.reserve(machine.physical()));
         long available = Math.max(0, ceiling - machine.claimed());
         Need need;
@@ -415,13 +431,59 @@ public final class HeapSizing {
             source = Source.OVERRIDE;
         } else {
             need = computed;
-            source = Source.RULE;
+            source = measured.isPresent() ? Source.MEASURED : Source.RULE;
             // The cache gives way first: a Rocks store whose heap fits gets what cache is left.
             if (need.cache() > 0 && need.total() > available && need.heap() + MINIMUM_CACHE <= available) {
                 need = new Need(need.heap(), Math.max(MINIMUM_CACHE, available - need.heap()));
             }
         }
         return new Plan(need, computed, fit(need.total(), available, ceiling), data, available, ceiling, machine, source);
+    }
+
+    /**
+     * What a store needs, before any override: as its assembly measured it, else as the rule asks.
+     *
+     * @param rule  the rule
+     * @param store the store
+     * @param data  its data, Lucene's index left out
+     * @return the need
+     */
+    public static Need needed(Rule rule, KnowledgeBase store, long data) {
+        Need ruled = need(rule, store.kind(), data, store.statedAxiomBytes().orElse(0L));
+        return measuredHeap(rule, store).map(heap -> new Need(heap, ruled.cache())).orElse(ruled);
+    }
+
+    private static Optional<Long> measuredHeap(Rule rule, KnowledgeBase store) {
+        return store.descriptor().descriptor()
+                .flatMap(descriptor -> measuredHeap(rule, descriptor, store.kind(), store.statedAxiomBytes()));
+    }
+
+    /**
+     * The heap a store's assembly measured, with room for the collector: the live heap loaded, at least
+     * the floor, and what the reasoner added, grown with the stated axioms when they have grown since.
+     * Only for the kind of store that was measured; a measurement of the reasoner missing, it stands
+     * in as the rule's share of the stated axioms.
+     *
+     * @param rule      the rule
+     * @param described the knowledge-base descriptor, from the store or from Nexus
+     * @param kind      the kind of store being sized
+     * @param statedNow the size of the store's stated axioms now, if known
+     * @return the heap, whole gibibytes, or empty when the descriptor measured none for this kind
+     */
+    public static Optional<Long> measuredHeap(Rule rule, KnowledgeBaseDescriptor described, StoreKind kind,
+                                              Optional<Long> statedNow) {
+        KnowledgeBaseDescriptor.Memory memory = described.memory();
+        if (memory.loadedHeapBytes().isEmpty() || StoreKind.ofLayout(described.layout()) != kind) {
+            return Optional.empty();
+        }
+        long loaded = Math.max(rule.minimumHeap(), Math.round(rule.measuredRoom() * memory.loadedHeapBytes().get()));
+        Optional<Long> stated = statedNow.or(memory::statedAxiomBytes);
+        long reasoner = memory.reasonerHeapBytes().map(bytes -> {
+            double growth = stated.flatMap(now -> memory.statedAxiomBytes().filter(then -> then > 0)
+                    .map(then -> Math.max(1.0, (double) now / then))).orElse(1.0);
+            return Math.round(rule.measuredRoom() * bytes * growth);
+        }).orElseGet(() -> Math.round(rule.axiomShare() * stated.orElse(0L)));
+        return Optional.of(roundUp(loaded + reasoner));
     }
 
     private static Fit fit(long total, long available, long ceiling) {

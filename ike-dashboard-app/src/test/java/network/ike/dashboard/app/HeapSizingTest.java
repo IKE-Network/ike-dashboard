@@ -108,6 +108,36 @@ class HeapSizingTest {
     }
 
     @Test
+    void whatTheAssemblyMeasuredSizesTheStoreItMeasured() {
+        // SNOMED CT assembled in a 64-bit spined store: 1.39 GB live loaded, 2.15 GB more for the reasoner,
+        // 168 MB of stated axioms. 1.7 × each: max(8, 2.4) + 3.7 = 11.7, whole gigabytes 12.
+        KnowledgeBaseDescriptor.Memory snomed = new KnowledgeBaseDescriptor.Memory(Optional.of(168_032_664L),
+                Optional.of(1_469_861_888L), Optional.of(2_253_783_040L));
+        KnowledgeBase spined = described("snomed", StoreKind.SPINED_64, "spined-64", snomed, Map.of());
+        HeapSizing.Plan plan = HeapSizing.plan(RULE, spined, 1_064_960_788L, Optional.empty(), sizing, IDLE);
+        assertThat(plan.source()).isEqualTo(HeapSizing.Source.MEASURED);
+        assertThat(plan.need().heap()).isEqualTo(12 * GIB);
+
+        // Measured on a spined store, it says nothing of a Rocks copy, which the rule sizes.
+        KnowledgeBase rocks = described("snomed-rocks", StoreKind.ROCKS, "spined-64", snomed, Map.of());
+        assertThat(HeapSizing.plan(RULE, rocks, GIB, Optional.empty(), sizing, IDLE).source())
+                .isEqualTo(HeapSizing.Source.RULE);
+
+        // Stated axioms grown by half since: the reasoner's part grows with them.
+        KnowledgeBase edited = described("snomed", StoreKind.SPINED_64, "spined-64", snomed,
+                Map.of(KnowledgeBase.STATED_AXIOM_BYTES, Long.toString(168_032_664L * 3 / 2)));
+        assertThat(HeapSizing.plan(RULE, edited, GIB, Optional.empty(), sizing, IDLE).need().heap())
+                .isEqualTo(HeapSizing.roundUp(8 * GIB + Math.round(1.7 * 2_253_783_040L * 1.5)));
+
+        // No reasoner measurement: the rule's share of the stated axioms stands in for it.
+        KnowledgeBaseDescriptor.Memory loadedOnly = new KnowledgeBaseDescriptor.Memory(Optional.of(168_032_664L),
+                Optional.of(1_469_861_888L), Optional.empty());
+        assertThat(HeapSizing.measuredHeap(RULE, descriptor("snomed", "spined-64", loadedOnly), StoreKind.SPINED_64,
+                Optional.empty()))
+                .contains(HeapSizing.roundUp(8 * GIB + Math.round(HeapSizing.DEFAULT_AXIOM_SHARE * 168_032_664L)));
+    }
+
+    @Test
     void theReserveIsTheLargerOfItsFloorAndItsShare() {
         assertThat(RULE.reserve(128 * GIB)).isEqualTo(Math.round(0.15 * 128 * GIB));
         assertThat(RULE.reserve(32 * GIB)).isEqualTo(8 * GIB);
@@ -185,7 +215,8 @@ class HeapSizingTest {
     @Test
     void theRuleAndAStoresHeapAreKeptInThePreferences() throws IOException {
         assertThat(HeapSizing.Rule.read(node)).isEqualTo(RULE);
-        HeapSizing.Rule mine = new HeapSizing.Rule(3.0, 0.5, 0.1, HeapSizing.DEFAULT_AXIOM_SHARE, 8 * GIB, 16 * GIB, 0.15);
+        HeapSizing.Rule mine = new HeapSizing.Rule(3.0, 0.5, 0.1, HeapSizing.DEFAULT_AXIOM_SHARE,
+                HeapSizing.DEFAULT_MEASURED_ROOM, 8 * GIB, 16 * GIB, 0.15);
         mine.write(node);
         assertThat(HeapSizing.Rule.read(node)).isEqualTo(mine);
         // A term equal to its default is not kept, so a later default reaches it.
@@ -253,6 +284,17 @@ class HeapSizingTest {
         Path launcher = folder.resolve("launchKomet");
         Files.writeString(launcher, "#!/usr/bin/env sh\n" + optionsLine + "\nexec \"$JAVACMD\" \"$@\"\n");
         return new KometInstallation("Komet " + version, version, folder.getParent(), launcher);
+    }
+
+    private KnowledgeBase described(String name, StoreKind kind, String layout, KnowledgeBaseDescriptor.Memory memory,
+                                    Map<String, String> attributes) {
+        return new KnowledgeBase(name, root.resolve(name), kind, 0, Optional.empty(), attributes, Instant.EPOCH,
+                DescriptorCheck.met(descriptor(name, layout, memory)));
+    }
+
+    private static KnowledgeBaseDescriptor descriptor(String name, String layout, KnowledgeBaseDescriptor.Memory memory) {
+        return new KnowledgeBaseDescriptor(1, new Coordinate("network.ike.data", name, "1-SNAPSHOT"), Optional.empty(),
+                name, layout, 3, Instant.EPOCH, "restricted", "META-INF/ike/icon.png", memory);
     }
 
     private KnowledgeBase store(String name, StoreKind kind) {

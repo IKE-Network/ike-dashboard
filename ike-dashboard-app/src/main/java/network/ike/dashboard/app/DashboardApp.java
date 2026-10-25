@@ -106,6 +106,7 @@ public final class DashboardApp extends Application {
         view.setOnOpen(this::open);
         view.setHeapPlanner((komet, knowledgeBase) -> Optional.of(heapPlan(komet, knowledgeBase)));
         view.setOnEditHeap(this::editHeap);
+        view.browser().setHeapRule(HeapSizing.Rule.read(heapPreferences));
         view.setOnDownload(this::download);
         view.setOnTrash(this::trash);
         view.setOnBrowse(this::loadCatalog);
@@ -454,9 +455,10 @@ public final class DashboardApp extends Application {
         Preferences stores = heapPreferences.node(HeapSizing.STORES_NODE);
         long data = dataBytes.getOrDefault(knowledgeBase.path(), knowledgeBase.sizeBytes());
         HeapView.edit(view.getScene().getWindow(), knowledgeBase, rule, HeapSizing.override(stores, knowledgeBase),
-                HeapSizing.need(rule, knowledgeBase.kind(), data, knowledgeBase.statedAxiomBytes().orElse(0L)))
+                HeapSizing.needed(rule, knowledgeBase, data))
                 .ifPresent(edit -> {
             edit.rule().write(heapPreferences);
+            view.browser().setHeapRule(edit.rule());
             HeapSizing.setOverride(stores, knowledgeBase, edit.override());
             view.heapChanged();
             view.setMessage(edit.override().map(need -> knowledgeBase.name() + " opens with " + need.text())

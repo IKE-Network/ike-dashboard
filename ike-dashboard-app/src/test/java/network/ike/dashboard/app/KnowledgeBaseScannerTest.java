@@ -118,6 +118,18 @@ class KnowledgeBaseScannerTest {
     }
 
     @Test
+    void theMemoryTheAssemblyMeasuredIsReadAndAMalformedSizeIsLeftOut() throws IOException {
+        KnowledgeBase measured = KnowledgeBaseScanner.inspect(describedStore("measured", LEVEL_ONE
+                + "statedAxiomBytes=168032664\nloadedHeapBytes=1469861888\nreasonerHeapBytes=lots\n", true));
+
+        assertThat(measured.managed()).as("optional at level 1, so a malformed one costs nothing").isTrue();
+        assertThat(measured.descriptor().descriptor().orElseThrow().memory()).isEqualTo(new KnowledgeBaseDescriptor.Memory(
+                Optional.of(168_032_664L), Optional.of(1_469_861_888L), Optional.empty()));
+        assertThat(KnowledgeBaseScanner.inspect(describedStore("unmeasured", LEVEL_ONE, true))
+                .descriptor().descriptor().orElseThrow().memory()).isEqualTo(KnowledgeBaseDescriptor.Memory.NONE);
+    }
+
+    @Test
     void aStoreFallingShortOfTheMinimumIsNotManaged() throws IOException {
         assertThat(problems(describedStore("no-icon", LEVEL_ONE, false))).containsExactly("icon META-INF/ike/icon.png is missing");
         assertThat(problems(describedStore("no-name", LEVEL_ONE.replace("displayName=Pizza Knowledge Base\n", ""), true)))
