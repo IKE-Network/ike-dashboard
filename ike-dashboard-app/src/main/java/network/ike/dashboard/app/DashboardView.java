@@ -1229,7 +1229,7 @@ public final class DashboardView extends BorderPane {
             detail.getChildren().add(muted("Opens in Komet " + komet.get().version()));
         }
         komet.flatMap(chosen -> heapPlanner.apply(chosen, copy))
-                .ifPresent(plan -> detail.getChildren().add(HeapView.line(plan, komet.get())));
+                .ifPresent(plan -> detail.getChildren().add(HeapView.line(plan, komet.get(), copy)));
         Label folder = muted("Folder  " + copy.path().getFileName());
         folder.setTooltip(new Tooltip(copy.path().toString()));
         detail.getChildren().add(folder);

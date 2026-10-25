@@ -54,6 +54,9 @@ public record KnowledgeBase(String name, Path path, StoreKind kind, long sizeByt
     /** The manifest attribute naming the store's entity format. */
     public static final String ENTITY_FORMAT = "Ike-Entity-Format";
 
+    /** The manifest attribute holding the size of the store's stated axioms, bytes. */
+    public static final String STATED_AXIOM_BYTES = "Ike-Stated-Axiom-Bytes";
+
     /** The manifest attribute naming the "Open …" provider. */
     public static final String OPEN_CONTROLLER = "Ike-Open-Controller";
 
@@ -152,6 +155,20 @@ public record KnowledgeBase(String name, Path path, StoreKind kind, long sizeByt
     public Optional<Integer> entityFormat() {
         try {
             return Optional.ofNullable(attributes.get(ENTITY_FORMAT)).map(String::trim).map(Integer::valueOf);
+        } catch (NumberFormatException e) {
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * The size of the store's stated axioms, if its manifest says: what the reasoner's heap is
+     * proportional to. {@code ike-knowledge-provider} writes it at assembly.
+     *
+     * @return the bytes
+     */
+    public Optional<Long> statedAxiomBytes() {
+        try {
+            return Optional.ofNullable(attributes.get(STATED_AXIOM_BYTES)).map(String::trim).map(Long::valueOf);
         } catch (NumberFormatException e) {
             return Optional.empty();
         }

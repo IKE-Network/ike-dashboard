@@ -32,12 +32,15 @@ import java.util.prefs.Preferences;
  * (IKE-Network/ike-issues#1324). The heap is one percentage of the store's database size per kind
  * (KEC, 2026-10-25): 400 % for a spined store, which holds everything on the heap, and 50 % for Rocks,
  * which keeps its data in native memory and gets a block cache beside the heap, sized apart. No store
- * gets less than a floor. The rule budgets what is left on the machine, not the total: physical RAM
- * less a reserve for everything else, less what the Komets already running claim.
+ * gets less than a floor. Room for the reasoner is added apart: a share of the store's stated axioms,
+ * which the heap the reasoner needs is proportional to (KEC, 2026-10-25), whichever kind holds them;
+ * the store's manifest says their size ({@code Ike-Stated-Axiom-Bytes}), and a store that does not
+ * say gets none. The rule budgets what is left on the machine, not the total: physical RAM less a
+ * reserve for everything else, less what the Komets already running claim.
  *
  * <p>Every term is a default the person can override, kept in {@code java.util.prefs}, as can the
  * heap and cache of one store. The defaults are provisional until the calibration runs of the design
- * (live heap after open, a search warm-up and a classification, on each corpus store) replace them.
+ * (live heap after open, a search warm-up and a run of the reasoner, on each corpus store) replace them.
  *
  * <p>Sizes are in bytes; a heap is launched in whole gibibytes, {@code KOMET_MAX_HEAP=<n>g}, which a
  * person reads as GB.
@@ -52,6 +55,14 @@ public final class HeapSizing {
 
     /** Rocks' block cache when nothing sets it ({@code Rocks64Store.BLOCK_CACHE_BYTES}). */
     public static final long DEFAULT_CACHE = GIB;
+
+    /**
+     * Heap per byte of stated axioms for the reasoner. Measured 2026-10-25 on SNOMED CT's export in a
+     * 64-bit spined store: 168 MB of stated axioms, and running the ELK reasoner over its 371,295 concepts
+     * raised the live heap after collection by 2.29 GiB, 14.6 bytes per byte; 25 leaves the collector
+     * room above the live set.
+     */
+    public static final double DEFAULT_AXIOM_SHARE = 25.0;
 
     /** The smallest cache the dashboard launches a Rocks store with. */
     static final long MINIMUM_CACHE = 256L << 20;
@@ -80,20 +91,22 @@ public final class HeapSizing {
      * @param spined64Share heap per byte of a 64-bit (or 32-bit) spined store's data
      * @param rocksShare    heap per byte of a Rocks store's data
      * @param cacheShare    Rocks block cache per byte of data
+     * @param axiomShare    heap added for the reasoner, per byte of the store's stated axioms
      * @param minimumHeap   the least heap any store is launched with: Komet's own needs
      * @param reserveFloor  the least the machine keeps for everything but Komet
      * @param reserveShare  the share of physical RAM the machine keeps, when more than the floor
      */
-    public record Rule(double spined64Share, double rocksShare, double cacheShare, long minimumHeap,
-                       long reserveFloor, double reserveShare) {
+    public record Rule(double spined64Share, double rocksShare, double cacheShare, double axiomShare,
+                       long minimumHeap, long reserveFloor, double reserveShare) {
 
         /**
          * The shipped defaults (KEC, 2026-10-25): spined 400 % and Rocks 50 % of the database size, at
          * least 8 GB; a Rocks cache of 10 % of it, at least 1 GB. A 2 GB solor-kb spined store gets
-         * 8 GB, and a 10 GB Rocks store the same. The reserve is the larger of 8 GB and 15 % of physical
-         * RAM. The percentages stay provisional until measured use replaces them.
+         * 8 GB, and a 10 GB Rocks store the same. Room for the reasoner is {@value #DEFAULT_AXIOM_SHARE} ×
+         * the stated axioms' size. The reserve is the larger of 8 GB and 15 % of physical RAM. The
+         * percentages stay provisional until measured use replaces them.
          */
-        public static final Rule DEFAULTS = new Rule(4.0, 0.5, 0.1, 8 * GIB, 8 * GIB, 0.15);
+        public static final Rule DEFAULTS = new Rule(4.0, 0.5, 0.1, DEFAULT_AXIOM_SHARE, 8 * GIB, 8 * GIB, 0.15);
 
         /**
          * The rule as the person has it: each term overridden in the preferences, else the default.
@@ -106,6 +119,7 @@ public final class HeapSizing {
                     node.getDouble("spined64Share", DEFAULTS.spined64Share),
                     node.getDouble("rocksShare", DEFAULTS.rocksShare),
                     node.getDouble("cacheShare", DEFAULTS.cacheShare),
+                    node.getDouble("axiomShare", DEFAULTS.axiomShare),
                     node.getLong("minimumHeap", DEFAULTS.minimumHeap),
                     node.getLong("reserveFloor", DEFAULTS.reserveFloor),
                     node.getDouble("reserveShare", DEFAULTS.reserveShare));
@@ -121,6 +135,7 @@ public final class HeapSizing {
             putDouble(node, "spined64Share", spined64Share, DEFAULTS.spined64Share);
             putDouble(node, "rocksShare", rocksShare, DEFAULTS.rocksShare);
             putDouble(node, "cacheShare", cacheShare, DEFAULTS.cacheShare);
+            putDouble(node, "axiomShare", axiomShare, DEFAULTS.axiomShare);
             putLong(node, "minimumHeap", minimumHeap, DEFAULTS.minimumHeap);
             putLong(node, "reserveFloor", reserveFloor, DEFAULTS.reserveFloor);
             putDouble(node, "reserveShare", reserveShare, DEFAULTS.reserveShare);
@@ -345,7 +360,7 @@ public final class HeapSizing {
     }
 
     /**
-     * What the rule asks for a store.
+     * What the rule asks for a store, with no room for the reasoner.
      *
      * @param rule the rule
      * @param kind the store's kind
@@ -353,8 +368,23 @@ public final class HeapSizing {
      * @return the need
      */
     public static Need need(Rule rule, StoreKind kind, long data) {
+        return need(rule, kind, data, 0);
+    }
+
+    /**
+     * What the rule asks for a store: its kind's share of its data, at least the floor, and room to
+     * run the reasoner over its stated axioms on top.
+     *
+     * @param rule        the rule
+     * @param kind        the store's kind
+     * @param data        the store's data, Lucene's index left out
+     * @param statedBytes the size of its stated axioms, 0 when unknown
+     * @return the need
+     */
+    public static Need need(Rule rule, StoreKind kind, long data, long statedBytes) {
         double share = kind == StoreKind.ROCKS ? rule.rocksShare() : rule.spined64Share();
-        long heap = roundUp(Math.max(rule.minimumHeap(), Math.round(share * data)));
+        long heap = roundUp(Math.max(rule.minimumHeap(), Math.round(share * data))
+                + Math.round(rule.axiomShare() * statedBytes));
         long cache = kind == StoreKind.ROCKS ? Math.max(DEFAULT_CACHE, Math.round(rule.cacheShare() * data)) : 0;
         return new Need(heap, cache);
     }
@@ -372,7 +402,7 @@ public final class HeapSizing {
      */
     public static Plan plan(Rule rule, KnowledgeBase store, long data, Optional<Need> override, KometInstallation komet,
                             Machine machine) {
-        Need computed = need(rule, store.kind(), data);
+        Need computed = need(rule, store.kind(), data, store.statedAxiomBytes().orElse(0L));
         long ceiling = Math.max(0, machine.physical() - rule.reserve(machine.physical()));
         long available = Math.max(0, ceiling - machine.claimed());
         Need need;

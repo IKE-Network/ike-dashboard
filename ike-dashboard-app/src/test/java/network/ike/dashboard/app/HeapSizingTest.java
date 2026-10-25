@@ -88,6 +88,26 @@ class HeapSizingTest {
     }
 
     @Test
+    void roomForTheReasonerFollowsTheStatedAxiomsWhicheverKindHoldsThem() {
+        long stated = 200L << 20;
+        long room = Math.round(HeapSizing.DEFAULT_AXIOM_SHARE * stated);
+        // On top of the kind's share of the data, after the floor: the same room for either kind.
+        assertThat(HeapSizing.need(RULE, StoreKind.SPINED_64, 3 * GIB, stated).heap())
+                .isEqualTo(HeapSizing.roundUp(12 * GIB + room));
+        assertThat(HeapSizing.need(RULE, StoreKind.ROCKS, 3 * GIB, stated).heap())
+                .isEqualTo(HeapSizing.roundUp(8 * GIB + room));
+
+        // Read from the store's manifest; a store that does not say gets none.
+        KnowledgeBase said = new KnowledgeBase("solor-kb", root.resolve("solor-kb"), StoreKind.ROCKS, 0, Optional.empty(),
+                Map.of(KnowledgeBase.STATED_AXIOM_BYTES, Long.toString(stated)), Instant.EPOCH);
+        assertThat(said.statedAxiomBytes()).contains(stated);
+        assertThat(HeapSizing.plan(RULE, said, 3 * GIB, Optional.empty(), sizing, IDLE).need().heap())
+                .isEqualTo(HeapSizing.roundUp(8 * GIB + room));
+        assertThat(HeapSizing.plan(RULE, store("solor-kb", StoreKind.ROCKS), 3 * GIB, Optional.empty(), sizing, IDLE)
+                .need().heap()).isEqualTo(8 * GIB);
+    }
+
+    @Test
     void theReserveIsTheLargerOfItsFloorAndItsShare() {
         assertThat(RULE.reserve(128 * GIB)).isEqualTo(Math.round(0.15 * 128 * GIB));
         assertThat(RULE.reserve(32 * GIB)).isEqualTo(8 * GIB);
@@ -165,7 +185,7 @@ class HeapSizingTest {
     @Test
     void theRuleAndAStoresHeapAreKeptInThePreferences() throws IOException {
         assertThat(HeapSizing.Rule.read(node)).isEqualTo(RULE);
-        HeapSizing.Rule mine = new HeapSizing.Rule(3.0, 0.5, 0.1, 8 * GIB, 16 * GIB, 0.15);
+        HeapSizing.Rule mine = new HeapSizing.Rule(3.0, 0.5, 0.1, HeapSizing.DEFAULT_AXIOM_SHARE, 8 * GIB, 16 * GIB, 0.15);
         mine.write(node);
         assertThat(HeapSizing.Rule.read(node)).isEqualTo(mine);
         // A term equal to its default is not kept, so a later default reaches it.

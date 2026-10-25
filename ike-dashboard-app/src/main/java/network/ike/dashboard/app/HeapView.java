@@ -55,9 +55,10 @@ final class HeapView {
      *
      * @param plan  what the store is launched with
      * @param komet the Komet it opens in
+     * @param store the store
      * @return the label
      */
-    static Label line(HeapSizing.Plan plan, KometInstallation komet) {
+    static Label line(HeapSizing.Plan plan, KometInstallation komet, KnowledgeBase store) {
         Label line = new Label("Memory  " + summary(plan, komet));
         line.setWrapText(true);
         line.setStyle(switch (plan.fit()) {
@@ -65,7 +66,7 @@ final class HeapView {
             case NOT_BESIDE_RUNNING -> ATTENTION;
             case EXCEEDS_MACHINE -> PROBLEM;
         });
-        line.setTooltip(new Tooltip(working(plan)));
+        line.setTooltip(new Tooltip(working(plan, store)));
         return line;
     }
 
@@ -97,9 +98,12 @@ final class HeapView {
      * @param plan the plan
      * @return the text
      */
-    static String working(HeapSizing.Plan plan) {
+    static String working(HeapSizing.Plan plan, KnowledgeBase store) {
         List<String> lines = new ArrayList<>();
         lines.add(DashboardCommand.size(plan.data()) + " of data, Lucene's index left out.");
+        lines.add(store.statedAxiomBytes()
+                .map(bytes -> DashboardCommand.size(bytes) + " of stated axioms, which the reasoner's room follows.")
+                .orElse("The store does not say its stated axioms' size, so no room for the reasoner is added."));
         lines.add("The rule asks " + plan.computed().text() + ".");
         if (plan.source() == HeapSizing.Source.FIXED_BY_KOMET) {
             lines.add("This Komet starts at 42 GB whatever its store needs; a Komet built after it takes the rule's.");
@@ -169,7 +173,8 @@ final class HeapView {
         } else {
             content.append("A spined store holds all of its data on the heap, so it does not open in less.");
             content.append(" A Rocks copy keeps its data off the heap: the rule asks ")
-                    .append(HeapSizing.gb(HeapSizing.need(HeapSizing.Rule.DEFAULTS, StoreKind.ROCKS, plan.data()).total()))
+                    .append(HeapSizing.gb(HeapSizing.need(HeapSizing.Rule.DEFAULTS, StoreKind.ROCKS, plan.data(),
+                            store.statedAxiomBytes().orElse(0L)).total()))
                     .append(" for one.");
         }
         if (fixed) {
@@ -231,6 +236,7 @@ final class HeapView {
         TextField spined = number(rule.spined64Share() * 100);
         TextField rocksShare = number(rule.rocksShare() * 100);
         TextField cacheShare = number(rule.cacheShare() * 100);
+        TextField axiomShare = number(rule.axiomShare());
         TextField minimum = number(rule.minimumHeap() / (double) HeapSizing.GIB);
         TextField reserveFloor = number(rule.reserveFloor() / (double) HeapSizing.GIB);
         TextField reserveShare = number(rule.reserveShare() * 100);
@@ -238,15 +244,17 @@ final class HeapView {
         every.addRow(0, new Label("Heap, % of a spined store's size"), spined);
         every.addRow(1, new Label("Heap, % of a Rocks store's size"), rocksShare);
         every.addRow(2, new Label("Rocks cache, % of its size"), cacheShare);
-        every.addRow(3, new Label("Least heap, GB"), minimum);
-        every.addRow(4, new Label("Kept for everything else: at least, GB"), reserveFloor);
-        every.addRow(5, new Label("… or this % of the machine's memory"), reserveShare);
+        every.addRow(3, new Label("For the reasoner, × the stated axioms' size"), axiomShare);
+        every.addRow(4, new Label("Least heap, GB"), minimum);
+        every.addRow(5, new Label("Kept for everything else: at least, GB"), reserveFloor);
+        every.addRow(6, new Label("… or this % of the machine's memory"), reserveShare);
         Hyperlink defaults = new Hyperlink("Restore the defaults");
         defaults.setOnAction(event -> {
             HeapSizing.Rule shipped = HeapSizing.Rule.DEFAULTS;
             spined.setText(text(shipped.spined64Share() * 100));
             rocksShare.setText(text(shipped.rocksShare() * 100));
             cacheShare.setText(text(shipped.cacheShare() * 100));
+            axiomShare.setText(text(shipped.axiomShare()));
             minimum.setText(text(shipped.minimumHeap() / (double) HeapSizing.GIB));
             reserveFloor.setText(text(shipped.reserveFloor() / (double) HeapSizing.GIB));
             reserveShare.setText(text(shipped.reserveShare() * 100));
@@ -269,7 +277,8 @@ final class HeapView {
         dialog.getDialogPane().lookupButton(ButtonType.OK).addEventFilter(javafx.event.ActionEvent.ACTION, event -> {
             try {
                 HeapSizing.Rule edited = new HeapSizing.Rule(parse(spined) / 100, parse(rocksShare) / 100,
-                        parse(cacheShare) / 100, gib(minimum), gib(reserveFloor), parse(reserveShare) / 100);
+                        parse(cacheShare) / 100, parse(axiomShare), gib(minimum), gib(reserveFloor),
+                        parse(reserveShare) / 100);
                 Optional<HeapSizing.Need> storeHeap = useRule.isSelected() ? Optional.empty()
                         : Optional.of(new HeapSizing.Need(HeapSizing.roundUp(gib(heap)), rocks ? gib(cache) : 0));
                 if (storeHeap.filter(need -> need.heap() < HeapSizing.GIB).isPresent()) {

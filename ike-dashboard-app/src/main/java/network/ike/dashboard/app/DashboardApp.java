@@ -454,7 +454,8 @@ public final class DashboardApp extends Application {
         Preferences stores = heapPreferences.node(HeapSizing.STORES_NODE);
         long data = dataBytes.getOrDefault(knowledgeBase.path(), knowledgeBase.sizeBytes());
         HeapView.edit(view.getScene().getWindow(), knowledgeBase, rule, HeapSizing.override(stores, knowledgeBase),
-                HeapSizing.need(rule, knowledgeBase.kind(), data)).ifPresent(edit -> {
+                HeapSizing.need(rule, knowledgeBase.kind(), data, knowledgeBase.statedAxiomBytes().orElse(0L)))
+                .ifPresent(edit -> {
             edit.rule().write(heapPreferences);
             HeapSizing.setOverride(stores, knowledgeBase, edit.override());
             view.heapChanged();
