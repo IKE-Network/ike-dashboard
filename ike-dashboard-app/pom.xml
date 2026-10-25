@@ -24,6 +24,8 @@
         <!-- Komet's working set is on JavaFX 27 (komet-bom). -->
         <javafx.version>27</javafx.version>
         <openjfx-monocle.version>21.0.2-jpms</openjfx-monocle.version>
+        <!-- The first ike-maven-plugin that notarizes an application bundle (signed-app). -->
+        <ike-dashboard.notarize.version>271</ike-dashboard.notarize.version>
     </properties>
 
     <dependencies>
@@ -83,4 +85,161 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- The application: a jpackage .app of the dashboard's modules on a jlinked runtime
+             (IKE-Network/ike-issues#1327), at target/app/IKE Dashboard.app, unsigned. Opt in with
+             -Papp; the installer build adds -Psigned-app to sign and notarize it. Its version is
+             the build clock's (ike:jpackage-props), as a Komet image's is, so the newest build
+             sorts last. -->
+        <profile>
+            <id>app</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>network.ike.tooling</groupId>
+                        <artifactId>ike-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>jpackage-props</id>
+                                <goals>
+                                    <goal>jpackage-props</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <!-- jpackage reads its options from argfiles, filtered for the version and paths. -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-resources-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>jpackage-argfiles</id>
+                                <phase>process-resources</phase>
+                                <goals>
+                                    <goal>copy-resources</goal>
+                                </goals>
+                                <configuration>
+                                    <outputDirectory>${project.build.directory}/jpackage</outputDirectory>
+                                    <resources>
+                                        <resource>
+                                            <directory>src/main/jpackage</directory>
+                                            <filtering>true</filtering>
+                                        </resource>
+                                    </resources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <!-- The modules the application runs on, beside this module's own jar. -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-dependency-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>app-modules</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>copy-dependencies</goal>
+                                </goals>
+                                <configuration>
+                                    <includeScope>runtime</includeScope>
+                                    <outputDirectory>${project.build.directory}/app-modules</outputDirectory>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <!-- jpackage refuses to write over an application already there. -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-clean-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>clean-app</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>clean</goal>
+                                </goals>
+                                <configuration>
+                                    <excludeDefaultDirectories>true</excludeDefaultDirectories>
+                                    <filesets>
+                                        <fileset>
+                                            <directory>${project.build.directory}/app</directory>
+                                        </fileset>
+                                    </filesets>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <!-- The JDK running the build makes the application and its runtime. -->
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <executions>
+                            <execution>
+                                <id>jpackage-app</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>${java.home}/bin/jpackage</executable>
+                                    <arguments>
+                                        <argument>@${project.build.directory}/jpackage/app.args</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!-- Signed with the Developer ID under the hardened runtime, then notarized and stapled:
+             what the installer build on the agent holding the build keychain runs, with -Papp. -->
+        <profile>
+            <id>signed-app</id>
+            <properties>
+                <!-- The signing identity's name, as jpackage takes it: Developer ID Application's. -->
+                <codesign.user>Keith Eugene Campbell (8WUE5BZ4BP)</codesign.user>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>jpackage-app</id>
+                                <configuration>
+                                    <arguments combine.children="append">
+                                        <argument>@${project.build.directory}/jpackage/sign.args</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <!-- Application bundles are notarized from ike-tooling 271 on. -->
+                    <plugin>
+                        <groupId>network.ike.tooling</groupId>
+                        <artifactId>ike-maven-plugin</artifactId>
+                        <version>${ike-dashboard.notarize.version}</version>
+                        <executions>
+                            <execution>
+                                <id>notarize-app</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>notarize</goal>
+                                </goals>
+                                <configuration>
+                                    <artifactDir>${project.build.directory}/app</artifactDir>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

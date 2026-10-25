@@ -48,6 +48,18 @@ The design is the `dev-ike-dashboard` topic in `ike-lab-documents`.
 The Nexus check reads the `ike-restricted` login from `~/.m2/settings.xml`, filling `${env.…}`
 placeholders from the environment, so run it from a shell that has them.
 
+## The application
+
+```bash
+./mvnw -Papp -pl ike-dashboard-app -am package -DskipTests
+open "ike-dashboard-app/target/app/IKE Dashboard.app"
+```
+
+`-Papp` makes `IKE Dashboard.app` with jpackage, on a runtime jlinked from the dashboard's modules, its
+version the build clock's (`ike:jpackage-props`), unsigned. Adding `-Psigned-app` signs it with the Developer
+ID under the hardened runtime and notarizes and staples it (`ike:notarize`, ike-tooling 271 on); that needs the
+signing identity and the `notarytool` keychain profile, which the installer build's agent holds.
+
 ## Build
 
 ```bash

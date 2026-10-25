@@ -1,0 +1,13 @@
+--type app-image
+--name "IKE Dashboard"
+--dest "${project.build.directory}/app"
+--app-version ${jpackage.app.version}
+--vendor "IKE Network"
+--description "Keeps Komet versions and knowledge bases current, and launches Komet on them"
+--mac-package-identifier network.ike.dashboard
+--mac-package-name "IKE Dashboard"
+--module-path "${project.build.directory}/app-modules:${project.build.directory}/${project.build.finalName}.jar"
+--module network.ike.dashboard.app/network.ike.dashboard.app.DashboardApp
+--add-modules org.slf4j.jul
+--java-options --enable-preview
+--java-options --enable-native-access=javafx.graphics
