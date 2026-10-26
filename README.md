@@ -6,6 +6,17 @@ watches Nexus for knowledge bases and application updates, and updates itself.
 
 The design is the `dev-ike-dashboard` topic in `ike-lab-documents`.
 
+## Download
+
+The newest IKE Dashboard for a Mac with Apple silicon, signed and notarized:
+
+<https://github.com/IKE-Network/ike-dashboard/releases/latest/download/IKE-Dashboard-osx-aarch64.zip>
+
+Unzip it and move `IKE Dashboard.app` into `~/Applications` or `/Applications` before opening it.
+From then on it updates itself (see [Self-update](#self-update)). The link never changes, and
+<https://ike.network/dashboard> is the page to send people to.
+[Releases](https://github.com/IKE-Network/ike-dashboard/releases) keeps the older versions.
+
 ## Modules
 
 - `ike-dashboard-download`: Maven repository access with the JDK and SLF4J alone (Nexus search,
@@ -67,22 +78,6 @@ version the build clock's (`ike:jpackage-props`), unsigned. Adding `-Psigned-app
 ID under the hardened runtime and notarizes and staples it (`ike:notarize`, ike-tooling 271 on); that needs the
 signing identity and the `notarytool` keychain profile, which the installer build's agent holds.
 
-## Getting it
-
-Download the newest dashboard for a Mac with Apple silicon:
-
-<https://github.com/IKE-Network/ike-dashboard/releases/latest/download/IKE-Dashboard-osx-aarch64.zip>
-
-Unzip it and move `IKE Dashboard.app` into `~/Applications` or `/Applications` before opening it.
-From then on it updates itself (below).
-
-The link never changes. TeamCity's **Publish to GitHub** (IKE Dashboard project, run by hand) runs
-**Installer macOS**, which signs the application with the Developer ID, notarizes and staples it, and
-deploys it to Nexus `ike-public` as `network.ike.dashboard:ike-dashboard-app:<version>:zip:osx-aarch64`.
-It then publishes the same zip as release `v<version>`, under the version-free name
-`IKE-Dashboard-osx-aarch64.zip` with its `.sha256`, and marks it Latest. Older versions stay on the
-releases page and on Nexus.
-
 ## Self-update
 
 The dashboard updates itself in plain Java (decision 2 of `dev-ike-dashboard`), with the code that
@@ -120,6 +115,15 @@ Where the dashboard runs decides where the update goes:
 A dashboard run from a build (`javafx:run`, or `DashboardCommand` on a JDK) is not an application and
 offers no update. From a shell, `DashboardCommand self-update "<path>/IKE Dashboard.app"` does steps
 1–3 for a named application, with the helper waiting for the command to end.
+
+## Releases
+
+TeamCity's **Publish to GitHub** (IKE Dashboard project, run by hand) runs **Installer macOS**, which
+signs the application with the Developer ID, notarizes and staples it, and deploys it to Nexus
+`ike-public` as `network.ike.dashboard:ike-dashboard-app:<version>:zip:osx-aarch64`. It then publishes
+the same zip as release `v<version>`, under the version-free name `IKE-Dashboard-osx-aarch64.zip` with
+its `.sha256`, and marks it Latest, which is what keeps the download link stable. Older versions stay
+on the releases page and on Nexus.
 
 ## Build
 
