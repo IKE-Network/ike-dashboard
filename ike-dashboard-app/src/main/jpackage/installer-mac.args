@@ -1,0 +1,6 @@
+--type pkg
+--name "IKE Dashboard"
+--app-version ${jpackage.app.version}
+--vendor "IKE Network"
+--mac-package-identifier network.ike.dashboard
+--resource-dir "${project.basedir}/src/main/jpackage-resources/mac"

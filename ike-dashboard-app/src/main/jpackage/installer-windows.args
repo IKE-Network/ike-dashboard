@@ -1,0 +1,10 @@
+--type msi
+--name "IKE Dashboard"
+--app-version ${dashboard.msi.version}
+--vendor "IKE Network"
+--description "Keeps Komet versions and knowledge bases current, and launches Komet on them"
+--win-per-user-install
+--win-menu
+--win-menu-group "IKE Network"
+--win-shortcut
+--win-upgrade-uuid a93d5e40-ca4c-4457-ae16-e5ed72321de4

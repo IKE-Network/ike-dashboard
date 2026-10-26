@@ -1,0 +1,4 @@
+--type deb
+--name ike-dashboard
+--app-version ${jpackage.app.version}
+--vendor "IKE Network"

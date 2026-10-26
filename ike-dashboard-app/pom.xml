@@ -87,11 +87,19 @@
     </build>
 
     <profiles>
-        <!-- The application: a jpackage .app of the dashboard's modules on a jlinked runtime
-             (IKE-Network/ike-issues#1327), at target/app/IKE Dashboard.app, unsigned. Opt in with
-             -Papp; the installer build adds -Psigned-app to sign and notarize it. Its version is
-             the build clock's (ike:jpackage-props), as a Komet image's is, so the newest build
-             sorts last. -->
+        <!-- The application: a jpackage image of the dashboard's modules on a jlinked runtime
+             (IKE-Network/ike-issues#1327), at target/app/IKE Dashboard.app on macOS and
+             target/app/IKE Dashboard on Windows, unsigned. Opt in with -Papp; the macOS installer
+             build adds -Psigned-app to sign and notarize it. Its version is the build clock's
+             (ike:jpackage-props), as a Komet image's is, so the newest build sorts last; the
+             Windows build names it with -Djpackage.app.version, since jpackage-props drops the day
+             there to keep it MSI-safe.
+
+             The installer people download, in Komet's family (KEC 2026-10-26): a .pkg on macOS and
+             a per-user .msi on Windows, made from that same image into target/installer by
+             exec:exec@jpackage-installer, run after the build (and, signed, after the image is
+             notarized). An MSI's version allows at most 255.255.65535, so it takes
+             dashboard.msi.version, which the Windows build derives from the image's. -->
         <profile>
             <id>app</id>
             <build>
@@ -185,8 +193,33 @@
                                 </goals>
                                 <configuration>
                                     <executable>${java.home}/bin/jpackage</executable>
+                                    <!-- Paths go on the command line, not in an argfile, which reads a
+                                         backslash in quotes as an escape and so mangles Windows paths. -->
                                     <arguments>
                                         <argument>@${project.build.directory}/jpackage/app.args</argument>
+                                        <argument>@${project.build.directory}/jpackage/app-${dashboard.os}.args</argument>
+                                        <argument>--dest</argument>
+                                        <argument>${project.build.directory}/app</argument>
+                                        <argument>--module-path</argument>
+                                        <argument>${project.build.directory}/app-modules${path.separator}${project.build.directory}/${project.build.finalName}.jar</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <!-- No phase: run after the build as exec:exec@jpackage-installer. -->
+                            <execution>
+                                <id>jpackage-installer</id>
+                                <phase>none</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>${java.home}/bin/jpackage</executable>
+                                    <arguments>
+                                        <argument>@${project.build.directory}/jpackage/installer-${dashboard.os}.args</argument>
+                                        <argument>--app-image</argument>
+                                        <argument>${project.build.directory}/app/${dashboard.app.folder}</argument>
+                                        <argument>--dest</argument>
+                                        <argument>${project.build.directory}/installer</argument>
                                     </arguments>
                                 </configuration>
                             </execution>
@@ -218,6 +251,15 @@
                                     </arguments>
                                 </configuration>
                             </execution>
+                            <!-- The .pkg is signed with the Developer ID Installer of the same name. -->
+                            <execution>
+                                <id>jpackage-installer</id>
+                                <configuration>
+                                    <arguments combine.children="append">
+                                        <argument>@${project.build.directory}/jpackage/sign.args</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
                         </executions>
                     </plugin>
                     <!-- Application bundles are notarized from ike-tooling 271 on. -->
@@ -236,10 +278,63 @@
                                     <artifactDir>${project.build.directory}/app</artifactDir>
                                 </configuration>
                             </execution>
+                            <!-- No phase: the .pkg, once made, as ike-maven-plugin:notarize@notarize-installer. -->
+                            <execution>
+                                <id>notarize-installer</id>
+                                <phase>none</phase>
+                                <goals>
+                                    <goal>notarize</goal>
+                                </goals>
+                                <configuration>
+                                    <artifactDir>${project.build.directory}/installer</artifactDir>
+                                </configuration>
+                            </execution>
                         </executions>
                     </plugin>
                 </plugins>
             </build>
+        </profile>
+
+        <!-- What differs by the OS the build runs on: the argfiles jpackage reads, and the image's
+             folder an installer is made from. -->
+        <profile>
+            <id>mac</id>
+            <activation>
+                <os>
+                    <family>mac</family>
+                </os>
+            </activation>
+            <properties>
+                <dashboard.os>mac</dashboard.os>
+                <dashboard.app.folder>IKE Dashboard.app</dashboard.app.folder>
+            </properties>
+        </profile>
+        <profile>
+            <id>windows</id>
+            <activation>
+                <os>
+                    <family>windows</family>
+                </os>
+            </activation>
+            <properties>
+                <dashboard.os>windows</dashboard.os>
+                <dashboard.app.folder>IKE Dashboard</dashboard.app.folder>
+                <!-- jpackage-props' Windows version is MSI-safe; the installer build names its own. -->
+                <dashboard.msi.version>${jpackage.app.version}</dashboard.msi.version>
+            </properties>
+        </profile>
+        <profile>
+            <id>linux</id>
+            <activation>
+                <os>
+                    <family>unix</family>
+                    <name>Linux</name>
+                </os>
+            </activation>
+            <properties>
+                <dashboard.os>linux</dashboard.os>
+                <dashboard.app.folder>IKE Dashboard</dashboard.app.folder>
+            </properties>
         </profile>
     </profiles>
 </project>

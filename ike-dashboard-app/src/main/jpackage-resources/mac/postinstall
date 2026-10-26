@@ -1,0 +1,11 @@
+#!/bin/sh
+# The IKE Dashboard installer's postinstall: hands the installed application to the person who
+# installed it. An installer leaves it owned by root, and the dashboard updates itself in place
+# only where it can write (SelfUpdate); a code signature does not cover ownership.
+# $2 is the folder the package installed into, /Applications.
+user=$(stat -f %Su /dev/console)
+app="$2/IKE Dashboard.app"
+if [ -n "$user" ] && [ "$user" != root ] && [ -d "$app" ]; then
+    chown -R "$user" "$app"
+fi
+exit 0
