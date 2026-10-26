@@ -24,6 +24,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -57,7 +58,7 @@ class NoticesTest {
         KnowledgeBaseFamily pizza = family(store("pizza-kb", StoreKind.ROCKS, Map.of()));
         Notice.Freshness asked = new Notice.Freshness(NOW.minus(Duration.ofHours(3)), false);
         List<Notice> notices = Notices.compute(new Notices.Inputs(List.of(pizza), List.of(), Map.of("pizza-kb", newer()),
-                Optional.of(asked), Map.of(), List.of(KOMET_1024), Optional.empty(), Optional.empty(), Map.of(), NOW),
+                Optional.of(asked), Map.of(), List.of(KOMET_1024), Optional.empty(), Optional.empty(), Map.of(), Set.of(), NOW),
                 id -> false);
 
         assertThat(notices).singleElement().satisfies(notice -> {
@@ -97,13 +98,45 @@ class NoticesTest {
     }
 
     @Test
+    void aTrackedCollectionStaysAtHandHoweverLongAgoItWasDeployed() {
+        KnowledgeBaseFamily pizza = family(store("pizza-kb", StoreKind.ROCKS, Map.of()));
+        NexusCatalog.Catalog catalog = new NexusCatalog.Catalog(List.of(
+                offer("pizza-kb", NOW.minus(Duration.ofDays(60))),
+                offer("solor-nuva-kb", NOW.minus(Duration.ofDays(2))),
+                offer("rxnorm-kb", NOW.minus(Duration.ofDays(40))),
+                offer("solor-gudid-kb", NOW.minus(Duration.ofDays(90))),
+                offer("dex-kb", NOW.minus(Duration.ofDays(90)))), Map.of(
+                coordinate("pizza-kb"), inCollection("pizza-kb", "Pizza", "SOLOR"),
+                coordinate("solor-nuva-kb"), inCollection("solor-nuva-kb", "SOLOR + NUVA", "SOLOR"),
+                coordinate("rxnorm-kb"), inCollection("rxnorm-kb", "RxNorm", "SOLOR"),
+                coordinate("solor-gudid-kb"), inCollection("solor-gudid-kb", "SOLOR + GUDID", "solor"),
+                coordinate("dex-kb"), inCollection("dex-kb", "DeX", null)));
+
+        List<Notice> notices = Notices.compute(inputs(List.of(pizza), Map.of(), Map.of(), List.of(KOMET_1024),
+                Optional.empty(), Optional.of(catalog), Map.of()), id -> false);
+
+        assertThat(notices).extracting(Notice::title).as("one recently deployed, the collection, and the rest counted")
+                .containsExactly("New on Nexus: SOLOR + NUVA", "1 more knowledge base on Nexus",
+                        "2 SOLOR knowledge bases not downloaded");
+        Notice collection = notices.getLast();
+        assertThat(collection.detail()).contains("RxNorm, SOLOR + GUDID").doesNotContain("Pizza");
+        assertThat(collection.action()).contains(new NoticeAction.Browse());
+        assertThat(collection.id()).isEqualTo("collection:SOLOR:RxNorm,SOLOR + GUDID");
+
+        assertThat(Notices.compute(new Notices.Inputs(List.of(pizza), List.of(), Map.of(), Optional.empty(), Map.of(),
+                List.of(KOMET_1024), Optional.empty(), Optional.of(catalog), Map.of(), Set.of(), NOW), id -> false))
+                .extracting(Notice::title).as("tracking none, they are counted with the rest")
+                .contains("3 more knowledge bases on Nexus");
+    }
+
+    @Test
     void anUnmanagedCopyIsNamedWhenNexusHasAManagedBuildOfIt() {
         KnowledgeBase oldCopy = new KnowledgeBase("solor-kb", Path.of("/Solor/solor-kb"), StoreKind.SPINED_32, 2_000_000_000L,
                 Optional.empty(), Map.of(), Instant.parse("2026-10-16T13:02:00Z"));
         NexusCatalog.Catalog catalog = catalog(offer("solor-kb", NOW.minus(Duration.ofDays(1))));
         List<Notice> notices = Notices.compute(new Notices.Inputs(List.of(), List.of(oldCopy), Map.of(),
                 Optional.of(new Notice.Freshness(NOW, true)), Map.of(), List.of(KOMET_1024), Optional.empty(),
-                Optional.of(catalog), Map.of(), NOW), id -> false);
+                Optional.of(catalog), Map.of(), Set.of(), NOW), id -> false);
 
         assertThat(notices).singleElement().satisfies(notice -> {
             assertThat(notice.title()).isEqualTo("A managed build of solor-kb is on Nexus");
@@ -165,7 +198,7 @@ class NoticesTest {
                                          Optional<KometRelease> release, Optional<NexusCatalog.Catalog> catalog,
                                          Map<Path, List<RepositorySync.Status>> sync) {
         return new Notices.Inputs(families, List.of(), statuses, Optional.of(new Notice.Freshness(NOW, true)), changeSets, komets,
-                release, catalog, sync, NOW);
+                release, catalog, sync, Set.of(DashboardSettings.DEFAULT_COLLECTIONS), NOW);
     }
 
     private static BuildStatus newer() {
@@ -198,6 +231,16 @@ class NoticesTest {
     private static NexusCatalog.Offer offer(String artifactId, Instant updated) {
         return new NexusCatalog.Offer(new Coordinate("network.ike.data", artifactId, "1-SNAPSHOT"), "rkb", 52_000_000,
                 updated, "ike-snapshots");
+    }
+
+    private static Coordinate coordinate(String artifactId) {
+        return new Coordinate("network.ike.data", artifactId, "1-SNAPSHOT");
+    }
+
+    private static NexusCatalog.Described inCollection(String artifactId, String displayName, String collection) {
+        return new NexusCatalog.Described(new KnowledgeBaseDescriptor(1, coordinate(artifactId), Optional.empty(), displayName,
+                "rocks", 3, Instant.parse("2026-08-01T00:00:00Z"), "restricted", "META-INF/ike/icon.png",
+                KnowledgeBaseDescriptor.Memory.NONE, Optional.ofNullable(collection)), new byte[] {1});
     }
 
     private static NexusCatalog.Catalog catalog(NexusCatalog.Offer... offers) {

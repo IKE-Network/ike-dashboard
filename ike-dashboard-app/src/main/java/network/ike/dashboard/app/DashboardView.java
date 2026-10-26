@@ -127,6 +127,7 @@ public final class DashboardView extends BorderPane {
     private final Hyperlink showLog = new Hyperlink("Show last log");
 
     private List<KnowledgeBaseFamily> families = List.of();
+    private Set<String> collections = Set.of();
     private NexusCatalog.Catalog catalog = new NexusCatalog.Catalog(List.of(), java.util.Map.of());
     private final ObservableList<KnowledgeBase> unmanaged = FXCollections.observableArrayList();
     private final ListView<KnowledgeBase> unmanagedList = new ListView<>(unmanaged);
@@ -337,6 +338,18 @@ public final class DashboardView extends BorderPane {
      */
     public List<String> unmanagedListed() {
         return unmanaged.stream().map(KnowledgeBase::name).toList();
+    }
+
+    /**
+     * The collections whose knowledge bases are kept at hand, downloaded or not: listed first in the
+     * Nexus window, and never folded into its count on the Notices screen.
+     *
+     * @param collections the collections, as the settings name them
+     */
+    public void setCollections(Set<String> collections) {
+        this.collections = Set.copyOf(collections);
+        browser.setCollections(this.collections);
+        refreshNotices();
     }
 
     /**
@@ -622,7 +635,7 @@ public final class DashboardView extends BorderPane {
 
     private void refreshNotices() {
         notices = Notices.compute(new Notices.Inputs(families, List.copyOf(unmanaged), statuses, nexusChecked, changeSets, komets, kometRelease,
-                catalogLoaded ? Optional.of(catalog) : Optional.empty(), sync, Instant.now()), dismissed);
+                catalogLoaded ? Optional.of(catalog) : Optional.empty(), sync, collections, Instant.now()), dismissed);
         long atRisk = notices.stream().filter(notice -> notice.urgency() == Notice.Urgency.AT_RISK).count();
         home.setText(notices.isEmpty() ? "Notices" : "Notices  ·  " + notices.size()
                 + (atRisk == 0 ? "" : "  (" + atRisk + " at risk)"));

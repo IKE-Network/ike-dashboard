@@ -74,8 +74,8 @@ class DashboardViewSnapshotTest {
                         offer("solor-gudid-kb", "reasoned-sa"),
                         offer("undescribed-kb", "rkb")),
                 java.util.Map.of(
-                        coordinate("pizza-kb"), described("pizza-kb", "Pizza Knowledge Base", new java.awt.Color(0xe65100)),
-                        coordinate("solor-gudid-kb"), described("solor-gudid-kb", "SOLOR GUDID", new java.awt.Color(0x1565c0))));
+                        coordinate("pizza-kb"), described("pizza-kb", "Pizza Knowledge Base", new java.awt.Color(0xe65100), null),
+                        coordinate("solor-gudid-kb"), described("solor-gudid-kb", "SOLOR GUDID", new java.awt.Color(0x1565c0), "SOLOR")));
 
         CompletableFuture<WritableImage> rendered = new CompletableFuture<>();
         CompletableFuture<WritableImage> notManaged = new CompletableFuture<>();
@@ -89,6 +89,7 @@ class DashboardViewSnapshotTest {
         Platform.runLater(() -> {
             try {
                 DashboardView view = new DashboardView();
+                view.setCollections(java.util.Set.of("SOLOR"));
                 view.setKomets(List.of(komet));
                 view.setFamilies(families);
                 view.setUnmanaged(unmanaged);
@@ -162,11 +163,12 @@ class DashboardViewSnapshotTest {
                 .contains("Memory  42 GB heap, fixed by Komet 26.1016.346; it needs 8 GB  ·  fits beside what is running");
         assertThat(unmanagedDetail.get()).as("why a store is not managed")
                 .anyMatch(text -> text.contains("icon META-INF/ike/icon.png is missing"));
-        assertThat(view.browser().shown()).as("only described knowledge bases on Nexus")
-                .extracting(offer -> offer.coordinate().artifactId(), view.browser()::isHere, view.browser()::hasIcon)
-                .containsExactly(org.assertj.core.groups.Tuple.tuple("pizza-kb", true, true),
-                        org.assertj.core.groups.Tuple.tuple("solor-gudid-kb", false, true),
-                        org.assertj.core.groups.Tuple.tuple("solor-gudid-kb", false, true));
+        assertThat(view.browser().shown()).as("only described knowledge bases on Nexus, the tracked collection's first")
+                .extracting(offer -> offer.coordinate().artifactId(), view.browser()::isHere, view.browser()::hasIcon,
+                        view.browser()::tracked)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("solor-gudid-kb", false, true, true),
+                        org.assertj.core.groups.Tuple.tuple("solor-gudid-kb", false, true, true),
+                        org.assertj.core.groups.Tuple.tuple("pizza-kb", true, true, false));
         Path png = Path.of("target", "dashboard-view.png");
         write(image, png);
         assertThat(png).isNotEmptyFile();
@@ -267,11 +269,13 @@ class DashboardViewSnapshotTest {
         return new Coordinate("network.ike.data", artifactId, "1-SNAPSHOT");
     }
 
-    private static NexusCatalog.Described described(String artifactId, String displayName, java.awt.Color color) throws IOException {
+    private static NexusCatalog.Described described(String artifactId, String displayName, java.awt.Color color,
+                                                    String collection) throws IOException {
         java.io.ByteArrayOutputStream png = new java.io.ByteArrayOutputStream();
         ImageIO.write(drawn(64, color), "png", png);
         return new NexusCatalog.Described(new KnowledgeBaseDescriptor(1, coordinate(artifactId), Optional.empty(), displayName,
-                "rocks", 3, Instant.parse("2026-10-24T00:19:00Z"), "restricted", "META-INF/ike/icon.png"), png.toByteArray());
+                "rocks", 3, Instant.parse("2026-10-24T00:19:00Z"), "restricted", "META-INF/ike/icon.png",
+                KnowledgeBaseDescriptor.Memory.NONE, Optional.ofNullable(collection)), png.toByteArray());
     }
 
     /** Gives a store a level-1 knowledge-base descriptor as ike:kb-assemble writes it, with or without its icon. */

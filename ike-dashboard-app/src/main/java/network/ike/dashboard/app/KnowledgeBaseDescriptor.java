@@ -34,13 +34,37 @@ import java.util.Optional;
  * @param access          {@code public} or {@code restricted}
  * @param icon            the icon's path relative to the store; on Nexus, the {@code png:icon} beside it
  * @param memory          what the assembly measured of the store's memory, optional at level 1
+ * @param collection      the collection it belongs to, such as {@code SOLOR}: the knowledge bases one
+ *                        pipeline builds and publishes together, which the dashboard keeps at hand when
+ *                        it tracks the collection (decision 17); optional at level 1
  */
 public record KnowledgeBaseDescriptor(int level, Coordinate coordinate, Optional<String> resolvedVersion,
                                       String displayName, String layout, int entityFormat, Instant assembledAt,
-                                      String access, String icon, Memory memory) {
+                                      String access, String icon, Memory memory, Optional<String> collection) {
 
     /**
-     * A descriptor with no memory measured.
+     * A descriptor in no collection.
+     *
+     * @param level           the descriptor level
+     * @param coordinate      the Maven coordinate the store is a build of
+     * @param resolvedVersion the deploy it is, when known
+     * @param displayName     the name a person reads
+     * @param layout          {@code rocks}, {@code spined-32} or {@code spined-64}
+     * @param entityFormat    the entity format the store was written in
+     * @param assembledAt     when it was assembled
+     * @param access          {@code public} or {@code restricted}
+     * @param icon            the icon's path relative to the store
+     * @param memory          what the assembly measured of the store's memory
+     */
+    public KnowledgeBaseDescriptor(int level, Coordinate coordinate, Optional<String> resolvedVersion,
+                                   String displayName, String layout, int entityFormat, Instant assembledAt,
+                                   String access, String icon, Memory memory) {
+        this(level, coordinate, resolvedVersion, displayName, layout, entityFormat, assembledAt, access, icon,
+                memory, Optional.empty());
+    }
+
+    /**
+     * A descriptor with no memory measured, in no collection.
      *
      * @param level           the descriptor level
      * @param coordinate      the Maven coordinate the store is a build of
@@ -57,6 +81,16 @@ public record KnowledgeBaseDescriptor(int level, Coordinate coordinate, Optional
                                    String access, String icon) {
         this(level, coordinate, resolvedVersion, displayName, layout, entityFormat, assembledAt, access, icon,
                 Memory.NONE);
+    }
+
+    /**
+     * Whether the knowledge base is in one of the collections the dashboard tracks.
+     *
+     * @param tracked the collections, as the settings name them
+     * @return whether its collection is one of them, matched without regard to case
+     */
+    public boolean inCollection(java.util.Set<String> tracked) {
+        return collection.map(name -> tracked.stream().anyMatch(name::equalsIgnoreCase)).orElse(false);
     }
 
     /**

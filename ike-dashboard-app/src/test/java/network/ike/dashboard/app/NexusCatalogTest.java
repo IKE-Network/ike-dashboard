@@ -84,6 +84,14 @@ class NexusCatalogTest {
 
         assertThat(NexusCatalog.describedBy(levelOne.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1)))
                 .map(KnowledgeBaseDescriptor::displayName).contains("Pizza Knowledge Base");
+        assertThat(NexusCatalog.describedBy(levelOne.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1)))
+                .flatMap(KnowledgeBaseDescriptor::collection).as("optional at level 1").isEmpty();
+        assertThat(NexusCatalog.describedBy((levelOne + "collection=SOLOR\n").getBytes(java.nio.charset.StandardCharsets.ISO_8859_1)))
+                .hasValueSatisfying(descriptor -> {
+                    assertThat(descriptor.collection()).contains("SOLOR");
+                    assertThat(descriptor.inCollection(java.util.Set.of("solor"))).as("matched without regard to case").isTrue();
+                    assertThat(descriptor.inCollection(java.util.Set.of())).isFalse();
+                });
         assertThat(NexusCatalog.describedBy(levelOne.replace("descriptorLevel=1", "descriptorLevel=9")
                 .getBytes(java.nio.charset.StandardCharsets.ISO_8859_1))).isEmpty();
         NexusCatalog.Offer described = new NexusCatalog.Offer(pizza, "rkb", 1, Instant.EPOCH, "r");

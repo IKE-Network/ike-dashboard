@@ -197,7 +197,8 @@ public final class DashboardCommand {
             release = Optional.empty();
         }
         List<Notice> notices = Notices.compute(new Notices.Inputs(families, KnowledgeBaseFamily.unmanaged(knowledgeBases), statuses,
-                Optional.of(new Notice.Freshness(now, true)), changeSets, komets, release, catalog, sync, now),
+                Optional.of(new Notice.Freshness(now, true)), changeSets, komets, release, catalog, sync,
+                settings.collections(), now),
                 NoticeDismissals.current()::dismissed);
         out.printf("%d notices%s%n", notices.size(), git.isPresent() ? "" : " (no git found: repository sync not checked)");
         for (Notice notice : notices) {

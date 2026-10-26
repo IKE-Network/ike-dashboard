@@ -190,7 +190,8 @@ public final class KnowledgeBaseScanner {
                 Optional.ofNullable(field(properties, "resolvedVersion")), field(properties, "displayName"), layout,
                 entityFormat, assembledAt, access, field(properties, "icon"),
                 new KnowledgeBaseDescriptor.Memory(bytes(properties, "statedAxiomBytes"),
-                        bytes(properties, "loadedHeapBytes"), bytes(properties, "reasonerHeapBytes"))));
+                        bytes(properties, "loadedHeapBytes"), bytes(properties, "reasonerHeapBytes")),
+                Optional.ofNullable(field(properties, "collection"))));
     }
 
     /** An optional size in bytes; absent when missing or not a whole number, which no level requires. */

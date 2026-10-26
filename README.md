@@ -38,6 +38,12 @@ The design is the `dev-ike-dashboard` topic in `ike-lab-documents`.
   change sets to upgrade, a newer Komet, the sync state of the git repositories inside each store),
   work at risk first, each with one action.
 
+  The knowledge bases of the collections it tracks stay at hand whether downloaded or not: the Nexus
+  window lists them first, and the Notices screen keeps them however long ago they were deployed. A
+  knowledge base is in a collection when its descriptor names one (`collection=`, from
+  `ike.kbAssemble.collection`); the `collections` preference (comma-separated, under
+  `network/ike/dashboard`) is `SOLOR` unless set, every knowledge base the `solor-kb-ws` pipeline publishes.
+
 ## Run
 
 ```bash

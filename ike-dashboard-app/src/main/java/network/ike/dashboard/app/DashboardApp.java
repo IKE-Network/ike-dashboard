@@ -99,6 +99,7 @@ public final class DashboardApp extends Application {
         Preferences preferences = Preferences.userRoot().node(DashboardSettings.NODE);
         heapPreferences = preferences.node(HeapSizing.NODE);
         view = new DashboardView();
+        view.setCollections(settings.collections());
         view.setLastOpened(history::lastOpened);
         view.setSortRecent(preferences.getBoolean(SORT_RECENT, false));
         view.setOnSortChange(recent -> preferences.putBoolean(SORT_RECENT, recent));

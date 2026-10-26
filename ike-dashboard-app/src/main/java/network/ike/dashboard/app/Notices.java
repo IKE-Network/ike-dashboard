@@ -29,6 +29,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -60,13 +61,14 @@ public final class Notices {
      * @param kometRelease the newest Komet build found, if one was
      * @param catalog      what Nexus offers, once asked
      * @param sync         the sync state of the repositories inside each store, by its folder
+     * @param collections  the collections whose knowledge bases are kept at hand, downloaded or not
      * @param now          the time the notices are for
      */
     public record Inputs(List<KnowledgeBaseFamily> families, List<KnowledgeBase> unmanaged, Map<String, BuildStatus> statuses,
                          Optional<Notice.Freshness> nexusChecked, Map<Path, ChangeSetCheck.Finding> changeSets,
                          List<KometInstallation> komets, Optional<KometRelease> kometRelease,
                          Optional<NexusCatalog.Catalog> catalog, Map<Path, List<RepositorySync.Status>> sync,
-                         Instant now) {
+                         Set<String> collections, Instant now) {
 
         /**
          * Copies the collections.
@@ -80,6 +82,7 @@ public final class Notices {
          * @param kometRelease the newest Komet build found
          * @param catalog      what Nexus offers
          * @param sync         the repositories' sync states
+         * @param collections  the collections tracked
          * @param now          the time
          */
         public Inputs {
@@ -89,6 +92,7 @@ public final class Notices {
             changeSets = Map.copyOf(changeSets);
             komets = List.copyOf(komets);
             sync = Map.copyOf(sync);
+            collections = Set.copyOf(collections);
         }
     }
 
@@ -225,13 +229,22 @@ public final class Notices {
                 .forEach(offer -> preferred.putIfAbsent(offer.coordinate(), offer));
         Instant since = inputs.now().minus(NEW_ON_NEXUS);
         int older = 0;
+        // A tracked collection's knowledge bases are never folded into the count: they stay at hand.
+        Map<String, List<String>> kept = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         for (NexusCatalog.Offer offer : preferred.values()) {
+            Optional<KnowledgeBaseDescriptor> descriptor = Optional.ofNullable(catalog.described().get(offer.coordinate()))
+                    .map(NexusCatalog.Described::descriptor);
+            String name = descriptor.map(KnowledgeBaseDescriptor::displayName).orElse(offer.coordinate().artifactId());
             if (offer.updated().isBefore(since)) {
-                older++;
+                Optional<String> collection = descriptor.filter(found -> found.inCollection(inputs.collections()))
+                        .flatMap(KnowledgeBaseDescriptor::collection);
+                if (collection.isPresent()) {
+                    kept.computeIfAbsent(collection.get(), key -> new ArrayList<>()).add(name);
+                } else {
+                    older++;
+                }
                 continue;
             }
-            String name = Optional.ofNullable(catalog.described().get(offer.coordinate()))
-                    .map(described -> described.descriptor().displayName()).orElse(offer.coordinate().artifactId());
             List<String> copies = unmanagedCopies(inputs.unmanaged(), offer.coordinate());
             String deployed = "Deployed " + WHEN.format(offer.updated()) + ", " + DashboardCommand.size(offer.sizeBytes()) + ". ";
             notices.add(new Notice("nexus-new:" + offer.coordinate() + ":" + offer.updated(), Notice.Urgency.ACTION,
@@ -242,6 +255,14 @@ public final class Notices {
                     Optional.empty(), Optional.of(new NoticeAction.Download(offer.coordinate(), offer.classifier())),
                     inputs.nexusChecked()));
         }
+        kept.forEach((collection, names) -> {
+            List<String> sorted = names.stream().sorted(String.CASE_INSENSITIVE_ORDER).toList();
+            notices.add(new Notice("collection:" + collection + ":" + String.join(",", sorted), Notice.Urgency.NEWS,
+                    plural(sorted.size(), collection + " knowledge base", collection + " knowledge bases") + " not downloaded",
+                    "The dashboard keeps the " + collection + " collection at hand: " + String.join(", ", sorted)
+                            + ". The Nexus window lists them first.",
+                    Optional.empty(), Optional.of(new NoticeAction.Browse()), inputs.nexusChecked()));
+        });
         if (older > 0) {
             notices.add(new Notice("nexus-more:" + older, Notice.Urgency.NEWS,
                     plural(older, "more knowledge base", "more knowledge bases") + " on Nexus",

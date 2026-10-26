@@ -37,6 +37,7 @@ import javafx.scene.layout.Region;
 
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -50,7 +51,8 @@ import java.util.function.Function;
  * The knowledge bases Nexus offers, searchable, each store a row to download beside the knowledge base's
  * icon; only those that deploy a knowledge-base descriptor at a supported level. It is the dashboard's
  * secondary place: what is not yet in {@code ~/Solor} is found here and brought down, and from then on
- * the main window looks after it.
+ * the main window looks after it. The knowledge bases of the collections the dashboard tracks are listed
+ * first, whether or not they are here, so a pipeline's knowledge bases are always at hand.
  */
 public final class NexusBrowser extends BorderPane {
 
@@ -64,6 +66,8 @@ public final class NexusBrowser extends BorderPane {
     private final Button download = new Button("Download");
     private final Label message = new Label();
     private Set<String> here = Set.of();
+    private Set<String> collections = Set.of();
+    private List<NexusCatalog.Offer> all = List.of();
     private Map<Coordinate, Image> icons = Map.of();
     private Map<Coordinate, NexusCatalog.Described> described = Map.of();
     private HeapSizing.Rule heapRule = HeapSizing.Rule.DEFAULTS;
@@ -94,6 +98,7 @@ public final class NexusBrowser extends BorderPane {
         });
         table.getColumns().addAll(List.of(
                 name,
+                column("Collection", 90, offer -> collection(offer).orElse("")),
                 column("Layout", 110, NexusCatalog.Offer::label),
                 column("Size", 80, offer -> DashboardCommand.size(offer.sizeBytes())),
                 column("Heap", 70, offer -> heap(offer).map(HeapSizing::gb).orElse("")),
@@ -142,6 +147,37 @@ public final class NexusBrowser extends BorderPane {
     }
 
     /**
+     * The collections whose knowledge bases are listed first.
+     *
+     * @param collections the collections, as the settings name them
+     */
+    public void setCollections(Set<String> collections) {
+        this.collections = Set.copyOf(collections);
+        setOffers(all, here);
+    }
+
+    /**
+     * The collection an offer's knowledge base belongs to, as its descriptor names it.
+     *
+     * @param offer the offer
+     * @return the collection, or empty when it names none
+     */
+    public Optional<String> collection(NexusCatalog.Offer offer) {
+        return Optional.ofNullable(described.get(offer.coordinate())).flatMap(entry -> entry.descriptor().collection());
+    }
+
+    /**
+     * Whether an offer's knowledge base is in a collection the dashboard tracks.
+     *
+     * @param offer the offer
+     * @return whether it is kept at hand
+     */
+    public boolean tracked(NexusCatalog.Offer offer) {
+        NexusCatalog.Described entry = described.get(offer.coordinate());
+        return entry != null && entry.descriptor().inCollection(collections);
+    }
+
+    /**
      * The rule the Heap column sizes by, as the person has it.
      *
      * @param rule the rule
@@ -185,11 +221,16 @@ public final class NexusBrowser extends BorderPane {
      */
     private void setOffers(List<NexusCatalog.Offer> offers, Set<String> here) {
         this.here = Set.copyOf(here);
-        this.offers.setAll(offers);
+        all = List.copyOf(offers);
+        // Stable: within the tracked and the rest, the catalog's own order.
+        this.offers.setAll(offers.stream().sorted(Comparator.comparing((NexusCatalog.Offer offer) -> !tracked(offer))).toList());
         table.setPlaceholder(new Label("Nexus offers no knowledge bases"));
         table.refresh();
-        message.setText(offers.stream().map(offer -> offer.coordinate().artifactId()).distinct().count()
-                + " knowledge bases on Nexus");
+        long count = offers.stream().map(offer -> offer.coordinate().artifactId()).distinct().count();
+        long kept = offers.stream().filter(this::tracked).map(offer -> offer.coordinate().artifactId()).distinct().count();
+        message.setText(count + " knowledge bases on Nexus"
+                + (kept == 0 ? "" : ", " + kept + " in " + String.join(", ", collections.stream().sorted().toList())
+                        + " listed first"));
     }
 
     /**
