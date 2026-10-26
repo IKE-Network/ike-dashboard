@@ -206,6 +206,8 @@ class RepositorySyncTest {
     private static void deleteTree(Path root) throws IOException {
         try (var paths = Files.walk(root)) {
             for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                // git writes its objects read-only, which Windows will not delete.
+                path.toFile().setWritable(true);
                 Files.delete(path);
             }
         }

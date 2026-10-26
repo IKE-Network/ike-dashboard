@@ -98,7 +98,8 @@ class KnowledgeBaseFamilyTest {
     }
 
     private static KnowledgeBase copy(String name, StoreKind kind, String modified, Map<String, String> attributes) {
-        return new KnowledgeBase(name, Path.of(name), kind, 0, Optional.empty(), attributes, Instant.parse(modified));
+        // A macOS folder may start with '*'; no Windows file name may hold one, and only the name matters here.
+        return new KnowledgeBase(name, Path.of(name.replace('*', '_')), kind, 0, Optional.empty(), attributes, Instant.parse(modified));
     }
 
     private static KometInstallation komet(String version) {

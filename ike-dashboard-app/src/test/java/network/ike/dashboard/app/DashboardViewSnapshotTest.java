@@ -6,6 +6,8 @@ import javafx.scene.image.PixelReader;
 import javafx.scene.image.WritableImage;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 import javax.imageio.ImageIO;
@@ -47,6 +49,7 @@ class DashboardViewSnapshotTest {
     }
 
     @Test
+    @DisabledOnOs(value = OS.WINDOWS, disabledReason = "its macOS folders start with '*', which no Windows file name may hold")
     void managedKnowledgeBasesShowTheirIconsAndTheRestFoldIntoNotManaged(@TempDir Path solor) throws Exception {
         store(solor, "pizza-kb", "20250627.1-20261023.232318-6");
         describe(solor.resolve("pizza-kb"), "pizza-kb", "Pizza Knowledge Base", "rocks", new java.awt.Color(0xe65100), true);

@@ -235,15 +235,15 @@ class NoticesTest {
 
         assertThat(Notices.compute(withDashboard(new SelfUpdate.State(placement, Optional.of(dashboard("26.1026.15")))),
                 id -> false)).singleElement().extracting(Notice::detail).asString()
-                .contains("This one is in /Applications, which you cannot change, so the new one goes in"
-                        + " /Users/someone/Applications");
+                .contains("This one is in " + Path.of("/Applications") + ", which you cannot change, so the new one goes in "
+                        + Path.of("/Users/someone/Applications"));
     }
 
     @Test
     void aTranslocatedDashboardAsksToBeMovedRatherThanUpdated() {
         SelfUpdate.Placement placement = SelfUpdate.place(new SelfUpdate.Running(Path.of(
                 "/private/var/folders/x1/abc/T/AppTranslocation/3F1C2A/d/IKE Dashboard.app"), "26.1025.2011"),
-                Path.of("/Users/someone"));
+                Path.of("/Users/someone"), OperatingSystem.MAC, java.util.Map.of());
 
         assertThat(Notices.compute(withDashboard(new SelfUpdate.State(placement, Optional.of(dashboard("26.1026.15")))),
                 id -> false)).singleElement().satisfies(notice -> {
