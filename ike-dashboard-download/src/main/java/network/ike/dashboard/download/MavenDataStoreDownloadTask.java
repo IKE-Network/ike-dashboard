@@ -926,7 +926,9 @@ public final class MavenDataStoreDownloadTask extends DownloadTask<Path> {
                     .toList();
         }
         for (Path file : files) {
-            digest.update(directory.relativize(file).toString().getBytes(StandardCharsets.UTF_8));
+            // With '/' on every platform, so a store hashes the same on Windows as elsewhere.
+            digest.update(directory.relativize(file).toString().replace(file.getFileSystem().getSeparator(), "/")
+                    .getBytes(StandardCharsets.UTF_8));
             digest.update((byte) 0);
             try (InputStream in = Files.newInputStream(file)) {
                 int n = in.read(buffer);

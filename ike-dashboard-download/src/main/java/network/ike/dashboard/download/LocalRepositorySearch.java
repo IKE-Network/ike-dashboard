@@ -121,7 +121,9 @@ public final class LocalRepositorySearch {
                     .filter(dir -> isArtifactDirectory(dir, classifierCandidates))
                     .forEach(dir -> {
                         String artifactId = dir.getFileName().toString();
-                        String groupId = localRepositoryRoot.relativize(dir.getParent()).toString().replace('/', '.');
+                        Path group = localRepositoryRoot.relativize(dir.getParent());
+                        // Joined by the file system's separator, a backslash on Windows.
+                        String groupId = group.toString().replace(group.getFileSystem().getSeparator(), ".");
                         if (groupId.toLowerCase(Locale.ROOT).contains(query)
                                 || artifactId.toLowerCase(Locale.ROOT).contains(query)) {
                             results.add(new ArtifactCoordinates(groupId, artifactId));

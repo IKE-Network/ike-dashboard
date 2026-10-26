@@ -327,7 +327,12 @@ public final class SelfUpdate {
      * @return {@code true} when translocated
      */
     static boolean translocated(Path bundle) {
-        return bundle.toAbsolutePath().toString().contains("/AppTranslocation/");
+        for (Path name : bundle.toAbsolutePath()) {
+            if (name.toString().equals("AppTranslocation")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
