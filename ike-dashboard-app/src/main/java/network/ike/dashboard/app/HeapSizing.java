@@ -69,9 +69,11 @@ public final class HeapSizing {
 
     /**
      * Heap per byte of the live heap an assembly measured: the room a collector needs above the live
-     * set, the same margin {@link #DEFAULT_AXIOM_SHARE} keeps over its measurement (25 over 14.6).
+     * set. Measured on solor-gudid-kb (2026-10-25), whose assembly peaks at 63 GiB live (13.7 loaded,
+     * 49.3 more for the reasoner): in a 72 GiB heap (1.14 ×) G1 fell back to a 36-second full
+     * collection; in 84 GiB (1.33 ×) it ran with none, its longest pause 1.3 s.
      */
-    public static final double DEFAULT_MEASURED_ROOM = 1.7;
+    public static final double DEFAULT_MEASURED_ROOM = 1.35;
 
     /** The smallest cache the dashboard launches a Rocks store with. */
     static final long MINIMUM_CACHE = 256L << 20;
