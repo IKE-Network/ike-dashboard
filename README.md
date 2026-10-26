@@ -69,12 +69,19 @@ signing identity and the `notarytool` keychain profile, which the installer buil
 
 ## Getting it
 
-The application is deployed to Nexus `ike-public` as
-`network.ike.dashboard:ike-dashboard-app:<version>:zip:osx-aarch64`, signed with the Developer ID,
-notarized and stapled. Download the zip of the newest version from
-<https://nexus.tinkar.org/repository/ike-public/network/ike/dashboard/ike-dashboard-app/> (its
-`maven-metadata.xml` names the newest), unzip it, and move `IKE Dashboard.app` into `~/Applications`
-or `/Applications` before opening it.
+Download the newest dashboard for a Mac with Apple silicon:
+
+<https://github.com/IKE-Network/ike-dashboard/releases/latest/download/IKE-Dashboard-osx-aarch64.zip>
+
+Unzip it and move `IKE Dashboard.app` into `~/Applications` or `/Applications` before opening it.
+From then on it updates itself (below).
+
+The link never changes. TeamCity's **Publish to GitHub** (IKE Dashboard project, run by hand) runs
+**Installer macOS**, which signs the application with the Developer ID, notarizes and staples it, and
+deploys it to Nexus `ike-public` as `network.ike.dashboard:ike-dashboard-app:<version>:zip:osx-aarch64`.
+It then publishes the same zip as release `v<version>`, under the version-free name
+`IKE-Dashboard-osx-aarch64.zip` with its `.sha256`, and marks it Latest. Older versions stay on the
+releases page and on Nexus.
 
 ## Self-update
 
