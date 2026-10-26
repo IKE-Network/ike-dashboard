@@ -172,4 +172,23 @@ class KnowledgeBaseScannerTest {
     void aMissingFolderHasNoKnowledgeBases() throws IOException {
         assertThat(KnowledgeBaseScanner.scan(solor.resolve("absent"))).isEmpty();
     }
+
+    @Test
+    void theInputsADescriptorRecordsAreReadInOrder() {
+        java.util.Properties descriptor = new java.util.Properties();
+        descriptor.setProperty("input.1", "PB network.ike.data:snomedct-kb:zip:unreasoned-pb:20260601.2-SNAPSHOT");
+        descriptor.setProperty("input.1.resolvedVersion", "20260601.2-20261026.160451-9");
+        descriptor.setProperty("input.2", "SOURCE org.snomed:rf2:zip:20260601");
+        descriptor.setProperty("input.2.importer", "snomed-rf2");
+        descriptor.setProperty("input.3", "malformed");
+        descriptor.setProperty("input.4", "CHANGESET file:edits.pb.zip");
+        descriptor.setProperty("input.6", "PB after a gap, not read");
+
+        assertThat(KnowledgeBaseScanner.inputs(descriptor)).containsExactly(
+                new KnowledgeBaseDescriptor.Input("PB", "network.ike.data:snomedct-kb:zip:unreasoned-pb:20260601.2-SNAPSHOT",
+                        Optional.of("20260601.2-20261026.160451-9"), Optional.empty()),
+                new KnowledgeBaseDescriptor.Input("SOURCE", "org.snomed:rf2:zip:20260601", Optional.empty(),
+                        Optional.of("snomed-rf2")),
+                new KnowledgeBaseDescriptor.Input("CHANGESET", "file:edits.pb.zip", Optional.empty(), Optional.empty()));
+    }
 }

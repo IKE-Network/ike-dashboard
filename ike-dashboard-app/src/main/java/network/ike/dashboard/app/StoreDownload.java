@@ -39,6 +39,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.TreeMap;
 import java.util.concurrent.CancellationException;
 import java.util.function.Consumer;
@@ -50,7 +51,9 @@ import java.util.stream.Stream;
  * Downloads a knowledge base's store from Nexus into a new folder of {@code ~/Solor}, through the
  * local repository as {@code mvn} would cache it, and adds to the store's manifest the facts only a
  * download knows (decision 4 of the {@code dev-ike-dashboard} topic): which deploy it is, which
- * repository it came from, when, and the checksum Nexus serves for it.
+ * repository it came from, when, and the checksum Nexus serves for it. A protobuf, which Komet loads
+ * into a store rather than opens, is placed as its zip, {@code <artifactId>-<deploy>-<classifier>.zip},
+ * the name its knowledge base's family is read from.
  */
 public final class StoreDownload {
 
@@ -85,7 +88,8 @@ public final class StoreDownload {
      */
     public static Path download(HttpClient http, RepositoryAccess repository, Coordinate coordinate, String classifier,
                                 Path solor, Path localRepository, DownloadListener<Path> listener) throws Exception {
-        return download(http, repository, coordinate, classifier, solor, localRepository, listener, cancel -> { });
+        return download(http, repository, coordinate, classifier, Optional.empty(), solor, localRepository, listener,
+                cancel -> { });
     }
 
     /**
@@ -107,24 +111,63 @@ public final class StoreDownload {
      */
     public static Path download(HttpClient http, RepositoryAccess repository, Coordinate coordinate, String classifier,
                                 Path solor, Path localRepository, Transfer transfer) throws Exception {
-        return download(http, repository, coordinate, classifier, solor, localRepository, transfer, transfer::cancelWith);
+        return download(http, repository, coordinate, classifier, Optional.empty(), solor, localRepository, transfer,
+                transfer::cancelWith);
+    }
+
+    /**
+     * Downloads the newest deploy of a store or a protobuf, as the other {@code download} does, keeping
+     * with a protobuf what Nexus describes of its knowledge base, so the dashboard manages it as it
+     * manages a store.
+     *
+     * @param http            the client to download with
+     * @param repository      the repository and its login
+     * @param coordinate      the knowledge base's coordinate
+     * @param classifier      the store's or protobuf's classifier
+     * @param described       the knowledge base's descriptor and icon, as Nexus deploys them
+     * @param solor           the knowledge-base folder
+     * @param localRepository the local Maven repository the zip is cached in
+     * @param transfer        shows the progress, and cancels the download when asked
+     * @return the unpacked store, or the protobuf's zip
+     * @throws CancellationException if the person cancelled it
+     * @throws Exception if that deploy is already here, Nexus has no such deploy, or the download fails
+     */
+    public static Path download(HttpClient http, RepositoryAccess repository, Coordinate coordinate, String classifier,
+                                Optional<NexusCatalog.Described> described, Path solor, Path localRepository,
+                                Transfer transfer) throws Exception {
+        return download(http, repository, coordinate, classifier, described, solor, localRepository, transfer,
+                transfer::cancelWith);
     }
 
     private static Path download(HttpClient http, RepositoryAccess repository, Coordinate coordinate, String classifier,
-                                 Path solor, Path localRepository, DownloadListener<Path> listener,
-                                 Consumer<Runnable> cancelWith) throws Exception {
+                                 Optional<NexusCatalog.Described> described, Path solor, Path localRepository,
+                                 DownloadListener<Path> listener, Consumer<Runnable> cancelWith) throws Exception {
         String fileVersion = coordinate.version();
         if (coordinate.snapshot()) {
             fileVersion = newestDeploy(http, repository, coordinate, classifier)
                     .orElseThrow(() -> new IOException("Nexus lists no " + classifier + " zip for " + coordinate))
                     .value();
         }
-        Path destination = destination(solor, coordinate.artifactId(), fileVersion);
         ArtifactCoordinates artifact = new ArtifactCoordinates(coordinate.groupId(), coordinate.artifactId());
         URI uri = MavenDataStoreDownloadTask.downloadUri(repository.url(), artifact, coordinate.version(), fileVersion,
                 classifier);
         Path cached = MavenDataStoreDownloadTask.localRepositoryPath(localRepository, artifact, coordinate.version(),
                 fileVersion, classifier);
+        if (NexusCatalog.PROTOBUF_CLASSIFIERS.contains(classifier)) {
+            Path zip = placeProtobuf(http, repository, uri, cached,
+                    protobufFile(solor, coordinate.artifactId(), fileVersion, classifier), localRepository, listener,
+                    cancelWith);
+            if (described.isPresent()) {
+                Map<String, String> attributes = new TreeMap<>();
+                attributes.put(KnowledgeBase.RESOLVED_VERSION, fileVersion);
+                attributes.put(RESOLVED_REPOSITORY, repository.serverId());
+                attributes.put(DOWNLOADED_AT, Instant.now().toString());
+                attributes.put(SOURCE_SHA1, sha1(cached));
+                describeProtobuf(zip, coordinate, described.get(), attributes);
+            }
+            return zip;
+        }
+        Path destination = destination(solor, coordinate.artifactId(), fileVersion);
         MavenDataStoreDownloadTask task = repository.credentials().isPresent()
                 ? MavenDataStoreDownloadTask.unpackTask(http, uri, cached, destination,
                 MavenDataStoreDownloadTask.AssetVerification.NONE, repository.credentials().get())
@@ -150,6 +193,89 @@ public final class StoreDownload {
         addToManifest(store, attributes);
         UsageJournal.record(localRepository, UsageJournal.DASHBOARD, LocalDate.now(), List.of(cached));
         return store;
+    }
+
+    private static Path placeProtobuf(HttpClient http, RepositoryAccess repository, URI uri, Path cached, Path file,
+                                      Path localRepository, DownloadListener<Path> listener,
+                                      Consumer<Runnable> cancelWith) throws Exception {
+        MavenDataStoreDownloadTask task = repository.credentials().isPresent()
+                ? MavenDataStoreDownloadTask.placeAsFileTask(http, uri, cached, file,
+                MavenDataStoreDownloadTask.AssetVerification.NONE, repository.credentials().get())
+                : MavenDataStoreDownloadTask.placeAsFileTask(http, uri, cached, file,
+                MavenDataStoreDownloadTask.AssetVerification.NONE);
+        if (listener != null) {
+            task.addListener(listener);
+        }
+        cancelWith.accept(task::cancel);
+        Path placed;
+        try {
+            placed = task.call();
+        } catch (CancellationException e) {
+            Files.deleteIfExists(file);
+            throw e;
+        }
+        UsageJournal.record(localRepository, UsageJournal.DASHBOARD, LocalDate.now(), List.of(cached));
+        return placed;
+    }
+
+    /**
+     * Keeps what a protobuf's zip cannot carry in its folder under
+     * {@value KnowledgeBaseScanner#PROTOBUF_DESCRIPTIONS}: its knowledge base's descriptor and icon, its
+     * Maven coordinate, and the facts of the download, laid out as in a store.
+     *
+     * @param zip        the protobuf
+     * @param coordinate the knowledge base
+     * @param described  its descriptor and icon, as Nexus deploys them
+     * @param attributes the download's facts, {@code Ike-*} manifest attributes
+     * @throws IOException if they cannot be written
+     */
+    static void describeProtobuf(Path zip, Coordinate coordinate, NexusCatalog.Described described,
+                                 Map<String, String> attributes) throws IOException {
+        Path folder = KnowledgeBaseScanner.describing(zip);
+        deleteTree(folder);
+        Path descriptor = folder.resolve(KnowledgeBaseScanner.DESCRIPTOR);
+        Files.createDirectories(descriptor.getParent());
+        try (OutputStream out = Files.newOutputStream(descriptor)) {
+            described.descriptor().toProperties().store(out, "Knowledge-base descriptor, as Nexus deploys it beside "
+                    + zip.getFileName());
+        }
+        Path icon = folder.resolve(described.descriptor().icon()).normalize();
+        if (!icon.startsWith(folder)) {
+            throw new IOException("The descriptor's icon " + described.descriptor().icon() + " is outside its folder");
+        }
+        Files.createDirectories(icon.getParent());
+        Files.write(icon, described.icon());
+        Path pom = folder.resolve("META-INF/maven").resolve(coordinate.groupId()).resolve(coordinate.artifactId())
+                .resolve("pom.properties");
+        Files.createDirectories(pom.getParent());
+        Properties maven = new Properties();
+        maven.setProperty("groupId", coordinate.groupId());
+        maven.setProperty("artifactId", coordinate.artifactId());
+        maven.setProperty("version", coordinate.version());
+        try (OutputStream out = Files.newOutputStream(pom)) {
+            maven.store(out, null);
+        }
+        addToManifest(folder, attributes);
+    }
+
+    /**
+     * Where a protobuf is placed: {@code <solor>/<artifactId>-<deploy>-<classifier>.zip}, never over a
+     * file already there.
+     *
+     * @param solor       the knowledge-base folder
+     * @param artifactId  the knowledge base
+     * @param fileVersion the deploy
+     * @param classifier  {@code reasoned-pb} or {@code unreasoned-pb}
+     * @return the file
+     * @throws IOException if that deploy is already there
+     */
+    static Path protobufFile(Path solor, String artifactId, String fileVersion, String classifier) throws IOException {
+        Path file = solor.resolve(artifactId + "-" + fileVersion + "-" + classifier + ".zip");
+        if (Files.exists(file)) {
+            throw new IOException(file + " is already there");
+        }
+        Files.createDirectories(solor);
+        return file;
     }
 
     private static void deleteTree(Path root) throws IOException {

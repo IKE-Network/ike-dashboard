@@ -775,6 +775,16 @@ public final class DashboardView extends BorderPane {
     }
 
     /**
+     * What Nexus describes of a knowledge base.
+     *
+     * @param coordinate the knowledge base, at its base version
+     * @return its descriptor and icon, when the catalog has them
+     */
+    public Optional<NexusCatalog.Described> described(Coordinate coordinate) {
+        return Optional.ofNullable(catalog.described().get(coordinate));
+    }
+
+    /**
      * The name a person reads for a knowledge base: its descriptor's display name, from a copy here or
      * from Nexus, else its artifactId.
      *
@@ -1218,8 +1228,9 @@ public final class DashboardView extends BorderPane {
         Optional<KnowledgeBase> latest = family.latest();
         List<KnowledgeBase> changeSets = family.members().stream().filter(member -> member.kind() == StoreKind.CHANGE_SETS).toList();
         if (latest.isEmpty()) {
-            detail.getChildren().add(muted("Change sets only. Komet loads change sets into a store; it does not open them."));
-            detail.getChildren().add(section("Change sets", changeSets, true, false));
+            detail.getChildren().add(muted("Protobufs only. Komet loads a protobuf into a store; it does not open it."));
+            detail.getChildren().add(section(KnowledgeBaseTree.PROTOBUFS, changeSets, true, false));
+            relations(family).ifPresent(detail.getChildren()::add);
             return;
         }
         KnowledgeBase copy = latest.get();
@@ -1301,8 +1312,98 @@ public final class DashboardView extends BorderPane {
             detail.getChildren().add(section("Older copies", older, true, true));
         }
         if (!changeSets.isEmpty()) {
-            detail.getChildren().add(section("Change sets", changeSets, false, false));
+            detail.getChildren().add(section(KnowledgeBaseTree.PROTOBUFS, changeSets, false, false));
         }
+        relations(family).ifPresent(detail.getChildren()::add);
+    }
+
+    /**
+     * What a knowledge base was built from and what is built from it (decision 18): the inputs its newest
+     * descriptor records, and every knowledge base here or on Nexus whose descriptor records it. Each one
+     * the dashboard knows is a link: to its line here, else to it in the Nexus window.
+     */
+    private Optional<Node> relations(KnowledgeBaseFamily family) {
+        Optional<KnowledgeBaseDescriptor> descriptor = family.members().stream()
+                .flatMap(member -> member.descriptor().descriptor().stream()).findFirst();
+        if (descriptor.isEmpty()) {
+            return Optional.empty();
+        }
+        Coordinate self = descriptor.get().coordinate();
+        Map<Coordinate, NexusCatalog.Described> described = catalog.described();
+        VBox built = new VBox(2);
+        descriptor.get().inputs().stream().filter(input -> !input.of(self)).forEach(input -> {
+            KnowledgeBaseTree.Node node = KnowledgeBaseTree.input(input, described);
+            String version = input.version().map(text -> "  " + text).orElse("");
+            built.getChildren().add(relation(node.label(), node.knowledgeBase(),
+                    KnowledgeBaseTree.describe(input) + version));
+        });
+        Map<String, Coordinate> including = new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        families.stream().filter(other -> other != family)
+                .forEach(other -> other.members().stream().flatMap(member -> member.descriptor().descriptor().stream())
+                        .filter(found -> found.includes(self)).findFirst()
+                        .ifPresent(found -> including.putIfAbsent(found.displayName(), found.coordinate())));
+        described.forEach((coordinate, entry) -> {
+            if (!coordinate.artifactId().equals(self.artifactId()) && entry.descriptor().includes(self)) {
+                including.putIfAbsent(entry.descriptor().displayName(), coordinate);
+            }
+        });
+        VBox included = new VBox(2);
+        including.forEach((name, coordinate) -> included.getChildren().add(relation(name, Optional.of(coordinate), "")));
+        if (built.getChildren().isEmpty() && included.getChildren().isEmpty()) {
+            return Optional.empty();
+        }
+        VBox box = new VBox(6);
+        if (!built.getChildren().isEmpty()) {
+            box.getChildren().addAll(heading(KnowledgeBaseTree.BUILT_FROM), built);
+        }
+        if (!included.getChildren().isEmpty()) {
+            box.getChildren().addAll(heading(KnowledgeBaseTree.INCLUDED_IN), included);
+        }
+        TitledPane pane = new TitledPane("Knowledge bases", box);
+        pane.setAnimated(false);
+        pane.setExpanded(true);
+        return Optional.of(pane);
+    }
+
+    /**
+     * One knowledge base a relation names, by its name here when it is here: a link when the dashboard can
+     * show it, with what it is beside it.
+     */
+    private Node relation(String named, Optional<Coordinate> knowledgeBase, String what) {
+        Optional<KnowledgeBaseFamily> here = knowledgeBase.flatMap(coordinate -> families.stream()
+                .filter(family -> family.name().equalsIgnoreCase(coordinate.artifactId())).findFirst());
+        String name = here.map(KnowledgeBaseFamily::displayName).orElse(named);
+        Optional<Coordinate> onNexus = knowledgeBase.filter(coordinate -> catalog.described().keySet().stream()
+                .anyMatch(described -> described.artifactId().equals(coordinate.artifactId())));
+        Node label;
+        if (here.isPresent()) {
+            Hyperlink link = new Hyperlink(name);
+            link.setOnAction(event -> select(here.get().name()));
+            link.setTooltip(new Tooltip("In ~/Solor: show it"));
+            label = link;
+        } else if (onNexus.isPresent()) {
+            Hyperlink link = new Hyperlink(name);
+            link.setOnAction(event -> {
+                openBrowser();
+                browser.select(onNexus.get());
+            });
+            link.setTooltip(new Tooltip("Not in ~/Solor: show it in the Nexus window"));
+            label = link;
+        } else {
+            label = new Label(name);
+        }
+        HBox row = new HBox(8, label);
+        if (!what.isEmpty()) {
+            row.getChildren().add(muted(what));
+        }
+        row.setAlignment(Pos.CENTER_LEFT);
+        return row;
+    }
+
+    private static Label heading(String text) {
+        Label label = new Label(text);
+        label.setStyle("-fx-font-weight: bold;");
+        return label;
     }
 
     /** The offer to upgrade a store's change sets, when some need it. */
@@ -1505,7 +1606,7 @@ public final class DashboardView extends BorderPane {
                 mark.setText("▲ newer build");
                 mark.setStyle("-fx-font-size: 11px;" + ATTENTION);
             } else if (latest.isEmpty()) {
-                mark.setText("change sets");
+                mark.setText("protobuf");
                 mark.setStyle("-fx-font-size: 11px;" + MUTED);
                 name.setStyle(MUTED);
             } else if (launcher(latest.get()).isEmpty()) {

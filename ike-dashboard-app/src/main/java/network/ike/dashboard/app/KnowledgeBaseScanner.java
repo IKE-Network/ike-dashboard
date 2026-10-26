@@ -50,6 +50,14 @@ public final class KnowledgeBaseScanner {
     /** The knowledge-base descriptor, relative to the store. */
     public static final String DESCRIPTOR = "META-INF/ike/knowledge-base.properties";
 
+    /**
+     * Where the dashboard keeps what a downloaded protobuf says about itself, beside {@code ~/Solor}'s
+     * zips: a folder per zip, {@code .ike/protobufs/<zip name>/}, laid out as a store's {@code META-INF}
+     * is. A zip cannot carry it, since Komet reads every entry of a change-set zip; a hidden folder is
+     * one Komet does not list.
+     */
+    public static final String PROTOBUF_DESCRIPTIONS = ".ike/protobufs";
+
     /** The descriptor levels the dashboard reads. */
     public static final Set<Integer> SUPPORTED_LEVELS = Set.of(1);
 
@@ -91,8 +99,23 @@ public final class KnowledgeBaseScanner {
      * @throws IOException if it cannot be read
      */
     public static KnowledgeBase inspect(Path entry) throws IOException {
-        return new KnowledgeBase(entry.getFileName().toString(), entry, kind(entry), size(entry), descriptor(entry),
-                ikeAttributes(entry), Files.getLastModifiedTime(entry).toInstant(), knowledgeBaseDescriptor(entry));
+        Path describing = describing(entry);
+        return new KnowledgeBase(entry.getFileName().toString(), entry, kind(entry), size(entry), descriptor(describing),
+                ikeAttributes(describing), Files.getLastModifiedTime(entry).toInstant(), knowledgeBaseDescriptor(describing));
+    }
+
+    /**
+     * The folder that says what an entry is: a store's own, a zip's under {@value #PROTOBUF_DESCRIPTIONS}.
+     *
+     * @param entry a folder or zip
+     * @return the folder its {@code META-INF} is in
+     */
+    public static Path describing(Path entry) {
+        String name = entry.getFileName().toString();
+        if (!name.endsWith(".zip") || Files.isDirectory(entry)) {
+            return entry;
+        }
+        return entry.resolveSibling(PROTOBUF_DESCRIPTIONS).resolve(name);
     }
 
     /**
@@ -191,7 +214,27 @@ public final class KnowledgeBaseScanner {
                 entityFormat, assembledAt, access, field(properties, "icon"),
                 new KnowledgeBaseDescriptor.Memory(bytes(properties, "statedAxiomBytes"),
                         bytes(properties, "loadedHeapBytes"), bytes(properties, "reasonerHeapBytes")),
-                Optional.ofNullable(field(properties, "collection"))));
+                Optional.ofNullable(field(properties, "collection")), inputs(properties)));
+    }
+
+    /**
+     * The inputs a descriptor records, {@code input.1} on until one is missing; an entry that is not a
+     * role and a reference is left out, since no level requires them.
+     *
+     * @param properties the descriptor
+     * @return the inputs, in order
+     */
+    static List<KnowledgeBaseDescriptor.Input> inputs(Properties properties) {
+        List<KnowledgeBaseDescriptor.Input> inputs = new ArrayList<>();
+        for (int n = 1; field(properties, "input." + n) != null; n++) {
+            String[] entry = field(properties, "input." + n).split("\\s+", 2);
+            if (entry.length == 2) {
+                inputs.add(new KnowledgeBaseDescriptor.Input(entry[0], entry[1],
+                        Optional.ofNullable(field(properties, "input." + n + ".resolvedVersion")),
+                        Optional.ofNullable(field(properties, "input." + n + ".importer"))));
+            }
+        }
+        return inputs;
     }
 
     /** An optional size in bytes; absent when missing or not a whole number, which no level requires. */

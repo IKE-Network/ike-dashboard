@@ -37,8 +37,9 @@ import java.util.stream.Collectors;
 
 /**
  * The knowledge bases Nexus offers, asked of its search API: the store zips Komet opens once unpacked
- * ({@code rkb} for Rocks, {@code reasoned-sa} for a spined array), newest deploy per artifact, version
- * and classifier. The {@link #catalog catalog} keeps only the artifacts that deploy a knowledge-base
+ * ({@code rkb} for Rocks, {@code reasoned-sa} for a spined array) and the protobufs Komet loads into a
+ * store ({@code reasoned-pb}, {@code unreasoned-pb}), newest deploy per artifact, version and
+ * classifier. The {@link #catalog catalog} keeps only the artifacts that deploy a knowledge-base
  * descriptor ({@code properties:kb-descriptor}) at a supported level and their icon
  * ({@code png:icon}): small files read instead of the stores. Nexus answers search only for a
  * signed-in user, so this needs the repository's credentials.
@@ -51,6 +52,13 @@ public final class NexusCatalog {
     /** The classifiers of stores Komet opens, Rocks first. */
     public static final List<String> CLASSIFIERS = List.of("rkb", "reasoned-sa");
 
+    /** The classifiers of protobufs: change sets Komet loads into a store, reasoned or not. */
+    public static final List<String> PROTOBUF_CLASSIFIERS = List.of("reasoned-pb", "unreasoned-pb");
+
+    /** Every classifier the catalog lists, stores first. */
+    public static final List<String> OFFERED = java.util.stream.Stream.concat(CLASSIFIERS.stream(),
+            PROTOBUF_CLASSIFIERS.stream()).toList();
+
     /** The classifier a knowledge base's icon deploys under, a PNG beside its store zips. */
     public static final String ICON_CLASSIFIER = "icon";
 
@@ -60,10 +68,10 @@ public final class NexusCatalog {
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
 
     /**
-     * A store Nexus offers.
+     * A store or a protobuf Nexus offers.
      *
      * @param coordinate the artifact, at its base version ({@code -SNAPSHOT} for a snapshot)
-     * @param classifier {@code rkb} or {@code reasoned-sa}
+     * @param classifier one of {@link #OFFERED}
      * @param sizeBytes  the zip's size
      * @param updated    when it was deployed
      * @param repository the hosted repository holding it
@@ -71,12 +79,21 @@ public final class NexusCatalog {
     public record Offer(Coordinate coordinate, String classifier, long sizeBytes, Instant updated, String repository) {
 
         /**
-         * How the dashboard names the store's layout.
+         * How the dashboard names what the offer is.
          *
-         * @return "Rocks" or "spined array"
+         * @return such as "Rocks" or "protobuf, reasoned"
          */
         public String label() {
-            return "rkb".equals(classifier) ? "Rocks" : "spined array";
+            return NexusCatalog.label(classifier);
+        }
+
+        /**
+         * Whether the offer is a store Komet opens, not a protobuf it loads.
+         *
+         * @return whether it is a store
+         */
+        public boolean store() {
+            return CLASSIFIERS.contains(classifier);
         }
     }
 
@@ -144,6 +161,22 @@ public final class NexusCatalog {
     }
 
     /**
+     * How the dashboard names what a classifier deploys.
+     *
+     * @param classifier one of {@link #OFFERED}
+     * @return such as "Rocks" or "protobuf, reasoned"
+     */
+    public static String label(String classifier) {
+        return switch (classifier) {
+            case "rkb" -> "Rocks";
+            case "reasoned-sa" -> "spined array";
+            case "reasoned-pb" -> "protobuf, reasoned";
+            case "unreasoned-pb" -> "protobuf, unreasoned";
+            default -> classifier;
+        };
+    }
+
+    /**
      * Lists the knowledge bases Nexus offers, the newest deploy of each.
      *
      * @param http       the client
@@ -154,7 +187,7 @@ public final class NexusCatalog {
      */
     public static List<Offer> list(HttpClient http, RepositoryAccess repository) throws IOException, InterruptedException {
         List<Offer> all = new ArrayList<>();
-        for (String classifier : CLASSIFIERS) {
+        for (String classifier : OFFERED) {
             Optional<String> token = Optional.empty();
             do {
                 Map<String, String> query = new LinkedHashMap<>();
@@ -195,7 +228,7 @@ public final class NexusCatalog {
      * Reads a page of Nexus's asset search.
      *
      * @param json the answer
-     * @return the stores on it
+     * @return the stores and protobufs on it
      */
     @SuppressWarnings("unchecked")
     static Page parse(String json) {
@@ -205,7 +238,7 @@ public final class NexusCatalog {
             Map<String, Object> asset = (Map<String, Object>) item;
             Map<String, Object> maven = (Map<String, Object>) asset.get("maven2");
             String path = (String) asset.get("path");
-            if (maven == null || path == null || !CLASSIFIERS.contains((String) maven.get("classifier"))) {
+            if (maven == null || path == null || !OFFERED.contains((String) maven.get("classifier"))) {
                 continue;
             }
             String[] segments = path.split("/");
@@ -343,7 +376,7 @@ public final class NexusCatalog {
      * Keeps the newest deploy of each artifact, version and classifier.
      *
      * @param offers every deploy
-     * @return one offer each, by artifact, then version, then classifier as {@link #CLASSIFIERS} orders them
+     * @return one offer each, by artifact, then version, then classifier as {@link #OFFERED} orders them
      */
     static List<Offer> newest(List<Offer> offers) {
         Map<String, Offer> newest = new LinkedHashMap<>();
@@ -354,7 +387,7 @@ public final class NexusCatalog {
         return newest.values().stream()
                 .sorted(Comparator.comparing((Offer offer) -> offer.coordinate().artifactId())
                         .thenComparing(offer -> offer.coordinate().version())
-                        .thenComparing(offer -> CLASSIFIERS.indexOf(offer.classifier())))
+                        .thenComparing(offer -> OFFERED.indexOf(offer.classifier())))
                 .toList();
     }
 }

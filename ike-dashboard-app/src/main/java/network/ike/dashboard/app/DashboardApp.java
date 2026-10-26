@@ -364,11 +364,12 @@ public final class DashboardApp extends Application {
     }
 
     /**
-     * Downloads a store on the work thread, one at a time, each shown as a transfer the person can watch
+     * Downloads a store or a protobuf on the work thread, one at a time, each shown as a transfer the person can watch
      * and cancel: a download waiting its turn says so, and one cancelled before its turn never starts.
      */
     private void download(Coordinate coordinate, String classifier) {
-        String layout = "rkb".equals(classifier) ? "Rocks" : "spined array";
+        String layout = NexusCatalog.label(classifier);
+        Optional<NexusCatalog.Described> described = view.described(coordinate);
         Transfer transfer = new Transfer(view.nameOf(coordinate) + " (" + layout + ")");
         view.showTransfer(transfer, Optional.of(DashboardView.downloadKey(coordinate, classifier)));
         work.submit(() -> {
@@ -377,7 +378,7 @@ public final class DashboardApp extends Application {
             }
             try {
                 Path store = StoreDownload.download(RepositoryHttpClients.newClient(), DashboardCommand.access(settings),
-                        coordinate, classifier, settings.solor(), settings.localRepository(), transfer);
+                        coordinate, classifier, described, settings.solor(), settings.localRepository(), transfer);
                 transfer.finished(Transfer.State.DONE, "Downloaded " + store.getFileName());
                 Platform.runLater(() -> {
                     selectAfterRefresh = coordinate.artifactId();

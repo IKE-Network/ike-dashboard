@@ -118,7 +118,7 @@ public record KnowledgeBase(String name, Path path, StoreKind kind, long sizeByt
      * @return the icon file, a PNG; empty when the store is not managed
      */
     public Optional<Path> icon() {
-        return descriptor.descriptor().map(described -> path.resolve(described.icon()));
+        return descriptor.descriptor().map(described -> KnowledgeBaseScanner.describing(path).resolve(described.icon()));
     }
 
     /**

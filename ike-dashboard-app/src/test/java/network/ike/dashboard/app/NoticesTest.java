@@ -98,6 +98,23 @@ class NoticesTest {
     }
 
     @Test
+    void aProtobufIsNoNewsOfItsOwn() {
+        NexusCatalog.Catalog catalog = catalog(
+                new NexusCatalog.Offer(coordinate("snomedct-kb"), "unreasoned-pb", 52_000_000, NOW.minus(Duration.ofDays(1)),
+                        "ike-snapshots"),
+                offer("solor-kb", NOW.minus(Duration.ofDays(1))),
+                new NexusCatalog.Offer(coordinate("solor-kb"), "reasoned-pb", 52_000_000, NOW.minus(Duration.ofDays(1)),
+                        "ike-snapshots"));
+
+        List<Notice> notices = Notices.compute(inputs(List.of(), Map.of(), Map.of(), List.of(KOMET_1024),
+                Optional.empty(), Optional.of(catalog), Map.of()), id -> false);
+
+        assertThat(notices).extracting(Notice::title).as("the Nexus window lists protobufs under their knowledge base")
+                .containsExactly("New on Nexus: solor-kb");
+        assertThat(notices.getFirst().action()).contains(new NoticeAction.Download(coordinate("solor-kb"), "rkb"));
+    }
+
+    @Test
     void aTrackedCollectionStaysAtHandHoweverLongAgoItWasDeployed() {
         KnowledgeBaseFamily pizza = family(store("pizza-kb", StoreKind.ROCKS, Map.of()));
         NexusCatalog.Catalog catalog = new NexusCatalog.Catalog(List.of(

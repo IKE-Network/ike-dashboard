@@ -56,6 +56,13 @@ From then on it updates itself (see [Self-update](#self-update)). The link never
   `ike.kbAssemble.collection`); the `collections` preference (comma-separated, under
   `network/ike/dashboard`) is `SOLOR` unless set, every knowledge base the `solor-kb-ws` pipeline publishes.
 
+  The Nexus window is a tree: each knowledge base holds its Databases (the stores Komet opens), its
+  Protobufs (`reasoned-pb`, `unreasoned-pb`, which Komet loads into a store), what it was Built from, and what
+  it is Included in. Both come from the descriptors' `input.<n>` entries, which `ike:kb-assemble` writes from
+  its inputs. A downloaded protobuf goes into `~/Solor` as `<artifactId>-<deploy>-<classifier>.zip`, and its
+  knowledge base's descriptor and icon go beside it in `~/Solor/.ike/protobufs/<zip name>/`, so the
+  dashboard manages it as it manages a store. The main window's detail links the same relations.
+
 ## Run
 
 ```bash

@@ -88,6 +88,35 @@ class StoreDownloadTest {
     }
 
     @Test
+    void aProtobufIsManagedByWhatTheDashboardKeepsBesideIt(@TempDir Path temp) throws IOException {
+        Path solor = Files.createDirectories(temp.resolve("Solor"));
+        Coordinate snomed = new Coordinate("network.ike.data", "snomedct-kb", "20260601.2-SNAPSHOT");
+        Path zip = StoreDownload.protobufFile(solor, "snomedct-kb", "20260601.2-20261026.160451-9", "unreasoned-pb");
+        Files.writeString(zip, "change sets");
+        KnowledgeBaseDescriptor descriptor = new KnowledgeBaseDescriptor(1, snomed, Optional.empty(), "SNOMED CT",
+                "spined-64", 3, java.time.Instant.parse("2026-10-26T16:07:05Z"), "restricted", "META-INF/ike/icon.png",
+                KnowledgeBaseDescriptor.Memory.NONE, Optional.of("SOLOR"), java.util.List.of(new KnowledgeBaseDescriptor.Input(
+                        "SOURCE", "org.snomed:rf2:zip:20260601", Optional.empty(), Optional.of("snomed-rf2"))));
+
+        StoreDownload.describeProtobuf(zip, snomed, new NexusCatalog.Described(descriptor, new byte[] {(byte) 0x89, 'P'}),
+                Map.of(KnowledgeBase.RESOLVED_VERSION, "20260601.2-20261026.160451-9"));
+
+        assertThat(KnowledgeBaseScanner.scan(solor)).as("the hidden folder is no entry of its own").singleElement()
+                .satisfies(found -> {
+                    assertThat(found.kind()).isEqualTo(StoreKind.CHANGE_SETS);
+                    assertThat(found.managed()).isTrue();
+                    assertThat(found.coordinate()).contains(snomed);
+                    assertThat(found.descriptor().descriptor()).contains(descriptor);
+                    assertThat(found.resolvedVersion()).contains("20260601.2-20261026.160451-9");
+                    assertThat(found.icon().orElseThrow()).hasBinaryContent(new byte[] {(byte) 0x89, 'P'});
+                    assertThat(KnowledgeBaseFamily.managed(java.util.List.of(found)))
+                            .extracting(KnowledgeBaseFamily::name).containsExactly("snomedct-kb");
+                });
+        assertThatThrownBy(() -> StoreDownload.protobufFile(solor, "snomedct-kb", "20260601.2-20261026.160451-9",
+                "unreasoned-pb")).isInstanceOf(IOException.class).hasMessageContaining("already there");
+    }
+
+    @Test
     void theChecksumIsTheOneNexusServes() throws IOException {
         Path file = Files.writeString(store.resolve("a.txt"), "abc");
 

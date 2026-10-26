@@ -72,10 +72,19 @@ class DashboardViewSnapshotTest {
                         offer("pizza-kb", "rkb"),
                         offer("solor-gudid-kb", "rkb"),
                         offer("solor-gudid-kb", "reasoned-sa"),
+                        offer("solor-gudid-kb", "reasoned-pb"),
+                        offer("snomedct-kb", "unreasoned-pb"),
                         offer("undescribed-kb", "rkb")),
                 java.util.Map.of(
                         coordinate("pizza-kb"), described("pizza-kb", "Pizza Knowledge Base", new java.awt.Color(0xe65100), null),
-                        coordinate("solor-gudid-kb"), described("solor-gudid-kb", "SOLOR GUDID", new java.awt.Color(0x1565c0), "SOLOR")));
+                        coordinate("snomedct-kb"), described("snomedct-kb", "SNOMED CT", new java.awt.Color(0x2e7d32), "SOLOR"),
+                        coordinate("solor-gudid-kb"), described("solor-gudid-kb", "SOLOR GUDID", new java.awt.Color(0x1565c0), "SOLOR",
+                                new KnowledgeBaseDescriptor.Input("PB",
+                                        "network.ike.foundation:ike-starter-set:zip:unreasoned-pb:1-SNAPSHOT",
+                                        Optional.of("1-20261020.101010-4"), Optional.empty()),
+                                new KnowledgeBaseDescriptor.Input("PB",
+                                        "network.ike.data:snomedct-kb:zip:unreasoned-pb:1-SNAPSHOT",
+                                        Optional.of("1-20261026.160451-9"), Optional.empty()))));
 
         CompletableFuture<WritableImage> rendered = new CompletableFuture<>();
         CompletableFuture<WritableImage> notManaged = new CompletableFuture<>();
@@ -141,7 +150,8 @@ class DashboardViewSnapshotTest {
                         .map(node -> ((javafx.scene.control.Label) node).getText()).toList());
                 memory.complete(sizedScene.snapshot(null));
 
-                Scene browserScene = new Scene(view.browser(), 720, 200);
+                view.browser().select(coordinate("solor-gudid-kb"));
+                Scene browserScene = new Scene(view.browser(), 900, 380);
                 view.browser().applyCss();
                 view.browser().layout();
                 nexus.complete(browserScene.snapshot(null));
@@ -166,9 +176,15 @@ class DashboardViewSnapshotTest {
         assertThat(view.browser().shown()).as("only described knowledge bases on Nexus, the tracked collection's first")
                 .extracting(offer -> offer.coordinate().artifactId(), view.browser()::isHere, view.browser()::hasIcon,
                         view.browser()::tracked)
-                .containsExactly(org.assertj.core.groups.Tuple.tuple("solor-gudid-kb", false, true, true),
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("snomedct-kb", false, true, true),
+                        org.assertj.core.groups.Tuple.tuple("solor-gudid-kb", false, true, true),
+                        org.assertj.core.groups.Tuple.tuple("solor-gudid-kb", false, true, true),
                         org.assertj.core.groups.Tuple.tuple("solor-gudid-kb", false, true, true),
                         org.assertj.core.groups.Tuple.tuple("pizza-kb", true, true, false));
+        assertThat(view.browser().knowledgeBasesShown().get(1).under(KnowledgeBaseTree.BUILT_FROM))
+                .extracting(KnowledgeBaseTree.Node::label).containsExactly("ike-starter-set", "SNOMED CT");
+        assertThat(view.browser().knowledgeBasesShown().getFirst().under(KnowledgeBaseTree.INCLUDED_IN))
+                .extracting(KnowledgeBaseTree.Node::label).containsExactly("SOLOR GUDID");
         Path png = Path.of("target", "dashboard-view.png");
         write(image, png);
         assertThat(png).isNotEmptyFile();
@@ -270,12 +286,13 @@ class DashboardViewSnapshotTest {
     }
 
     private static NexusCatalog.Described described(String artifactId, String displayName, java.awt.Color color,
-                                                    String collection) throws IOException {
+                                                    String collection, KnowledgeBaseDescriptor.Input... inputs)
+            throws IOException {
         java.io.ByteArrayOutputStream png = new java.io.ByteArrayOutputStream();
         ImageIO.write(drawn(64, color), "png", png);
         return new NexusCatalog.Described(new KnowledgeBaseDescriptor(1, coordinate(artifactId), Optional.empty(), displayName,
                 "rocks", 3, Instant.parse("2026-10-24T00:19:00Z"), "restricted", "META-INF/ike/icon.png",
-                KnowledgeBaseDescriptor.Memory.NONE, Optional.ofNullable(collection)), png.toByteArray());
+                KnowledgeBaseDescriptor.Memory.NONE, Optional.ofNullable(collection), List.of(inputs)), png.toByteArray());
     }
 
     /** Gives a store a level-1 knowledge-base descriptor as ike:kb-assemble writes it, with or without its icon. */

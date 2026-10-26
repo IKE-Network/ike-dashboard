@@ -251,7 +251,9 @@ public final class Notices {
         inputs.families().forEach(family -> here.add(family.name().toLowerCase(Locale.ROOT)));
         // The catalog lists each coordinate's offers in the order the dashboard prefers their classifiers.
         Map<Coordinate, NexusCatalog.Offer> preferred = new LinkedHashMap<>();
+        // Stores only: a protobuf is loaded into a store, and the Nexus window lists it under its knowledge base.
         catalog.offers().stream()
+                .filter(NexusCatalog.Offer::store)
                 .filter(offer -> !here.contains(offer.coordinate().artifactId().toLowerCase(Locale.ROOT)))
                 .forEach(offer -> preferred.putIfAbsent(offer.coordinate(), offer));
         Instant since = inputs.now().minus(NEW_ON_NEXUS);

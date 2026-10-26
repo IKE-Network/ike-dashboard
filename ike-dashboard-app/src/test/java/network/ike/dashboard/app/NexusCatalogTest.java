@@ -9,7 +9,8 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The dashboard reads Nexus's asset search as Nexus writes it, keeping the newest deploy of each store.
+ * The dashboard reads Nexus's asset search as Nexus writes it, keeping the newest deploy of each store
+ * and protobuf.
  * The record is the one Nexus returned for pizza-kb on 2026-10-24, shortened.
  */
 class NexusCatalogTest {
@@ -39,12 +40,18 @@ class NexusCatalogTest {
             """;
 
     @Test
-    void aPageReadsAsTheStoresOnIt() {
+    void aPageReadsAsTheStoresAndProtobufsOnIt() {
         NexusCatalog.Page page = NexusCatalog.parse(PAGE);
 
-        assertThat(page.offers()).containsExactly(new NexusCatalog.Offer(
-                new Coordinate("network.ike.data", "pizza-kb", "20250627.1-SNAPSHOT"), "rkb", 1_795_725,
-                Instant.parse("2026-10-16T15:32:40.775Z"), "ike-restricted-snapshots"));
+        Coordinate pizza = new Coordinate("network.ike.data", "pizza-kb", "20250627.1-SNAPSHOT");
+        assertThat(page.offers()).containsExactly(
+                new NexusCatalog.Offer(pizza, "rkb", 1_795_725, Instant.parse("2026-10-16T15:32:40.775Z"),
+                        "ike-restricted-snapshots"),
+                new NexusCatalog.Offer(pizza, "reasoned-pb", 99, Instant.parse("2026-10-16T15:32:41Z"),
+                        "ike-restricted-snapshots"));
+        assertThat(page.offers()).extracting(NexusCatalog.Offer::label, NexusCatalog.Offer::store).containsExactly(
+                org.assertj.core.groups.Tuple.tuple("Rocks", true),
+                org.assertj.core.groups.Tuple.tuple("protobuf, reasoned", false));
         assertThat(page.continuationToken()).contains("8a2f1");
     }
 
