@@ -17,7 +17,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class UsageCollectorTest {
 
-    private static final Path REPOSITORY = Path.of("/Users/someone/.m2/repository");
+    // Absolute, as the collector keeps them: on Windows a path from the root has no drive until made so.
+    private static final Path REPOSITORY = Path.of("/Users/someone/.m2/repository").toAbsolutePath();
     private static final Path JAR = REPOSITORY.resolve("org/slf4j/slf4j-api/2.0.17/slf4j-api-2.0.17.jar");
 
     @Test
@@ -32,7 +33,7 @@ class UsageCollectorTest {
 
     @Test
     void filesAreKeptPerLocalRepository() {
-        Path ciRepository = Path.of("/Users/someone/.m2/solor-kb-ws-repository");
+        Path ciRepository = Path.of("/Users/someone/.m2/solor-kb-ws-repository").toAbsolutePath();
         Path zip = ciRepository.resolve("network/ike/data/solor-kb/1-SNAPSHOT/solor-kb-1-SNAPSHOT-rkb.zip");
         UsageCollector collector = new UsageCollector();
         collector.resolved(REPOSITORY, JAR);
