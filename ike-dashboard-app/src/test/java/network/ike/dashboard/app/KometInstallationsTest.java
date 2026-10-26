@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -54,7 +55,54 @@ class KometInstallationsTest {
                 0, java.util.Optional.empty(), java.util.Map.of(), java.time.Instant.EPOCH);
 
         assertThat(KometLauncher.command(komet, pizza))
-                .containsExactly("/Applications/Komet.app/Contents/MacOS/Komet", "--kb=/Users/someone/Solor/pizza-kb");
+                .containsExactly(komet.executable().toString(), "--kb=" + pizza.path());
+    }
+
+    @Test
+    void onWindowsKometIsAJlinkImageOrAnImageWhoseLauncherConfigurationRunsIt() throws IOException {
+        Path local = root.resolve("AppData/Local");
+        Path installed = appImage(local.resolve("Komet"), "Komet", "dev.ikm.komet.desktop/dev.ikm.komet.desktop.KometLauncher",
+                "26.1026.57");
+        appImage(local.resolve("Programs/Other"), "Other", "com.example/com.example.Main", "1.0");
+        Path install = root.resolve("IKE/Komet");
+        Path bin = Files.createDirectories(install.resolve(KometInstaller.imageFolder("26.1101.900")).resolve("bin"));
+        Files.writeString(bin.resolve("launchKomet.bat"), "@echo off\r\n");
+        Files.writeString(bin.getParent().resolve(KometInstaller.PROPERTIES), "version=26.1101.900\n");
+
+        List<KometInstallation> found = KometInstallations.find(KometInstallations.defaultRoots(root, install,
+                OperatingSystem.WINDOWS, Map.of("LOCALAPPDATA", local.toString())));
+
+        assertThat(found).extracting(KometInstallation::version).containsExactly("26.1101.900", "26.1026.57");
+        assertThat(found.getFirst().executable()).isEqualTo(bin.resolve("launchKomet.bat"));
+        assertThat(found.get(1).name()).isEqualTo("Komet");
+        assertThat(found.get(1).executable()).isEqualTo(installed.resolve("Komet.exe"));
+    }
+
+    @Test
+    void onWindowsKometIsLookedForWherePerUserAndEveryUserInstallersPutApplications() {
+        Path home = Path.of("home");
+        assertThat(KometInstallations.defaultRoots(home, Path.of("komets"), OperatingSystem.WINDOWS,
+                Map.of("ProgramFiles", Path.of("programs").toString())))
+                .containsExactly(Path.of("komets"), home.resolve("AppData/Local"), home.resolve("AppData/Local/Programs"),
+                        Path.of("programs"));
+    }
+
+    /**
+     * Writes a jpackage application image as Windows lays one out: its launcher, and beside it in
+     * {@code app} the launcher configuration naming the main module and the version.
+     */
+    static Path appImage(Path folder, String name, String main, String version) throws IOException {
+        Path app = Files.createDirectories(folder.resolve("app"));
+        Files.writeString(app.resolve(name + ".cfg"), """
+                [Application]
+                app.mainmodule=%s
+
+                [JavaOptions]
+                java-options=-Djpackage.app-version=%s
+                java-options=--enable-preview
+                """.formatted(main, version));
+        Files.write(folder.resolve(name + ".exe"), new byte[] {'M', 'Z'});
+        return folder;
     }
 
     private static void bundle(Path app, String identifier, String version, String executable) throws IOException {

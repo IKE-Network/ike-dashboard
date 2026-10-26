@@ -137,6 +137,29 @@ class RepositorySyncTest {
     }
 
     @Test
+    void onWindowsGitForWindowsIsPreferredThenAnyGitOnThePath(@TempDir Path temp) throws IOException {
+        Path everyone = git(temp.resolve("Program Files/Git/cmd"));
+        Path mine = git(temp.resolve("Local/Programs/Git/cmd"));
+        Path onPath = git(temp.resolve("tools"));
+        Map<String, String> environment = Map.of("ProgramFiles", temp.resolve("Program Files").toString(),
+                "LOCALAPPDATA", temp.resolve("Local").toString(),
+                "Path", temp.resolve("nothing") + ";" + temp.resolve("tools"));
+
+        assertThat(RepositorySync.Git.windowsCandidates(environment)).containsSubsequence(everyone, mine, onPath);
+        assertThat(RepositorySync.Git.find(environment, "Windows 11")).contains(new RepositorySync.Git(everyone));
+        Files.delete(everyone);
+        assertThat(RepositorySync.Git.find(environment, "Windows 11")).contains(new RepositorySync.Git(mine));
+        Files.delete(mine);
+        assertThat(RepositorySync.Git.find(environment, "Windows 11")).contains(new RepositorySync.Git(onPath));
+        Files.delete(onPath);
+        assertThat(RepositorySync.Git.find(environment, "Windows 11")).isEmpty();
+    }
+
+    private static Path git(Path folder) throws IOException {
+        return Files.write(Files.createDirectories(folder).resolve("git.exe"), new byte[] {'M', 'Z'});
+    }
+
+    @Test
     void macOsStandInForGitIsNeverRun() {
         Optional<RepositorySync.Git> found = RepositorySync.Git.find(Map.of(), "Mac OS X");
         found.ifPresent(chosen -> assertThat(chosen.executable()).isNotEqualTo(Path.of("/usr/bin/git")));

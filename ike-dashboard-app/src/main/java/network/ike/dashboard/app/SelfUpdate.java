@@ -50,6 +50,12 @@ import java.util.function.Consumer;
  * in {@code ~/Applications} when it cannot, such as an administrator's {@code /Applications} or a disk
  * image. One opened where it was downloaded runs translocated, from a randomized read-only copy, and is
  * first moved into {@code ~/Applications}.
+ *
+ * <p>On Windows the application is a jpackage image folder, {@value #WINDOWS_FOLDER}, which its
+ * per-user installer puts under {@code %LOCALAPPDATA%}. Its launcher configuration says it is the
+ * dashboard and which version ({@link AppImage}). It is not signed (KEC, 2026-10-26), so the
+ * {@code .sha1} Nexus keeps is the only check; Java unpacks it, and a PowerShell helper swaps it. One
+ * whose folder cannot be written is updated into {@code %LOCALAPPDATA%\Programs}. Nothing is translocated.
  */
 public final class SelfUpdate {
 
@@ -64,6 +70,15 @@ public final class SelfUpdate {
 
     /** The application's folder name. */
     public static final String BUNDLE_NAME = "IKE Dashboard.app";
+
+    /** The application's folder name on Windows. */
+    public static final String WINDOWS_FOLDER = "IKE Dashboard";
+
+    /** The application's launcher on Windows, in its folder. */
+    public static final String WINDOWS_LAUNCHER = WINDOWS_FOLDER + ".exe";
+
+    /** The dashboard's main module, which its launcher configuration names. */
+    static final String MAIN_MODULE = "network.ike.dashboard.app";
 
     /** The folder beside the application that holds a staged update and the previous application. */
     public static final String WORK_FOLDER = ".ike-dashboard-update";
@@ -105,14 +120,55 @@ public final class SelfUpdate {
             exec "$@"
             """;
 
+    /**
+     * The Windows helper: waits for the dashboard to quit, swaps the folders, and starts the rest of its
+     * arguments. A folder a process has just left can stay locked for a moment, by the system or a virus
+     * scanner, so each move is tried for ten seconds.
+     */
+    private static final String WINDOWS_SWAP_SCRIPT = """
+            # Written by the IKE Dashboard's self-update: replaces the dashboard once it has quit.
+            $waitFor = [int]$args[0]; $staged = $args[1]; $target = $args[2]; $previous = $args[3]
+            $then = @($args | Select-Object -Skip 4)
+            $process = Get-Process -Id $waitFor -ErrorAction SilentlyContinue
+            if ($process -and -not $process.WaitForExit(600000)) {
+                Write-Output "The dashboard (process $waitFor) did not quit in ten minutes; nothing was replaced."
+                exit 1
+            }
+            function Move-Retrying($from, $to) {
+                for ($i = 0; $i -lt 50; $i++) {
+                    try { Move-Item -LiteralPath $from -Destination $to -ErrorAction Stop; return $true }
+                    catch { Start-Sleep -Milliseconds 200 }
+                }
+                return $false
+            }
+            if (Test-Path -LiteralPath $previous) { Remove-Item -LiteralPath $previous -Recurse -Force }
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $previous) | Out-Null
+            if ((Test-Path -LiteralPath $target) -and -not (Move-Retrying $target $previous)) {
+                Write-Output "Could not move $target aside; nothing was replaced."
+                exit 1
+            }
+            if (-not (Test-Path -LiteralPath $staged) -or -not (Move-Retrying $staged $target)) {
+                Write-Output "Could not move $staged to $target; putting the previous one back."
+                if (Test-Path -LiteralPath $previous) { Move-Item -LiteralPath $previous -Destination $target }
+                exit 1
+            }
+            Write-Output "Replaced $target"
+            if ($then.Count -gt 1) {
+                Start-Process -FilePath $then[0] -ArgumentList $then[1..($then.Count - 1)]
+            } elseif ($then.Count -eq 1) {
+                Start-Process -FilePath $then[0]
+            }
+            """;
+
     private SelfUpdate() {
     }
 
     /**
      * The running dashboard: its application and version.
      *
-     * @param bundle  the {@code .app} folder
-     * @param version its {@code CFBundleShortVersionString}
+     * @param bundle  the {@code .app} folder, or the image folder outside macOS
+     * @param version its {@code CFBundleShortVersionString}, or its launcher configuration's
+     *                {@code jpackage.app-version}
      */
     public record Running(Path bundle, String version) {
     }
@@ -121,7 +177,10 @@ public final class SelfUpdate {
     public enum Location {
         /** Over the running one, whose folder can be written. */
         IN_PLACE,
-        /** Into {@code ~/Applications}, since the running one's folder cannot be written. */
+        /**
+         * Into {@code ~/Applications} ({@code %LOCALAPPDATA%\Programs} on Windows), since the running
+         * one's folder cannot be written.
+         */
         APPLICATIONS,
         /** Into {@code ~/Applications} once moved there, since macOS runs this one from a read-only copy. */
         TRANSLOCATED
@@ -186,24 +245,31 @@ public final class SelfUpdate {
         if (launcher == null || launcher.isBlank()) {
             return Optional.empty();
         }
-        // <bundle>/Contents/MacOS/<launcher>
-        Path bundle = Path.of(launcher).toAbsolutePath().getParent();
-        for (int i = 0; i < 2 && bundle != null; i++) {
+        // <bundle>/Contents/MacOS/<launcher>; <image>\<launcher>.exe; <image>/bin/<launcher>
+        int levels = switch (OperatingSystem.current()) {
+            case MAC -> 3;
+            case WINDOWS -> 1;
+            case LINUX -> 2;
+        };
+        Path bundle = Path.of(launcher).toAbsolutePath();
+        for (int i = 0; i < levels && bundle != null; i++) {
             bundle = bundle.getParent();
         }
         return bundle == null ? Optional.empty() : read(bundle);
     }
 
     /**
-     * Reads an application as a dashboard.
+     * Reads an application as a dashboard: a macOS bundle by its {@code Info.plist}, an image elsewhere
+     * by its launcher configuration.
      *
-     * @param bundle an {@code .app} folder
+     * @param bundle an {@code .app} folder, or an image folder
      * @return the dashboard, or empty when the folder is not one or cannot be read
      */
     public static Optional<Running> read(Path bundle) {
         Path plist = bundle.resolve("Contents").resolve("Info.plist");
         if (!Files.isRegularFile(plist)) {
-            return Optional.empty();
+            return AppImage.read(bundle).filter(image -> image.runs(MAIN_MODULE))
+                    .map(image -> new Running(bundle, image.version()));
         }
         try (InputStream in = new BufferedInputStream(Files.newInputStream(plist))) {
             if (KometInstallations.binary(in)) {
@@ -226,9 +292,24 @@ public final class SelfUpdate {
      * @return the placement
      */
     public static Placement place(Running running, Path home) {
-        Path applications = home.resolve("Applications").resolve(BUNDLE_NAME);
+        return place(running, home, OperatingSystem.current(), System.getenv());
+    }
+
+    /**
+     * Where an update of a running dashboard goes on a platform.
+     *
+     * @param running     the running dashboard
+     * @param home        the user's home folder
+     * @param platform    the platform
+     * @param environment the environment, for {@code LOCALAPPDATA}
+     * @return the placement
+     */
+    static Placement place(Running running, Path home, OperatingSystem platform, Map<String, String> environment) {
+        Path applications = platform == OperatingSystem.WINDOWS
+                ? OperatingSystem.localAppData(home, environment).resolve("Programs").resolve(WINDOWS_FOLDER)
+                : home.resolve("Applications").resolve(BUNDLE_NAME);
         Path bundle = running.bundle();
-        if (translocated(bundle)) {
+        if (platform == OperatingSystem.MAC && translocated(bundle)) {
             return new Placement(running, Location.TRANSLOCATED, applications);
         }
         Path folder = bundle.toAbsolutePath().getParent();
@@ -306,13 +387,37 @@ public final class SelfUpdate {
      */
     public static Path stage(HttpClient http, KometRelease release, Placement placement, Path localRepository,
                              Consumer<String> progress) throws Exception {
+        return stage(http, release, placement, localRepository, progress, OperatingSystem.current());
+    }
+
+    /**
+     * Downloads, checks and unpacks a dashboard build beside the target, as a platform does.
+     *
+     * @param http            the client
+     * @param release         the build
+     * @param placement       where it goes
+     * @param localRepository the local Maven repository, which keeps the download
+     * @param progress        told what is happening, in words
+     * @param platform        the platform
+     * @return the staged application, checked, ready to swap in
+     * @throws Exception if it cannot be downloaded, does not match its checksum, or is refused
+     */
+    static Path stage(HttpClient http, KometRelease release, Placement placement, Path localRepository,
+                      Consumer<String> progress, OperatingSystem platform) throws Exception {
         return stage(http, release, placement, localRepository, progress,
-                new KometInstaller.Progress(progress, "Downloading the IKE Dashboard " + release.version()), cancel -> { });
+                new KometInstaller.Progress(progress, "Downloading the IKE Dashboard " + release.version()), cancel -> { },
+                platform);
     }
 
     private static Path stage(HttpClient http, KometRelease release, Placement placement, Path localRepository,
                               Consumer<String> progress, DownloadListener<Path> listener, Consumer<Runnable> cancelWith)
             throws Exception {
+        return stage(http, release, placement, localRepository, progress, listener, cancelWith, OperatingSystem.current());
+    }
+
+    private static Path stage(HttpClient http, KometRelease release, Placement placement, Path localRepository,
+                              Consumer<String> progress, DownloadListener<Path> listener, Consumer<Runnable> cancelWith,
+                              OperatingSystem platform) throws Exception {
         Path staging = freshStaging(placement);
         try {
             Coordinate coordinate = release.coordinate().orElseThrow(
@@ -330,11 +435,11 @@ public final class SelfUpdate {
             UsageJournal.record(localRepository, UsageJournal.DASHBOARD, LocalDate.now(), List.of(cached));
             progress.accept("Unpacking the IKE Dashboard " + release.version() + " …");
             Path unpacked = Files.createDirectories(staging.resolve("unpacked"));
-            KometInstaller.run(List.of("ditto", "-x", "-k", zip.toString(), unpacked.toString()));
-            Path app = KometInstaller.only(unpacked, path -> Files.isDirectory(path)
-                    && path.getFileName().toString().endsWith(".app"), "The download holds no application");
-            progress.accept("Checking the IKE Dashboard " + release.version() + " with Gatekeeper …");
-            check(app, release.version());
+            KometInstaller.unpack(zip, unpacked, platform);
+            Path app = KometInstaller.only(unpacked, Files::isDirectory, "The download holds no application");
+            progress.accept("Checking the IKE Dashboard " + release.version()
+                    + (platform == OperatingSystem.MAC ? " with Gatekeeper …" : " …"));
+            check(app, release.version(), platform);
             Files.delete(zip);
             return app;
         } catch (Exception e) {
@@ -357,7 +462,7 @@ public final class SelfUpdate {
         try {
             Path copy = staging.resolve(BUNDLE_NAME);
             KometInstaller.run(List.of("ditto", placement.running().bundle().toString(), copy.toString()));
-            check(copy, placement.running().version());
+            check(copy, placement.running().version(), OperatingSystem.MAC);
             unquarantine(copy);
             return copy;
         } catch (Exception e) {
@@ -376,9 +481,27 @@ public final class SelfUpdate {
      * @throws InterruptedException if interrupted
      */
     static void check(Path app, String version) throws IOException, InterruptedException {
+        check(app, version, OperatingSystem.current());
+    }
+
+    /**
+     * Refuses an application that is not the dashboard of the version expected and, on macOS, one that
+     * {@code codesign} finds altered or that Gatekeeper would not open. Outside macOS the dashboard is
+     * not signed, and the checksum the download was checked against is the check.
+     *
+     * @param app      the application
+     * @param version  the version it should be
+     * @param platform the platform
+     * @throws IOException          if it is refused
+     * @throws InterruptedException if interrupted
+     */
+    static void check(Path app, String version, OperatingSystem platform) throws IOException, InterruptedException {
         Running found = read(app).orElseThrow(() -> new IOException(app.getFileName() + " is not the IKE Dashboard"));
         if (!found.version().equals(version)) {
             throw new IOException(app.getFileName() + " is version " + found.version() + ", not " + version);
+        }
+        if (platform != OperatingSystem.MAC) {
+            return;
         }
         try {
             KometInstaller.run(List.of("codesign", "--verify", "--deep", "--strict", app.toString()));
@@ -403,10 +526,19 @@ public final class SelfUpdate {
      */
     public static Process swap(Placement placement, Path staged, long waitFor, List<String> then, Path log)
             throws IOException {
-        Path script = Files.writeString(Files.createDirectories(placement.work()).resolve("swap.sh"), SWAP_SCRIPT);
         Files.createDirectories(log.toAbsolutePath().getParent());
-        List<String> command = new ArrayList<>(List.of("/bin/sh", script.toString(), Long.toString(waitFor),
-                staged.toString(), placement.target().toString(), placement.previous().toString()));
+        List<String> command;
+        if (OperatingSystem.current() == OperatingSystem.WINDOWS) {
+            Path script = Files.writeString(Files.createDirectories(placement.work()).resolve("swap.ps1"),
+                    WINDOWS_SWAP_SCRIPT);
+            command = new ArrayList<>(List.of("powershell.exe", "-NoProfile", "-NonInteractive",
+                    "-ExecutionPolicy", "Bypass", "-File", script.toString()));
+        } else {
+            Path script = Files.writeString(Files.createDirectories(placement.work()).resolve("swap.sh"), SWAP_SCRIPT);
+            command = new ArrayList<>(List.of("/bin/sh", script.toString()));
+        }
+        command.addAll(List.of(Long.toString(waitFor), staged.toString(), placement.target().toString(),
+                placement.previous().toString()));
         command.addAll(then);
         return new ProcessBuilder(command).redirectErrorStream(true)
                 .redirectOutput(ProcessBuilder.Redirect.appendTo(log.toFile())).start();
@@ -419,7 +551,11 @@ public final class SelfUpdate {
      * @return the command
      */
     public static List<String> relaunch(Path app) {
-        return List.of("/usr/bin/open", app.toString());
+        return switch (OperatingSystem.current()) {
+            case MAC -> List.of("/usr/bin/open", app.toString());
+            case WINDOWS -> List.of(app.resolve(WINDOWS_LAUNCHER).toString());
+            case LINUX -> List.of(app.resolve("bin").resolve(WINDOWS_FOLDER).toString());
+        };
     }
 
     /**

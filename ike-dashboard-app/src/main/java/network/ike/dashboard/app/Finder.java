@@ -22,14 +22,45 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * What the dashboard asks of the Finder: show a file, open one, and move copies to the Trash, where
- * the person can still take them back. Nothing the dashboard removes is deleted outright.
+ * What the dashboard asks of the file manager, the Finder on macOS and File Explorer on Windows: show a
+ * file, open one, and move copies to the Trash (the Recycle Bin on Windows), where the person can still
+ * take them back. Nothing the dashboard removes is deleted outright.
  */
 public final class Finder {
 
     private static final Path TRASH = Path.of("/usr/bin/trash");
 
+    /** Sends each path it is given to the Recycle Bin, as File Explorer's Delete does. */
+    private static final String RECYCLE = """
+            Add-Type -AssemblyName Microsoft.VisualBasic
+            foreach ($p in $args) {
+                if (Test-Path -LiteralPath $p -PathType Container) {
+                    [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($p, 'OnlyErrorDialogs', 'SendToRecycleBin')
+                } else {
+                    [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($p, 'OnlyErrorDialogs', 'SendToRecycleBin')
+                }
+            }
+            """;
+
     private Finder() {
+    }
+
+    /**
+     * The file manager's name, as a person reads it in a button: {@code Show in Finder}.
+     *
+     * @return {@code Finder}, or {@code File Explorer} on Windows
+     */
+    public static String name() {
+        return OperatingSystem.current() == OperatingSystem.WINDOWS ? "File Explorer" : "Finder";
+    }
+
+    /**
+     * Where removed files go, as a person reads it: {@code Move to Trash…}.
+     *
+     * @return {@code Trash}, or {@code Recycle Bin} on Windows
+     */
+    public static String trashName() {
+        return OperatingSystem.current() == OperatingSystem.WINDOWS ? "Recycle Bin" : "Trash";
     }
 
     /**
@@ -39,7 +70,12 @@ public final class Finder {
      * @throws IOException if the Finder cannot be asked
      */
     public static void reveal(Path path) throws IOException {
-        new ProcessBuilder("open", "-R", path.toString()).start();
+        if (OperatingSystem.current() == OperatingSystem.WINDOWS) {
+            // explorer takes the path after "/select," as the next argument, quoted or not.
+            new ProcessBuilder("explorer.exe", "/select,", path.toString()).start();
+        } else {
+            new ProcessBuilder("open", "-R", path.toString()).start();
+        }
     }
 
     /**
@@ -49,7 +85,7 @@ public final class Finder {
      * @throws IOException if it cannot be opened
      */
     public static void open(Path path) throws IOException {
-        new ProcessBuilder("open", path.toString()).start();
+        new ProcessBuilder(OperatingSystem.current() == OperatingSystem.WINDOWS ? "explorer.exe" : "open", path.toString()).start();
     }
 
     /**
@@ -64,7 +100,10 @@ public final class Finder {
             return;
         }
         List<String> command = new ArrayList<>();
-        if (Files.isExecutable(TRASH)) {
+        if (OperatingSystem.current() == OperatingSystem.WINDOWS) {
+            command.addAll(List.of("powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                    "& { " + RECYCLE + " } " + String.join(" ", paths.stream().map(Finder::quoted).toList())));
+        } else if (Files.isExecutable(TRASH)) {
             command.add(TRASH.toString());
             paths.forEach(path -> command.add(path.toString()));
         } else {
@@ -77,7 +116,17 @@ public final class Finder {
         Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
         String output = new String(process.getInputStream().readAllBytes()).strip();
         if (process.waitFor() != 0) {
-            throw new IOException("Could not move to the Trash" + (output.isEmpty() ? "" : ": " + output));
+            throw new IOException("Could not move to the " + trashName() + (output.isEmpty() ? "" : ": " + output));
         }
+    }
+
+    /**
+     * A path as a PowerShell literal: single-quoted, with each single quote doubled.
+     *
+     * @param path the path
+     * @return the literal
+     */
+    static String quoted(Path path) {
+        return "'" + path.toString().replace("'", "''") + "'";
     }
 }

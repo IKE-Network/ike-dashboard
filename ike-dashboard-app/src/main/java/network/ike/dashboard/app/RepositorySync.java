@@ -251,12 +251,50 @@ public final class RepositorySync {
             if (override != null && !override.isBlank()) {
                 return Optional.of(Path.of(override)).filter(Files::isExecutable).map(Git::new);
             }
+            if (OperatingSystem.of(osName) == OperatingSystem.WINDOWS) {
+                return windowsCandidates(environment).stream().filter(Files::isRegularFile).findFirst().map(Git::new);
+            }
             List<Path> candidates = new ArrayList<>(CANDIDATES);
             if (!osName.toLowerCase(Locale.ROOT).contains("mac")) {
                 // Elsewhere /usr/bin/git is git itself, not a stand-in that offers to install it.
                 candidates.add(Path.of("/usr/bin/git"));
             }
             return candidates.stream().filter(Files::isExecutable).findFirst().map(Git::new);
+        }
+
+        /**
+         * Where Git for Windows puts git, in the order preferred: its installer for every user
+         * ({@code Program Files}), its installer for one user ({@code %LOCALAPPDATA%\Programs}), then
+         * any {@code git.exe} on the {@code PATH}, as from another installer.
+         *
+         * @param environment the environment
+         * @return the places to look
+         */
+        static List<Path> windowsCandidates(Map<String, String> environment) {
+            List<Path> candidates = new ArrayList<>();
+            for (String programFiles : List.of("ProgramFiles", "ProgramW6432")) {
+                String folder = environment.get(programFiles);
+                if (folder != null && !folder.isBlank()) {
+                    candidates.add(Path.of(folder, "Git", "cmd", "git.exe"));
+                }
+            }
+            String local = environment.get("LOCALAPPDATA");
+            if (local != null && !local.isBlank()) {
+                candidates.add(Path.of(local, "Programs", "Git", "cmd", "git.exe"));
+            }
+            // Windows does not distinguish the variable's case; a Map handed in does.
+            String path = environment.entrySet().stream().filter(entry -> entry.getKey().equalsIgnoreCase("PATH"))
+                    .map(Map.Entry::getValue).findFirst().orElse("");
+            for (String folder : path.split(";")) {
+                if (!folder.isBlank()) {
+                    try {
+                        candidates.add(Path.of(folder.strip(), "git.exe"));
+                    } catch (java.nio.file.InvalidPathException e) {
+                        // A PATH entry that is not a path names no git.
+                    }
+                }
+            }
+            return candidates;
         }
 
         /**

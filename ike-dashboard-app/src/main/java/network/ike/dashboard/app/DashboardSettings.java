@@ -18,6 +18,7 @@ package network.ike.dashboard.app;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.prefs.Preferences;
 import java.util.stream.Collectors;
@@ -83,13 +84,39 @@ public record DashboardSettings(Path solor, Path installLocation, String reposit
      * @return the settings
      */
     public static DashboardSettings read(Preferences preferences, Path home) {
+        return read(preferences, home, OperatingSystem.current(), System.getenv());
+    }
+
+    /**
+     * The settings, from the preferences where set, the platform's defaults otherwise. On Windows Komet
+     * versions install under {@code %LOCALAPPDATA%\Programs\IKE\Komet}, where a per-user installer puts
+     * applications, and the logs go to {@code %LOCALAPPDATA%\IKE Dashboard\logs}; elsewhere under
+     * {@code ~/Applications/IKE/Komet} and {@code ~/Library/Logs/IKE Dashboard}.
+     *
+     * @param preferences the dashboard's node
+     * @param home        the user's home folder
+     * @param platform    the platform
+     * @param environment the environment, for {@code LOCALAPPDATA}
+     * @return the settings
+     */
+    static DashboardSettings read(Preferences preferences, Path home, OperatingSystem platform, Map<String, String> environment) {
+        Path installLocation;
+        Path logFolder;
+        if (platform == OperatingSystem.WINDOWS) {
+            Path local = OperatingSystem.localAppData(home, environment);
+            installLocation = local.resolve("Programs").resolve("IKE").resolve("Komet");
+            logFolder = local.resolve("IKE Dashboard").resolve("logs");
+        } else {
+            installLocation = home.resolve("Applications/IKE/Komet");
+            logFolder = home.resolve("Library/Logs/IKE Dashboard");
+        }
         return new DashboardSettings(
                 Path.of(preferences.get("solor", home.resolve("Solor").toString())),
-                Path.of(preferences.get("installLocation", home.resolve("Applications/IKE/Komet").toString())),
+                Path.of(preferences.get("installLocation", installLocation.toString())),
                 preferences.get("repositoryUrl", RepositoryAccess.RESTRICTED_URL),
                 preferences.get("serverId", RepositoryAccess.RESTRICTED_SERVER_ID),
                 Path.of(preferences.get("localRepository", home.resolve(".m2/repository").toString())),
-                Path.of(preferences.get("logFolder", home.resolve("Library/Logs/IKE Dashboard").toString())),
+                Path.of(preferences.get("logFolder", logFolder.toString())),
                 collections(preferences.get("collections", DEFAULT_COLLECTIONS)));
     }
 

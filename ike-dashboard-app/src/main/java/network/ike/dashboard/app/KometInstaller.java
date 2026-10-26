@@ -20,6 +20,7 @@ import network.ike.dashboard.download.DownloadListener;
 import network.ike.dashboard.download.MavenDataStoreDownloadTask;
 import network.ike.dashboard.journal.UsageJournal;
 
+import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -41,14 +42,17 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 /**
  * Installs a Komet build beside the ones already installed, never over one, so any version stays
  * available to open what it reads. A jlink image from Nexus is unpacked into
  * {@code <install location>/komet-<version>} and run by its own launcher; an installer package from
  * GitHub has its application taken out, signature checked, and placed in the install location, with
- * no installer and no administrator password. Unpacking uses the macOS tools, which keep the
- * launcher's execute bit and the image's symbolic links.
+ * no installer and no administrator password. On macOS unpacking uses the macOS tools, which keep the
+ * launcher's execute bit and the image's symbolic links; on Windows, which has neither, Java unpacks
+ * it. A package from GitHub is a macOS {@code .pkg}, so only macOS installs from GitHub.
  */
 public final class KometInstaller {
 
@@ -131,8 +135,8 @@ public final class KometInstaller {
             verify(cached, release);
             progress.accept("Unpacking Komet " + release.version() + " …");
             Path unpacked = Files.createDirectories(staging.resolve("unpacked"));
-            run(List.of("ditto", "-x", "-k", zip.toString(), unpacked.toString()));
-            Path image = only(unpacked, path -> Files.isExecutable(path.resolve("bin/launchKomet")),
+            unpack(zip, unpacked);
+            Path image = only(unpacked, path -> KometInstallations.imageLauncher(path).isPresent(),
                     "no Komet image with bin/launchKomet");
             Properties properties = new Properties();
             properties.setProperty("version", release.version());
@@ -154,6 +158,10 @@ public final class KometInstaller {
 
     private static KometInstallation installPackage(KometRelease release, Path installLocation,
                                                     Consumer<String> progress) throws Exception {
+        if (OperatingSystem.current() != OperatingSystem.MAC) {
+            throw new IOException("Komet " + release.version() + " from GitHub is a macOS package; on this machine"
+                    + " Komet installs from Nexus");
+        }
         Path staging = Files.createTempDirectory(installLocation, ".komet-" + release.version() + "-");
         try {
             Path pkg = staging.resolve("komet.pkg");
@@ -248,6 +256,67 @@ public final class KometInstaller {
     private static void refuseExisting(Path target) throws IOException {
         if (Files.exists(target)) {
             throw new IOException(target.getFileName() + " is already installed in " + target.getParent());
+        }
+    }
+
+    /**
+     * Unpacks a zip into a folder: with {@code ditto} on macOS, which keeps execute bits, symbolic links
+     * and extended attributes; with {@code unzip} on Linux, for the execute bits; in Java on Windows.
+     *
+     * @param zip  the zip
+     * @param into the folder
+     * @throws IOException          if it cannot be unpacked
+     * @throws InterruptedException if interrupted
+     */
+    static void unpack(Path zip, Path into) throws IOException, InterruptedException {
+        unpack(zip, into, OperatingSystem.current());
+    }
+
+    /**
+     * Unpacks a zip into a folder the way a platform does.
+     *
+     * @param zip      the zip
+     * @param into     the folder
+     * @param platform the platform
+     * @throws IOException          if it cannot be unpacked
+     * @throws InterruptedException if interrupted
+     */
+    static void unpack(Path zip, Path into, OperatingSystem platform) throws IOException, InterruptedException {
+        switch (platform) {
+            case MAC -> run(List.of("ditto", "-x", "-k", zip.toString(), into.toString()));
+            case LINUX -> run(List.of("unzip", "-q", zip.toString(), "-d", into.toString()));
+            case WINDOWS -> unzip(zip, into);
+        }
+    }
+
+    /**
+     * Unpacks a zip in Java, refusing any entry that would land outside the folder.
+     *
+     * @param zip  the zip
+     * @param into the folder
+     * @throws IOException if it cannot be read or names a path outside the folder
+     */
+    static void unzip(Path zip, Path into) throws IOException {
+        Path root = into.toAbsolutePath().normalize();
+        try (ZipInputStream in = new ZipInputStream(new BufferedInputStream(Files.newInputStream(zip)))) {
+            for (ZipEntry entry; (entry = in.getNextEntry()) != null; ) {
+                // Some Windows tools write their own separator into the names.
+                String name = entry.getName().replace('\\', '/');
+                Path target = root.resolve(name).normalize();
+                if (target.equals(root)) {
+                    continue;
+                }
+                if (!target.startsWith(root)) {
+                    throw new IOException(zip.getFileName() + " names a path outside the folder it is unpacked in: "
+                            + entry.getName());
+                }
+                if (entry.isDirectory() || name.endsWith("/")) {
+                    Files.createDirectories(target);
+                } else {
+                    Files.createDirectories(target.getParent());
+                    Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
         }
     }
 

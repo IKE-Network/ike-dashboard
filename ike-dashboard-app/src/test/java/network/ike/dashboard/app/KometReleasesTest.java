@@ -1,6 +1,8 @@
 package network.ike.dashboard.app;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
@@ -56,6 +58,7 @@ class KometReleasesTest {
     }
 
     @Test
+    @DisabledOnOs(value = OS.WINDOWS, disabledReason = "an execute bit; KometInstallationsTest has the Windows image")
     void anInstalledImageIsAKomet(@TempDir Path install) throws IOException {
         Path image = Files.createDirectories(install.resolve(KometInstaller.imageFolder("26.1024.999") + "/bin"));
         Path launcher = Files.writeString(image.resolve("launchKomet"), "#!/bin/sh\n");

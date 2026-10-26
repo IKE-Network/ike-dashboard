@@ -174,8 +174,8 @@ final class HeapView {
         if (plan.fit() == HeapSizing.Fit.NOT_BESIDE_RUNNING) {
             content.append("Closing one of these makes room:\n").append(plan.machine().running().stream()
                     .map(running -> "    " + running.text()).collect(Collectors.joining("\n"))).append("\n\n");
-            content.append("Opened anyway, the Komets together can claim more memory than the machine has, and macOS "
-                    + "swaps or one of them runs out.");
+            content.append("Opened anyway, the Komets together can claim more memory than the machine has, and the "
+                    + "system swaps or one of them runs out.");
         } else if (shrinks) {
             content.append("Rocks keeps its data off the heap, so a smaller heap may open and browse it, and run out "
                     + "under a heavier load.");

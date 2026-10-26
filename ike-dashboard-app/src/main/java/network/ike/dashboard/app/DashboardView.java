@@ -1203,10 +1203,11 @@ public final class DashboardView extends BorderPane {
         detail.getChildren().add(why);
         detail.getChildren().add(muted("The dashboard manages a store that carries a complete knowledge-base descriptor"
                 + " (level 1) and its icon, as builds by ike-maven-plugin 268 or later do. Download a newer build to"
-                + " manage this knowledge base; this copy can be shown in the Finder or moved to the Trash."));
-        Button reveal = new Button("Show in Finder");
+                + " manage this knowledge base; this copy can be shown in " + (OperatingSystem.current() == OperatingSystem.WINDOWS ? "File Explorer" : "the Finder")
+                + " or moved to the " + Finder.trashName() + "."));
+        Button reveal = new Button("Show in " + Finder.name());
         reveal.setOnAction(event -> onReveal.accept(entry.path()));
-        Button trash = new Button("Move to Trash…");
+        Button trash = new Button("Move to " + Finder.trashName() + "…");
         trash.setOnAction(event -> confirmTrash(List.of(entry)));
         HBox actions = new HBox(8, reveal, trash);
         actions.setPadding(new Insets(6, 0, 0, 0));
@@ -1370,7 +1371,7 @@ public final class DashboardView extends BorderPane {
         if (!trashAll) {
             return pane;
         }
-        Button trash = new Button("Move to Trash…");
+        Button trash = new Button("Move to " + Finder.trashName() + "…");
         trash.setOnAction(event -> confirmTrash(copies));
         HBox bar = new HBox(trash);
         bar.setAlignment(Pos.CENTER_RIGHT);
@@ -1439,7 +1440,7 @@ public final class DashboardView extends BorderPane {
             memory.setOnAction(event -> onEditHeap.accept(copy));
             items.add(memory);
         }
-        MenuItem reveal = new MenuItem("Show in Finder");
+        MenuItem reveal = new MenuItem("Show in " + Finder.name());
         reveal.setOnAction(event -> onReveal.accept(copy.path()));
         MenuItem copyPath = new MenuItem("Copy path");
         copyPath.setOnAction(event -> {
@@ -1450,7 +1451,7 @@ public final class DashboardView extends BorderPane {
         items.add(reveal);
         items.add(copyPath);
         if (withOpenAndTrash) {
-            MenuItem trash = new MenuItem("Move to Trash…");
+            MenuItem trash = new MenuItem("Move to " + Finder.trashName() + "…");
             trash.setOnAction(event -> confirmTrash(List.of(copy)));
             items.add(trash);
         }
@@ -1460,13 +1461,13 @@ public final class DashboardView extends BorderPane {
     private void confirmTrash(List<KnowledgeBase> copies) {
         long bytes = copies.stream().mapToLong(KnowledgeBase::sizeBytes).sum();
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-        alert.setTitle("Move to Trash");
+        alert.setTitle("Move to " + Finder.trashName());
         alert.setHeaderText("Move " + (copies.size() == 1 ? copies.getFirst().name() : copies.size() + " copies")
-                + " (" + DashboardCommand.size(bytes) + ") to the Trash?");
+                + " (" + DashboardCommand.size(bytes) + ") to the " + Finder.trashName() + "?");
         alert.setContentText((copies.size() == 1 ? "" : copies.stream().map(KnowledgeBase::name)
                 .collect(Collectors.joining("\n", "", "\n\n")))
                 + "A copy you edited may hold work no build has. Quit any Komet that has one open first. "
-                + "The space comes back when the Trash is emptied.");
+                + "The space comes back when the " + Finder.trashName() + " is emptied.");
         alert.getButtonTypes().setAll(ButtonType.CANCEL, ButtonType.OK);
         if (getScene() != null) {
             alert.initOwner(getScene().getWindow());
@@ -1543,9 +1544,9 @@ public final class DashboardView extends BorderPane {
             line.setMinWidth(0);
             line.prefWidthProperty().bind(unmanagedList.widthProperty().subtract(36));
             setGraphic(line);
-            MenuItem reveal = new MenuItem("Show in Finder");
+            MenuItem reveal = new MenuItem("Show in " + Finder.name());
             reveal.setOnAction(event -> onReveal.accept(entry.path()));
-            MenuItem trash = new MenuItem("Move to Trash…");
+            MenuItem trash = new MenuItem("Move to " + Finder.trashName() + "…");
             trash.setOnAction(event -> confirmTrash(List.of(entry)));
             setContextMenu(new ContextMenu(reveal, trash));
         }

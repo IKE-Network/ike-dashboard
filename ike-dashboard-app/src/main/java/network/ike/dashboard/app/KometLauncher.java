@@ -20,6 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -29,7 +30,9 @@ import java.util.Map;
  * password itself. Its output goes to a log of its own, so the dashboard can quit while Komet runs.
  * Its heap is the {@link HeapSizing} plan's, through the variables a Komet image's {@code launchKomet}
  * takes ({@code KOMET_MAX_HEAP}, {@code KOMET_JAVA_OPTS}); a Komet whose launcher takes none starts at
- * the heap it was built with.
+ * the heap it was built with. Windows' {@code launchKomet.bat} cannot default an unset variable inline,
+ * so it takes only {@code KOMET_JAVA_OPTS}, after its own {@code -Xmx}: there the heap goes in as
+ * {@code -Xmx}, which the JVM takes the last of ({@link #launcherEnvironment}).
  */
 public final class KometLauncher {
 
@@ -55,14 +58,41 @@ public final class KometLauncher {
      */
     public static boolean takesHeap(KometInstallation komet) {
         Path launcher = komet.executable();
-        if (!launcher.getFileName().toString().equals("launchKomet") || !Files.isRegularFile(launcher)) {
+        String name = launcher.getFileName().toString();
+        if (!(name.equals("launchKomet") || windowsLauncher(launcher)) || !Files.isRegularFile(launcher)) {
             return false;
         }
         try {
-            return Files.readString(launcher).contains(HeapSizing.MAX_HEAP_VARIABLE);
+            return Files.readString(launcher).contains(windowsLauncher(launcher)
+                    ? HeapSizing.JAVA_OPTS_VARIABLE : HeapSizing.MAX_HEAP_VARIABLE);
         } catch (IOException e) {
             return false;
         }
+    }
+
+    /**
+     * The variables a launch sets, for the launcher it runs: the plan's as they are, except that
+     * Windows' {@code launchKomet.bat} takes the heap as {@code -Xmx} at the head of
+     * {@value HeapSizing#JAVA_OPTS_VARIABLE}.
+     *
+     * @param komet       the Komet
+     * @param environment the plan's variables ({@link HeapSizing.Plan#environment})
+     * @return the variables to set
+     */
+    static Map<String, String> launcherEnvironment(KometInstallation komet, Map<String, String> environment) {
+        String heap = environment.get(HeapSizing.MAX_HEAP_VARIABLE);
+        if (!windowsLauncher(komet.executable()) || heap == null) {
+            return environment;
+        }
+        Map<String, String> translated = new LinkedHashMap<>(environment);
+        translated.remove(HeapSizing.MAX_HEAP_VARIABLE);
+        String options = environment.get(HeapSizing.JAVA_OPTS_VARIABLE);
+        translated.put(HeapSizing.JAVA_OPTS_VARIABLE, "-Xmx" + heap + (options == null || options.isBlank() ? "" : " " + options));
+        return translated;
+    }
+
+    private static boolean windowsLauncher(Path launcher) {
+        return launcher.getFileName().toString().equalsIgnoreCase("launchKomet.bat");
     }
 
     /**
@@ -147,7 +177,7 @@ public final class KometLauncher {
         ProcessBuilder builder = new ProcessBuilder(upgradeCommand(komet, knowledgeBase))
                 .redirectErrorStream(true)
                 .redirectOutput(log.toFile());
-        builder.environment().putAll(environment);
+        builder.environment().putAll(launcherEnvironment(komet, environment));
         Process process = builder.start();
         int status = process.waitFor();
         return new UpgradeRun(status, report(Files.readString(log)), log);
@@ -190,7 +220,7 @@ public final class KometLauncher {
         ProcessBuilder builder = new ProcessBuilder(command(komet, knowledgeBase))
                 .redirectErrorStream(true)
                 .redirectOutput(log.toFile());
-        builder.environment().putAll(environment);
+        builder.environment().putAll(launcherEnvironment(komet, environment));
         builder.start();
         return log;
     }

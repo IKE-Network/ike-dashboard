@@ -63,8 +63,9 @@ class ChangeSetUpgradeLaunchTest {
 
     @Test
     void theUpgradeRunsKometOnTheStoreWithTheUpgradeOption() {
-        assertThat(KometLauncher.upgradeCommand(komet("26.1101.900"), STORE)).containsExactly(
-                "/k/26.1101.900/bin/launchKomet", "--kb=/Users/x/Solor/ike-kb", "--upgrade-change-sets");
+        KometInstallation komet = komet("26.1101.900");
+        assertThat(KometLauncher.upgradeCommand(komet, STORE)).containsExactly(
+                komet.executable().toString(), "--kb=" + STORE.path(), "--upgrade-change-sets");
     }
 
     @Test

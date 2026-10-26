@@ -17,6 +17,12 @@ package network.ike.dashboard.app;
 
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Path;
+import java.util.Map;
+import java.util.UUID;
+import java.util.prefs.BackingStoreException;
+import java.util.prefs.Preferences;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -29,5 +35,28 @@ class DashboardSettingsTest {
         assertThat(DashboardSettings.collections(DashboardSettings.DEFAULT_COLLECTIONS)).containsExactly("SOLOR");
         assertThat(DashboardSettings.collections(" SOLOR, ,Examples ")).containsExactly("SOLOR", "Examples");
         assertThat(DashboardSettings.collections("")).as("an empty preference tracks none").isEmpty();
+    }
+
+    @Test
+    void onWindowsKometInstallsAndTheDashboardLogsUnderLocalAppData() throws BackingStoreException {
+        Preferences empty = Preferences.userRoot().node("network/ike/dashboard-test-" + UUID.randomUUID());
+        try {
+            Path home = Path.of("home");
+            Path local = Path.of("local");
+
+            DashboardSettings windows = DashboardSettings.read(empty, home, OperatingSystem.WINDOWS,
+                    Map.of("LOCALAPPDATA", local.toString()));
+            assertThat(windows.installLocation()).isEqualTo(local.resolve("Programs/IKE/Komet"));
+            assertThat(windows.logFolder()).isEqualTo(local.resolve("IKE Dashboard/logs"));
+            assertThat(windows.solor()).isEqualTo(home.resolve("Solor"));
+            assertThat(DashboardSettings.read(empty, home, OperatingSystem.WINDOWS, Map.of()).installLocation())
+                    .as("without the variable").isEqualTo(home.resolve("AppData/Local/Programs/IKE/Komet"));
+
+            DashboardSettings mac = DashboardSettings.read(empty, home, OperatingSystem.MAC, Map.of());
+            assertThat(mac.installLocation()).isEqualTo(home.resolve("Applications/IKE/Komet"));
+            assertThat(mac.logFolder()).isEqualTo(home.resolve("Library/Logs/IKE Dashboard"));
+        } finally {
+            empty.removeNode();
+        }
     }
 }

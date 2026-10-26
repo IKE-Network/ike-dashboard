@@ -18,12 +18,14 @@ package network.ike.dashboard.app;
 import java.nio.file.Path;
 
 /**
- * One installed Komet: a macOS application bundle whose bundle identifier is Komet's.
+ * One installed Komet: a macOS application bundle whose bundle identifier is Komet's, a jlink image
+ * the dashboard installed, or a jpackage application image that runs Komet.
  *
- * @param name       the bundle's display name, such as {@code Komet Desktop 2026-10-16 346s}
+ * @param name       the display name, such as {@code Komet Desktop 2026-10-16 346s}
  * @param version    its version, such as {@code 26.1016.346}
- * @param bundle     the {@code .app} folder
- * @param executable the launcher inside it, {@code Contents/MacOS/<executable>}
+ * @param bundle     the {@code .app} or image folder
+ * @param executable the launcher inside it, such as {@code Contents/MacOS/<executable>},
+ *                   {@code bin/launchKomet} or {@code <name>.exe}
  */
 public record KometInstallation(String name, String version, Path bundle, Path executable) {
 

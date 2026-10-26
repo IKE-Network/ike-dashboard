@@ -18,6 +18,9 @@ package network.ike.dashboard.app;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
@@ -36,6 +39,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -91,6 +96,7 @@ class SelfUpdateTest {
     }
 
     @Test
+    @DisabledOnOs(value = OS.WINDOWS, disabledReason = "POSIX permissions")
     void aDashboardInAFolderThatCannotBeWrittenIsUpdatedIntoTheUsersApplications(@TempDir Path folder) throws IOException {
         Path locked = Files.createDirectories(folder.resolve("Applications"));
         SelfUpdate.Running running = new SelfUpdate.Running(bundle(locked, "26.1025.2011"), "26.1025.2011");
@@ -110,7 +116,7 @@ class SelfUpdateTest {
         SelfUpdate.Running running = new SelfUpdate.Running(Path.of(
                 "/private/var/folders/x1/abc/T/AppTranslocation/3F1C2A/d/IKE Dashboard.app"), "26.1025.2011");
 
-        SelfUpdate.Placement placement = SelfUpdate.place(running, Path.of("/Users/someone"));
+        SelfUpdate.Placement placement = SelfUpdate.place(running, Path.of("/Users/someone"), OperatingSystem.MAC, Map.of());
 
         assertThat(placement.location()).isEqualTo(SelfUpdate.Location.TRANSLOCATED);
         assertThat(placement.target()).isEqualTo(Path.of("/Users/someone/Applications/IKE Dashboard.app"));
@@ -184,6 +190,7 @@ class SelfUpdateTest {
     }
 
     @Test
+    @DisabledOnOs(value = OS.WINDOWS, disabledReason = "the POSIX helper; theWindowsHelperSwaps… is Windows'")
     void theHelperSwapsOnlyOnceTheDashboardHasQuitAndKeepsThePreviousOne(@TempDir Path folder) throws Exception {
         SelfUpdate.Placement placement = inPlace(folder);
         Files.writeString(placement.target().resolve("which"), "old");
@@ -206,6 +213,7 @@ class SelfUpdateTest {
     }
 
     @Test
+    @DisabledOnOs(value = OS.WINDOWS, disabledReason = "the POSIX helper")
     void theHelperPutsThePreviousOneBackWhenTheNewOneCannotBeMovedIn(@TempDir Path folder) throws Exception {
         SelfUpdate.Placement placement = inPlace(folder);
         Files.writeString(placement.target().resolve("which"), "old");
@@ -218,6 +226,81 @@ class SelfUpdateTest {
         assertThat(helper.exitValue()).isEqualTo(1);
         assertThat(placement.target().resolve("which")).hasContent("old");
         assertThat(opened).as("nothing new to open").doesNotExist();
+    }
+
+    @Test
+    void onWindowsTheDashboardIsTheImageWhoseLauncherConfigurationRunsIt(@TempDir Path folder) throws IOException {
+        Path dashboard = windowsImage(folder.resolve("IKE Dashboard"), "26.1027.900");
+        Path komet = KometInstallationsTest.appImage(folder.resolve("Komet"), "Komet",
+                "dev.ikm.komet.desktop/dev.ikm.komet.desktop.KometLauncher", "26.1026.57");
+
+        assertThat(SelfUpdate.read(dashboard)).contains(new SelfUpdate.Running(dashboard, "26.1027.900"));
+        assertThat(SelfUpdate.read(komet)).isEmpty();
+    }
+
+    @Test
+    void onWindowsADashboardThatCannotBeWrittenWhereItIsGoesToTheUsersPrograms(@TempDir Path folder) throws IOException {
+        Path local = folder.resolve("Local");
+        SelfUpdate.Running writable = new SelfUpdate.Running(windowsImage(local.resolve("IKE Dashboard"), "26.1027.900"),
+                "26.1027.900");
+        SelfUpdate.Running absent = new SelfUpdate.Running(folder.resolve("gone/IKE Dashboard"), "26.1027.900");
+
+        SelfUpdate.Placement inPlace = SelfUpdate.place(writable, folder, OperatingSystem.WINDOWS,
+                Map.of("LOCALAPPDATA", local.toString()));
+        SelfUpdate.Placement elsewhere = SelfUpdate.place(absent, folder, OperatingSystem.WINDOWS,
+                Map.of("LOCALAPPDATA", local.toString()));
+
+        assertThat(inPlace.location()).isEqualTo(SelfUpdate.Location.IN_PLACE);
+        assertThat(inPlace.previous()).isEqualTo(local.resolve(".ike-dashboard-update/previous/IKE Dashboard"));
+        assertThat(elsewhere.location()).isEqualTo(SelfUpdate.Location.APPLICATIONS);
+        assertThat(elsewhere.target()).isEqualTo(local.resolve("Programs/IKE Dashboard"));
+    }
+
+    @Test
+    void onWindowsTheDownloadIsUnpackedAndCheckedByItsVersionAlone(@TempDir Path folder) throws Exception {
+        windowsImage(folder.resolve("built/IKE Dashboard"), "26.1027.900");
+        Path zip = javaZip(folder.resolve("built"), folder.resolve("built.zip"));
+        KometRelease release = served("26.1027.900", Files.readAllBytes(zip), KometInstaller.digest(zip, "SHA-1"));
+        Path local = folder.resolve("Local");
+        Path running = windowsImage(local.resolve("IKE Dashboard"), "26.1026.1544");
+        SelfUpdate.Placement placement = new SelfUpdate.Placement(new SelfUpdate.Running(running, "26.1026.1544"),
+                SelfUpdate.Location.IN_PLACE, running);
+        List<String> said = new java.util.ArrayList<>();
+
+        Path staged = SelfUpdate.stage(HttpClient.newHttpClient(), release, placement, folder.resolve("repository"),
+                said::add, OperatingSystem.WINDOWS);
+
+        assertThat(staged).isEqualTo(placement.work().resolve("new/unpacked/IKE Dashboard"));
+        assertThat(SelfUpdate.read(staged)).contains(new SelfUpdate.Running(staged, "26.1027.900"));
+        assertThat(said).contains("Checking the IKE Dashboard 26.1027.900 …");
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    void theWindowsHelperSwapsOnlyOnceTheDashboardHasQuitAndKeepsThePreviousOne(@TempDir Path folder) throws Exception {
+        Path running = windowsImage(folder.resolve("Local/IKE Dashboard"), "26.1026.1544");
+        SelfUpdate.Placement placement = new SelfUpdate.Placement(new SelfUpdate.Running(running, "26.1026.1544"),
+                SelfUpdate.Location.IN_PLACE, running);
+        Files.writeString(running.resolve("which"), "old");
+        Path staged = windowsImage(placement.work().resolve("new/IKE Dashboard"), "26.1027.900");
+        Files.writeString(staged.resolve("which"), "new");
+        Path opened = folder.resolve("opened");
+        Process dashboard = new ProcessBuilder("powershell.exe", "-NoProfile", "-Command", "Start-Sleep -Seconds 3").start();
+
+        Process helper = SelfUpdate.swap(placement, staged, dashboard.pid(),
+                List.of("cmd.exe", "/c", "copy", "NUL", opened.toString()), folder.resolve("logs/self-update.log"));
+
+        assertThat(helper.waitFor(1, TimeUnit.SECONDS)).as("it waits while the dashboard runs").isFalse();
+        assertThat(running.resolve("which")).hasContent("old");
+        assertThat(helper.waitFor(60, TimeUnit.SECONDS)).isTrue();
+        assertThat(Files.readString(folder.resolve("logs/self-update.log"))).contains("Replaced " + running);
+        assertThat(helper.exitValue()).isZero();
+        assertThat(running.resolve("which")).hasContent("new");
+        assertThat(placement.previous().resolve("which")).hasContent("old");
+        for (int i = 0; i < 50 && !Files.exists(opened); i++) {
+            Thread.sleep(200);
+        }
+        assertThat(opened).as("then it starts the new one").exists();
     }
 
     @Test
@@ -291,6 +374,25 @@ class SelfUpdateTest {
 
     private String repository() {
         return "http://127.0.0.1:" + nexus.getAddress().getPort() + "/repository/ike-public/";
+    }
+
+    /** A dashboard image as Windows lays it out. */
+    private static Path windowsImage(Path folder, String version) throws IOException {
+        return KometInstallationsTest.appImage(folder, SelfUpdate.WINDOWS_FOLDER,
+                "network.ike.dashboard.app/network.ike.dashboard.app.DashboardApp", version);
+    }
+
+    /** Zips a folder's contents in Java, with the forward slashes the Windows build's zip has. */
+    private static Path javaZip(Path folder, Path zip) throws IOException {
+        try (ZipOutputStream out = new ZipOutputStream(Files.newOutputStream(zip));
+             java.util.stream.Stream<Path> walk = Files.walk(folder)) {
+            for (Path path : walk.filter(Files::isRegularFile).toList()) {
+                out.putNextEntry(new ZipEntry(folder.relativize(path).toString().replace('\\', '/')));
+                Files.copy(path, out);
+                out.closeEntry();
+            }
+        }
+        return zip;
     }
 
     /** Zips an application as the installer build does, keeping its folder. */

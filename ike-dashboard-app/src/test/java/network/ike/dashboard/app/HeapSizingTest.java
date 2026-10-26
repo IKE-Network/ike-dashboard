@@ -227,6 +227,23 @@ class HeapSizingTest {
     }
 
     @Test
+    void windowsLauncherTakesTheHeapAsTheLastXmxOfItsJavaOptions() throws IOException {
+        Path bin = Files.createDirectories(root.resolve("komet-26.1101.900/bin"));
+        Path launcher = Files.writeString(bin.resolve("launchKomet.bat"),
+                "set JAVA_OPTS=-Xmx42g %KOMET_JAVA_OPTS%\r\n");
+        KometInstallation windows = new KometInstallation("Komet 26.1101.900", "26.1101.900", bin.getParent(), launcher);
+        assertThat(KometLauncher.takesHeap(windows)).isTrue();
+
+        assertThat(KometLauncher.launcherEnvironment(windows, Map.of(HeapSizing.MAX_HEAP_VARIABLE, "24g",
+                HeapSizing.JAVA_OPTS_VARIABLE, "-Drocks.cache=512")))
+                .containsExactly(Map.entry(HeapSizing.JAVA_OPTS_VARIABLE, "-Xmx24g -Drocks.cache=512"));
+        assertThat(KometLauncher.launcherEnvironment(windows, Map.of(HeapSizing.MAX_HEAP_VARIABLE, "8g")))
+                .containsExactly(Map.entry(HeapSizing.JAVA_OPTS_VARIABLE, "-Xmx8g"));
+        assertThat(KometLauncher.launcherEnvironment(sizing, Map.of(HeapSizing.MAX_HEAP_VARIABLE, "8g")))
+                .as("a launcher that takes the variable is given it").containsExactly(Map.entry(HeapSizing.MAX_HEAP_VARIABLE, "8g"));
+    }
+
+    @Test
     void theRuleAndAStoresHeapAreKeptInThePreferences() throws IOException {
         assertThat(HeapSizing.Rule.read(node)).isEqualTo(RULE);
         HeapSizing.Rule mine = new HeapSizing.Rule(3.0, 0.5, 0.1, HeapSizing.DEFAULT_AXIOM_SHARE,

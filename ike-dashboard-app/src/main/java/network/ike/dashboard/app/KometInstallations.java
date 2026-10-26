@@ -39,23 +39,54 @@ import java.util.stream.Stream;
 
 /**
  * Finds the Komet versions installed: application bundles in the folders given, and one level of
- * version folders below them, whose {@code Info.plist} names Komet's bundle identifier.
+ * version folders below them, whose {@code Info.plist} names Komet's bundle identifier; jlink images
+ * the dashboard installed; and, outside macOS, jpackage application images whose launcher
+ * configuration runs Komet ({@link AppImage}), as Komet's Windows installer leaves.
  */
 public final class KometInstallations {
 
     private KometInstallations() {
     }
 
+    /** The package Komet's main class is in, which its application images name. */
+    static final String MAIN_PACKAGE = "dev.ikm.komet.desktop";
+
     /**
-     * The folders Komet versions are looked for in: {@code /Applications}, {@code ~/Applications},
-     * and the dashboard's own install location.
+     * The folders Komet versions are looked for on this machine.
      *
      * @param home            the user's home folder
      * @param installLocation the dashboard's install location for Komet versions
      * @return the folders
      */
     public static List<Path> defaultRoots(Path home, Path installLocation) {
-        return List.of(Path.of("/Applications"), home.resolve("Applications"), installLocation);
+        return defaultRoots(home, installLocation, OperatingSystem.current(), System.getenv());
+    }
+
+    /**
+     * The folders Komet versions are looked for in: on macOS {@code /Applications},
+     * {@code ~/Applications} and the dashboard's own install location; on Windows the install location,
+     * {@code %LOCALAPPDATA%} and its {@code Programs}, where a per-user installer puts an application,
+     * and {@code Program Files}, where one for every user does.
+     *
+     * @param home            the user's home folder
+     * @param installLocation the dashboard's install location for Komet versions
+     * @param platform        the platform
+     * @param environment     the environment
+     * @return the folders
+     */
+    static List<Path> defaultRoots(Path home, Path installLocation, OperatingSystem platform, Map<String, String> environment) {
+        return switch (platform) {
+            case MAC, LINUX -> List.of(Path.of("/Applications"), home.resolve("Applications"), installLocation);
+            case WINDOWS -> {
+                Path local = OperatingSystem.localAppData(home, environment);
+                List<Path> roots = new ArrayList<>(List.of(installLocation, local, local.resolve("Programs")));
+                String programFiles = environment.get("ProgramFiles");
+                if (programFiles != null && !programFiles.isBlank()) {
+                    roots.add(Path.of(programFiles));
+                }
+                yield List.copyOf(roots);
+            }
+        };
     }
 
     /**
@@ -77,6 +108,8 @@ public final class KometInstallations {
                         read(entry).ifPresent(found::add);
                     } else if (Files.isDirectory(entry) && readImage(entry).isPresent()) {
                         readImage(entry).ifPresent(found::add);
+                    } else if (Files.isDirectory(entry) && readAppImage(entry).isPresent()) {
+                        readAppImage(entry).ifPresent(found::add);
                     } else if (Files.isDirectory(entry)) {
                         try (Stream<Path> versions = Files.list(entry)) {
                             for (Path bundle : versions.filter(path -> path.getFileName().toString().endsWith(".app"))
@@ -101,7 +134,7 @@ public final class KometInstallations {
      */
     static Optional<KometInstallation> read(Path bundle) {
         if (!bundle.getFileName().toString().endsWith(".app")) {
-            return readImage(bundle);
+            return readImage(bundle).or(() -> readAppImage(bundle));
         }
         Path plist = bundle.resolve("Contents").resolve("Info.plist");
         if (!Files.isRegularFile(plist)) {
@@ -141,18 +174,19 @@ public final class KometInstallations {
      * @throws ParserConfigurationException if no parser can be made
      */
     /**
-     * Reads a Komet jlink image the dashboard installed: a folder with {@code bin/launchKomet} and the
-     * {@value KometInstaller#PROPERTIES} the installer writes.
+     * Reads a Komet jlink image the dashboard installed: a folder with its launcher
+     * ({@link #imageLauncher}) and the {@value KometInstaller#PROPERTIES} the installer writes.
      *
      * @param folder the folder
      * @return the Komet, if the folder is one
      */
     static Optional<KometInstallation> readImage(Path folder) {
-        Path launcher = folder.resolve("bin").resolve("launchKomet");
+        Optional<Path> found = imageLauncher(folder);
         Path properties = folder.resolve(KometInstaller.PROPERTIES);
-        if (!Files.isExecutable(launcher) || !Files.isRegularFile(properties)) {
+        if (found.isEmpty() || !Files.isRegularFile(properties)) {
             return Optional.empty();
         }
+        Path launcher = found.get();
         java.util.Properties read = new java.util.Properties();
         try (InputStream in = Files.newInputStream(properties)) {
             read.load(in);
@@ -162,6 +196,35 @@ public final class KometInstallations {
         String version = read.getProperty("version");
         return version == null ? Optional.empty()
                 : Optional.of(new KometInstallation("Komet " + version, version, folder, launcher));
+    }
+
+    /**
+     * The launcher of a Komet jlink image: {@code bin/launchKomet}, executable, which JReleaser writes
+     * for macOS and Linux, or {@code bin\launchKomet.bat}, which it writes for Windows.
+     *
+     * @param folder the image's folder
+     * @return the launcher, if the folder has one
+     */
+    static Optional<Path> imageLauncher(Path folder) {
+        Path bin = folder.resolve("bin");
+        Path unix = bin.resolve("launchKomet");
+        if (Files.isRegularFile(unix) && Files.isExecutable(unix)) {
+            return Optional.of(unix);
+        }
+        Path windows = bin.resolve("launchKomet.bat");
+        return Files.isRegularFile(windows) ? Optional.of(windows) : Optional.empty();
+    }
+
+    /**
+     * Reads a jpackage application image that runs Komet, such as the one Komet's Windows installer
+     * leaves; its launcher fixes its heap, as a bundle's does.
+     *
+     * @param folder the folder
+     * @return the Komet, if the folder is one
+     */
+    static Optional<KometInstallation> readAppImage(Path folder) {
+        return AppImage.read(folder).filter(image -> image.runs(MAIN_PACKAGE))
+                .map(image -> new KometInstallation(image.name(), image.version(), folder, image.launcher()));
     }
 
     static Map<String, String> plistStrings(InputStream plist)

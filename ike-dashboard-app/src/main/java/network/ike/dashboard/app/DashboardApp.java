@@ -487,7 +487,7 @@ public final class DashboardApp extends Application {
     }
 
     private void trash(List<KnowledgeBase> copies) {
-        view.setMessage("Moving " + copies.size() + (copies.size() == 1 ? " copy" : " copies") + " to the Trash …");
+        view.setMessage("Moving " + copies.size() + (copies.size() == 1 ? " copy" : " copies") + " to the " + Finder.trashName() + " …");
         work.submit(() -> {
             try {
                 Finder.trash(copies.stream().map(KnowledgeBase::path).toList());
