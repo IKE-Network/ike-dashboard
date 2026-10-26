@@ -67,6 +67,26 @@ public sealed interface NoticeAction {
     }
 
     /**
+     * Replace the dashboard with a newer build and restart it.
+     *
+     * @param release the build
+     */
+    record UpdateDashboard(KometRelease release) implements NoticeAction {
+        @Override
+        public String label() {
+            return "Update and restart";
+        }
+    }
+
+    /** Move a translocated dashboard into {@code ~/Applications}, where it can update itself, and restart it there. */
+    record MoveDashboard() implements NoticeAction {
+        @Override
+        public String label() {
+            return "Move and restart";
+        }
+    }
+
+    /**
      * Show a knowledge base in the list, where its detail offers what can be done with it.
      *
      * @param family the knowledge base's name

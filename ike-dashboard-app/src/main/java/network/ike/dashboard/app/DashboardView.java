@@ -151,6 +151,10 @@ public final class DashboardView extends BorderPane {
     private Consumer<KometRelease> onInstallKomet = release -> { };
     private Optional<KometRelease> kometRelease = Optional.empty();
     private boolean installing;
+    private Optional<SelfUpdate.State> dashboard = Optional.empty();
+    private Consumer<KometRelease> onUpdateDashboard = release -> { };
+    private Runnable onMoveDashboard = () -> { };
+    private boolean updatingDashboard;
     private final Map<Path, ChangeSetCheck.Finding> changeSets = new HashMap<>();
     private final Set<Path> upgrading = new java.util.HashSet<>();
     private BiConsumer<KometInstallation, KnowledgeBase> onUpgradeChangeSets = (komet, knowledgeBase) -> { };
@@ -422,6 +426,44 @@ public final class DashboardView extends BorderPane {
         onInstallKomet = action;
     }
 
+    /**
+     * Where the dashboard runs and the newest build of it, for the notice that offers the update.
+     *
+     * @param state what the self-update check found; empty when the dashboard runs from a build
+     */
+    public void setDashboard(Optional<SelfUpdate.State> state) {
+        dashboard = state;
+        refreshNotices();
+    }
+
+    /**
+     * Marks the dashboard's own update as running, so it is not started twice.
+     *
+     * @param running whether it is running
+     */
+    public void setUpdatingDashboard(boolean running) {
+        updatingDashboard = running;
+        refreshNotices();
+    }
+
+    /**
+     * What updating the dashboard does.
+     *
+     * @param action the action
+     */
+    public void setOnUpdateDashboard(Consumer<KometRelease> action) {
+        onUpdateDashboard = action;
+    }
+
+    /**
+     * What moving a translocated dashboard into {@code ~/Applications} does.
+     *
+     * @param action the action
+     */
+    public void setOnMoveDashboard(Runnable action) {
+        onMoveDashboard = action;
+    }
+
     private Optional<KometRelease> newerKomet() {
         return kometRelease.filter(release -> komets.isEmpty() || release.newerThan(komets.getFirst().version()));
     }
@@ -635,7 +677,8 @@ public final class DashboardView extends BorderPane {
 
     private void refreshNotices() {
         notices = Notices.compute(new Notices.Inputs(families, List.copyOf(unmanaged), statuses, nexusChecked, changeSets, komets, kometRelease,
-                catalogLoaded ? Optional.of(catalog) : Optional.empty(), sync, collections, Instant.now()), dismissed);
+                catalogLoaded ? Optional.of(catalog) : Optional.empty(), sync, collections, dashboard, Instant.now()),
+                dismissed);
         long atRisk = notices.stream().filter(notice -> notice.urgency() == Notice.Urgency.AT_RISK).count();
         home.setText(notices.isEmpty() ? "Notices" : "Notices  ·  " + notices.size()
                 + (atRisk == 0 ? "" : "  (" + atRisk + " at risk)"));
@@ -679,9 +722,11 @@ public final class DashboardView extends BorderPane {
         HBox row = new HBox(10, text);
         row.setAlignment(Pos.CENTER_LEFT);
         notice.action().ifPresent(action -> {
-            boolean running = action instanceof NoticeAction.Download(Coordinate coordinate, String classifier)
+            boolean updating = updatingDashboard
+                    && (action instanceof NoticeAction.UpdateDashboard || action instanceof NoticeAction.MoveDashboard);
+            boolean running = updating || action instanceof NoticeAction.Download(Coordinate coordinate, String classifier)
                     && transferring(downloadKey(coordinate, classifier));
-            Button button = new Button(running ? "Downloading …" : action.label());
+            Button button = new Button(updating ? "Updating …" : running ? "Downloading …" : action.label());
             button.setDisable(running);
             button.setMinWidth(Region.USE_PREF_SIZE);
             button.setOnAction(event -> act(action));
@@ -711,6 +756,8 @@ public final class DashboardView extends BorderPane {
                             () -> setMessage("Upgrading change sets needs Komet " + LauncherChoice.UPGRADE_CHANGE_SETS_SINCE
                                     + " or later"));
             case NoticeAction.InstallKomet(KometRelease release) -> onInstallKomet.accept(release);
+            case NoticeAction.UpdateDashboard(KometRelease release) -> onUpdateDashboard.accept(release);
+            case NoticeAction.MoveDashboard() -> onMoveDashboard.run();
             case NoticeAction.Show(String family) -> select(family);
             case NoticeAction.Browse() -> openBrowser();
         }

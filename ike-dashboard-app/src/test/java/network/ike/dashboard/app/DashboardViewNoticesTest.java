@@ -102,6 +102,30 @@ class DashboardViewNoticesTest {
         assertThat(left).containsExactly("A newer build of Pizza is on Nexus");
     }
 
+    @Test
+    void theDashboardUpdateCardStartsTheUpdateOnceAndSaysItIsRunning() throws Exception {
+        KometRelease newer = new KometRelease("26.1026.15", KometRelease.Source.NEXUS, java.net.URI.create("https://x"), 1,
+                Optional.empty(), Optional.empty(), Optional.empty(), "osx-aarch64");
+        List<KometRelease> started = new ArrayList<>();
+        Button after = onFx(() -> {
+            DashboardView view = view();
+            view.setOnUpdateDashboard(started::add);
+            view.setDashboard(Optional.of(new SelfUpdate.State(new SelfUpdate.Placement(new SelfUpdate.Running(
+                    Path.of("/A/IKE Dashboard.app"), "26.1025.2202"), SelfUpdate.Location.IN_PLACE,
+                    Path.of("/A/IKE Dashboard.app")), Optional.of(newer))));
+            view.applyCss();
+            view.layout();
+            button(view, "Update and restart").fire();
+            view.setUpdatingDashboard(true);
+            view.applyCss();
+            view.layout();
+            return button(view, "Updating …");
+        });
+
+        assertThat(started).containsExactly(newer);
+        assertThat(after.isDisabled()).isTrue();
+    }
+
     private static DashboardView view() {
         KnowledgeBaseDescriptor descriptor = new KnowledgeBaseDescriptor(1, PIZZA, Optional.empty(), "Pizza", "rocks", 3,
                 Instant.parse("2026-10-23T23:23:18Z"), "public", "META-INF/ike/icon.png");

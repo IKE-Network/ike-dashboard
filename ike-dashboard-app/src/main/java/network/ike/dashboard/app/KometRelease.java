@@ -22,7 +22,8 @@ import java.util.Optional;
 /**
  * A Komet build the dashboard can install: a jlink image zip on Nexus
  * ({@code network.ike.platform:komet-app}), or, until the first of those is deployed, the signed
- * installer package of a GitHub pre-release.
+ * installer package of a GitHub pre-release. A newer dashboard on Nexus
+ * ({@code network.ike.dashboard:ike-dashboard-app}) is found the same way and carried in the same record.
  *
  * @param version    the app version, such as {@code 26.1024.212}
  * @param source     where it comes from

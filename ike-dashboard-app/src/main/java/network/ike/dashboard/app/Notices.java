@@ -62,13 +62,14 @@ public final class Notices {
      * @param catalog      what Nexus offers, once asked
      * @param sync         the sync state of the repositories inside each store, by its folder
      * @param collections  the collections whose knowledge bases are kept at hand, downloaded or not
+     * @param dashboard    where the dashboard runs and the newest build of it, when it runs as an application
      * @param now          the time the notices are for
      */
     public record Inputs(List<KnowledgeBaseFamily> families, List<KnowledgeBase> unmanaged, Map<String, BuildStatus> statuses,
                          Optional<Notice.Freshness> nexusChecked, Map<Path, ChangeSetCheck.Finding> changeSets,
                          List<KometInstallation> komets, Optional<KometRelease> kometRelease,
                          Optional<NexusCatalog.Catalog> catalog, Map<Path, List<RepositorySync.Status>> sync,
-                         Set<String> collections, Instant now) {
+                         Set<String> collections, Optional<SelfUpdate.State> dashboard, Instant now) {
 
         /**
          * Copies the collections.
@@ -83,6 +84,7 @@ public final class Notices {
          * @param catalog      what Nexus offers
          * @param sync         the repositories' sync states
          * @param collections  the collections tracked
+         * @param dashboard    where the dashboard runs and its newest build
          * @param now          the time
          */
         public Inputs {
@@ -115,6 +117,7 @@ public final class Notices {
             newerBuild(notices, family, inputs);
         }
         newerKomet(notices, inputs);
+        dashboard(notices, inputs);
         newOnNexus(notices, inputs);
         return notices.stream()
                 .filter(notice -> !dismissed.test(notice.id()))
@@ -209,6 +212,30 @@ public final class Notices {
                         (inputs.komets().isEmpty() ? "" : "You have Komet " + inputs.komets().getFirst().version() + ". ")
                                 + "It installs beside the Komets you have, from " + release.source().label() + ".",
                         Optional.empty(), Optional.of(new NoticeAction.InstallKomet(release)), inputs.nexusChecked())));
+    }
+
+    private static void dashboard(List<Notice> notices, Inputs inputs) {
+        inputs.dashboard().ifPresent(state -> {
+            SelfUpdate.Placement placement = state.placement();
+            if (placement.location() == SelfUpdate.Location.TRANSLOCATED) {
+                notices.add(new Notice("dashboard-translocated", Notice.Urgency.ACTION,
+                        "Move the IKE Dashboard into your Applications folder",
+                        "macOS runs it from a read-only copy because it was opened where it was downloaded, so it cannot"
+                                + " update itself. Moving it puts it in " + placement.target().getParent()
+                                + " and restarts it there; you can then delete the download.",
+                        Optional.empty(), Optional.of(new NoticeAction.MoveDashboard()), Optional.empty()));
+                return;
+            }
+            state.offered().ifPresent(release -> notices.add(new Notice("dashboard:" + release.version(),
+                    Notice.Urgency.ACTION, "IKE Dashboard " + release.version() + " is available",
+                    "You have " + placement.running().version() + ". "
+                            + (placement.location() == SelfUpdate.Location.IN_PLACE
+                            ? "It replaces this one and the dashboard restarts; this one is kept until the new one has started."
+                            : "This one is in " + placement.running().bundle().getParent() + ", which you cannot change,"
+                                    + " so the new one goes in " + placement.target().getParent() + " and starts from there.")
+                            + " Running Komets are not affected.",
+                    Optional.empty(), Optional.of(new NoticeAction.UpdateDashboard(release)), inputs.nexusChecked())));
+        });
     }
 
     private static void newOnNexus(List<Notice> notices, Inputs inputs) {

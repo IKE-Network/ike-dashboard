@@ -43,6 +43,9 @@ import java.util.Locale;
  * komet-latest [repository-url]         the newest Komet build: Nexus's komet-app, else GitHub's
  * komet-install [folder] [repository-url] install it beside the others (default: the install location)
  * download &lt;g:a:v&gt; &lt;classifier&gt;          the newest deploy of a store, into ~/Solor/&lt;artifactId&gt;
+ * dashboard-latest [repository-url]     the newest IKE Dashboard on Nexus
+ * self-update [application]             replace a dashboard with the newest, once this command has
+ *                                       ended, and open it (default: the application running this)
  * </pre>
  */
 public final class DashboardCommand {
@@ -85,9 +88,42 @@ public final class DashboardCommand {
                 }
                 download(out, settings, Coordinate.parse(args[1]), args[2]);
             }
+            case "dashboard-latest" -> SelfUpdate.newest(RepositoryHttpClients.newClient(),
+                            args.length > 1 ? args[1] : KometReleases.PUBLIC_URL, KometReleases.platformClassifier())
+                    .ifPresentOrElse(release -> out.printf("IKE Dashboard %s: %s (%s)%n", release.version(), release.uri(),
+                                    release.sizeBytes() > 0 ? size(release.sizeBytes()) : "size unknown"),
+                            () -> out.println("No IKE Dashboard build found"));
+            case "self-update" -> selfUpdate(out, settings, args.length > 1 ? Optional.of(Path.of(args[1])) : Optional.empty());
             default -> throw new IllegalArgumentException("Unknown command " + command
-                    + "; use list, check, notices, komets, heap or download");
+                    + "; use list, check, notices, komets, heap, download, dashboard-latest or self-update");
         }
+    }
+
+    /**
+     * Stages the newest dashboard beside an application and starts the helper that swaps it in once this
+     * command has ended, as the window's update does once the window has quit.
+     */
+    private static void selfUpdate(PrintStream out, DashboardSettings settings, Optional<Path> application) throws Exception {
+        SelfUpdate.Running running = (application.isPresent() ? SelfUpdate.read(application.get()) : SelfUpdate.running())
+                .orElseThrow(() -> new IllegalArgumentException(application.map(path -> path + " is not the IKE Dashboard")
+                        .orElse("Not running as the IKE Dashboard application; name one: self-update <application>")));
+        SelfUpdate.Placement placement = SelfUpdate.place(running, Path.of(System.getProperty("user.home")));
+        if (placement.location() == SelfUpdate.Location.TRANSLOCATED) {
+            throw new IllegalStateException(running.bundle() + " is translocated; move it into Applications first");
+        }
+        HttpClient http = RepositoryHttpClients.newClient();
+        SelfUpdate.State state = new SelfUpdate.State(placement, SelfUpdate.newest(http));
+        Optional<KometRelease> offered = state.offered();
+        if (offered.isEmpty()) {
+            out.printf("The IKE Dashboard %s is the newest%s%n", running.version(),
+                    state.newest().map(newest -> " (Nexus has " + newest.version() + ")").orElse(""));
+            return;
+        }
+        Path staged = SelfUpdate.stage(http, offered.get(), placement, settings.localRepository(), out::println);
+        Path log = settings.logFolder().resolve("self-update.log");
+        SelfUpdate.swap(placement, staged, ProcessHandle.current().pid(), SelfUpdate.relaunch(placement.target()), log);
+        out.printf("The IKE Dashboard %s replaces %s in %s once this command ends, and opens; see %s%n",
+                offered.get().version(), running.version(), placement.target(), log);
     }
 
     private static void list(PrintStream out, DashboardSettings settings, boolean check) throws Exception {
@@ -196,9 +232,19 @@ public final class DashboardCommand {
             out.println("Could not look for a newer Komet: " + e.getMessage());
             release = Optional.empty();
         }
+        Optional<SelfUpdate.State> dashboard = Optional.empty();
+        Optional<SelfUpdate.Running> running = SelfUpdate.running();
+        if (running.isPresent()) {
+            try {
+                dashboard = Optional.of(new SelfUpdate.State(SelfUpdate.place(running.get(),
+                        Path.of(System.getProperty("user.home"))), SelfUpdate.newest(http)));
+            } catch (Exception e) {
+                out.println("Could not look for a newer dashboard: " + e.getMessage());
+            }
+        }
         List<Notice> notices = Notices.compute(new Notices.Inputs(families, KnowledgeBaseFamily.unmanaged(knowledgeBases), statuses,
                 Optional.of(new Notice.Freshness(now, true)), changeSets, komets, release, catalog, sync,
-                settings.collections(), now),
+                settings.collections(), dashboard, now),
                 NoticeDismissals.current()::dismissed);
         out.printf("%d notices%s%n", notices.size(), git.isPresent() ? "" : " (no git found: repository sync not checked)");
         for (Notice notice : notices) {

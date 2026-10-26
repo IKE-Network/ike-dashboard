@@ -33,10 +33,11 @@ The design is the `dev-ike-dashboard` topic in `ike-lab-documents`.
 - `ike-dashboard-app`: the window. It lists the knowledge bases in `~/Solor` with what each store
   says about itself, asks Nexus whether a newer build is deployed, lists the Komet versions
   installed, and opens a knowledge base in a chosen Komet as an independent process. Also a headless
-  `DashboardCommand` (`list`, `check`, `notices`, `komets`, `download <g:a:v> <classifier>`). Its first
-  screen is Notices: one card per finding of its checks (newer builds, knowledge bases not yet downloaded,
-  change sets to upgrade, a newer Komet, the sync state of the git repositories inside each store),
-  work at risk first, each with one action.
+  `DashboardCommand` (`list`, `check`, `notices`, `komets`, `download <g:a:v> <classifier>`,
+  `dashboard-latest`, `self-update [application]`). Its first screen is Notices: one card per finding of
+  its checks (newer builds, knowledge bases not yet downloaded, change sets to upgrade, a newer Komet, a
+  newer dashboard, the sync state of the git repositories inside each store), work at risk first, each
+  with one action.
 
   The knowledge bases of the collections it tracks stay at hand whether downloaded or not: the Nexus
   window lists them first, and the Notices screen keeps them however long ago they were deployed. A
@@ -65,6 +66,53 @@ open "ike-dashboard-app/target/app/IKE Dashboard.app"
 version the build clock's (`ike:jpackage-props`), unsigned. Adding `-Psigned-app` signs it with the Developer
 ID under the hardened runtime and notarizes and staples it (`ike:notarize`, ike-tooling 271 on); that needs the
 signing identity and the `notarytool` keychain profile, which the installer build's agent holds.
+
+## Getting it
+
+The application is deployed to Nexus `ike-public` as
+`network.ike.dashboard:ike-dashboard-app:<version>:zip:osx-aarch64`, signed with the Developer ID,
+notarized and stapled. Download the zip of the newest version from
+<https://nexus.tinkar.org/repository/ike-public/network/ike/dashboard/ike-dashboard-app/> (its
+`maven-metadata.xml` names the newest), unzip it, and move `IKE Dashboard.app` into `~/Applications`
+or `/Applications` before opening it.
+
+## Self-update
+
+The dashboard updates itself in plain Java (decision 2 of `dev-ike-dashboard`), with the code that
+installs Komet versions. When it runs as the application, it asks Nexus, on start and every hour, for
+the newest `ike-dashboard-app` with a zip for this machine, as it asks for `komet-app`. A newer one
+than the one running is a Notices card, *IKE Dashboard <version> is available*, whose one action,
+*Update and restart*:
+
+1. downloads the zip through the local Maven repository, as a transfer that can be cancelled and
+   resumed, and checks it against the `.sha1` Nexus keeps beside it;
+2. unpacks it with `ditto` beside the application, in `.ike-dashboard-update/new`, and refuses it unless
+   it is the dashboard (`network.ike.dashboard`) of that version, `codesign --verify --deep --strict`
+   accepts it, and `spctl --assess` (Gatekeeper) would open it. A file Java downloads carries no
+   quarantine, so Gatekeeper never assesses it unless asked;
+3. starts a helper (`.ike-dashboard-update/swap.sh`, logging to
+   `~/Library/Logs/IKE Dashboard/self-update.log`) and quits. The helper waits for the dashboard to exit,
+   moves the old application to `.ike-dashboard-update/previous`, moves the new one in, and opens it.
+   If the new one cannot be moved in, the old one is put back.
+
+The new dashboard removes `.ike-dashboard-update` once it has started, so the previous application is
+kept until then: if an update does not start, move `.ike-dashboard-update/previous/IKE Dashboard.app`
+back. Running Komets are independent processes and are not affected.
+
+Where the dashboard runs decides where the update goes:
+
+- in place, when the folder it is in can be written;
+- into `~/Applications`, when it cannot, such as an administrator's `/Applications` or a disk image.
+  The card says so, and the old copy stays where it was;
+- nowhere yet, when macOS runs it *translocated*: opened where it was downloaded, from a randomized
+  read-only copy. The card is then *Move the IKE Dashboard into your Applications folder*; its action
+  copies the running application into `~/Applications`, checks it as it checks a download, removes its
+  quarantine so macOS opens it in place, and restarts it there. If a dashboard as new is already
+  there, it opens that one instead.
+
+A dashboard run from a build (`javafx:run`, or `DashboardCommand` on a JDK) is not an application and
+offers no update. From a shell, `DashboardCommand self-update "<path>/IKE Dashboard.app"` does steps
+1–3 for a named application, with the helper waiting for the command to end.
 
 ## Build
 

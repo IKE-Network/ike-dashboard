@@ -26,4 +26,8 @@ module network.ike.dashboard.app {
     requires java.xml;
     requires network.ike.dashboard.download;
     requires network.ike.dashboard.journal;
+
+    // Test-only (com.sun.net.httpserver.HttpServer standing in for Nexus in *Test classes), as in the
+    // download module, whose own requirement already puts it in the application's runtime.
+    requires jdk.httpserver;
 }

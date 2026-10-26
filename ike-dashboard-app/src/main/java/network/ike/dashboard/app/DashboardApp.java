@@ -78,6 +78,7 @@ public final class DashboardApp extends Application {
     private final Map<Path, Long> dataBytes = new ConcurrentHashMap<>();
     private DashboardView view;
     private volatile String selectAfterRefresh;
+    private Optional<SelfUpdate.Placement> placement = Optional.empty();
 
     /** Creates the application; JavaFX instantiates it. */
     public DashboardApp() {
@@ -113,6 +114,8 @@ public final class DashboardApp extends Application {
         view.setOnBrowse(this::loadCatalog);
         view.setOnInstallKomet(this::installKomet);
         view.setOnUpgradeChangeSets(this::upgradeChangeSets);
+        view.setOnUpdateDashboard(this::updateDashboard);
+        view.setOnMoveDashboard(this::moveDashboard);
         view.setOnReveal(path -> run(() -> Finder.reveal(path), "Could not show " + path));
         view.setOnOpenFile(path -> run(() -> Finder.open(path), "Could not open " + path));
         NoticeDismissals dismissals = NoticeDismissals.current();
@@ -121,6 +124,16 @@ public final class DashboardApp extends Application {
         stage.setTitle("IKE Dashboard");
         stage.setScene(new Scene(view, 1080, 640));
         stage.show();
+        placement = SelfUpdate.running().map(running -> SelfUpdate.place(running, Path.of(System.getProperty("user.home"))));
+        view.setDashboard(placement.map(where -> new SelfUpdate.State(where, Optional.empty())));
+        placement.ifPresent(where -> work.submit(() -> {
+            try {
+                SelfUpdate.cleanUp(where);
+            } catch (IOException e) {
+                Platform.runLater(() -> view.setMessage("Could not remove what the last update left in " + where.work()
+                        + ": " + e.getMessage()));
+            }
+        }));
         refresh();
         long interval = NETWORK_CHECK_INTERVAL.toMinutes();
         clock.scheduleAtFixedRate(() -> work.submit(() -> checkNetwork(current)), interval, interval, TimeUnit.MINUTES);
@@ -280,6 +293,15 @@ public final class DashboardApp extends Application {
         } catch (Exception e) {
             problem = (problem == null ? "" : problem + "; ") + "could not look for a newer Komet: " + e.getMessage();
         }
+        if (placement.isPresent()) {
+            try {
+                Optional<SelfUpdate.State> state = Optional.of(new SelfUpdate.State(placement.get(),
+                        SelfUpdate.newest(RepositoryHttpClients.newClient())));
+                Platform.runLater(() -> view.setDashboard(state));
+            } catch (Exception e) {
+                problem = (problem == null ? "" : problem + "; ") + "could not look for a newer dashboard: " + e.getMessage();
+            }
+        }
         String summary = families.size() + " knowledge bases"
                 + (newer == 0 ? " · all current with Nexus" : " · " + newer + " with a newer build")
                 + (problem == null ? "" : " · " + problem);
@@ -398,6 +420,70 @@ public final class DashboardApp extends Application {
                 Platform.runLater(() -> view.setInstalling(false));
             }
         });
+    }
+
+    /**
+     * Downloads and checks a newer dashboard on the work thread, as a transfer the person can watch and
+     * cancel, then starts the helper that swaps it in once this one has quit, and quits.
+     */
+    private void updateDashboard(KometRelease release) {
+        SelfUpdate.Placement where = placement.orElseThrow();
+        view.setUpdatingDashboard(true);
+        Transfer transfer = new Transfer("IKE Dashboard " + release.version());
+        view.showTransfer(transfer, Optional.empty());
+        work.submit(() -> {
+            if (!transfer.started()) {
+                Platform.runLater(() -> view.setUpdatingDashboard(false));
+                return;
+            }
+            try {
+                Path staged = SelfUpdate.stage(RepositoryHttpClients.newClient(), release, where,
+                        settings.localRepository(), transfer);
+                restartAs(where, staged);
+                transfer.finished(Transfer.State.DONE, "Restarting as the IKE Dashboard " + release.version());
+            } catch (CancellationException e) {
+                transfer.finished(Transfer.State.CANCELLED, "Cancelled. What had downloaded is kept, so updating"
+                        + " again picks up where this one stopped.");
+                Platform.runLater(() -> view.setUpdatingDashboard(false));
+            } catch (Exception e) {
+                transfer.finished(Transfer.State.FAILED, "Could not update the dashboard: " + e.getMessage());
+                Platform.runLater(() -> view.setUpdatingDashboard(false));
+            }
+        });
+    }
+
+    /**
+     * Moves a translocated dashboard into {@code ~/Applications} and restarts it there; when a dashboard
+     * as new is already there, opens that one instead.
+     */
+    private void moveDashboard() {
+        SelfUpdate.Placement where = placement.orElseThrow();
+        view.setUpdatingDashboard(true);
+        view.setMessage("Moving the IKE Dashboard into " + where.target().getParent() + " …");
+        work.submit(() -> {
+            try {
+                Optional<SelfUpdate.Running> there = SelfUpdate.read(where.target());
+                if (there.isPresent()
+                        && KometInstallations.compareVersions(there.get().version(), where.running().version()) >= 0) {
+                    new ProcessBuilder(SelfUpdate.relaunch(where.target())).start();
+                    Platform.runLater(Platform::exit);
+                    return;
+                }
+                restartAs(where, SelfUpdate.stageRunning(where));
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    view.setUpdatingDashboard(false);
+                    view.setMessage("Could not move the dashboard: " + e.getMessage());
+                });
+            }
+        });
+    }
+
+    /** Starts the helper that swaps a staged dashboard in once this one has quit and opens it, then quits. */
+    private void restartAs(SelfUpdate.Placement where, Path staged) throws IOException {
+        SelfUpdate.swap(where, staged, ProcessHandle.current().pid(), SelfUpdate.relaunch(where.target()),
+                settings.logFolder().resolve("self-update.log"));
+        Platform.runLater(Platform::exit);
     }
 
     private void trash(List<KnowledgeBase> copies) {

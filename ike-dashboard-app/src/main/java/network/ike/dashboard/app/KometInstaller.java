@@ -205,6 +205,18 @@ public final class KometInstaller {
      * @throws IOException if it does not match
      */
     static void verify(Path file, KometRelease release) throws IOException {
+        verify(file, release, "Komet " + release.version());
+    }
+
+    /**
+     * Checks a download against the checksum its source published.
+     *
+     * @param file    the download
+     * @param release what it should be
+     * @param what    what it is, for the refusal
+     * @throws IOException if it does not match
+     */
+    static void verify(Path file, KometRelease release, String what) throws IOException {
         Optional<String> expected = release.checksum();
         if (expected.isEmpty()) {
             return;
@@ -213,7 +225,7 @@ public final class KometInstaller {
         String algorithm = parts[0].equalsIgnoreCase("sha1") ? "SHA-1" : "SHA-256";
         String actual = digest(file, algorithm);
         if (!actual.equalsIgnoreCase(parts[1])) {
-            throw new IOException("The download of Komet " + release.version() + " does not match its published "
+            throw new IOException("The download of " + what + " does not match its published "
                     + parts[0] + " (" + parts[1] + "); got " + actual);
         }
     }
@@ -239,13 +251,13 @@ public final class KometInstaller {
         }
     }
 
-    private static Path only(Path directory, java.util.function.Predicate<Path> test, String missing) throws IOException {
+    static Path only(Path directory, java.util.function.Predicate<Path> test, String missing) throws IOException {
         try (Stream<Path> entries = Files.list(directory)) {
             return entries.filter(test).findFirst().orElseThrow(() -> new IOException(missing));
         }
     }
 
-    private static void run(List<String> command) throws IOException, InterruptedException {
+    static void run(List<String> command) throws IOException, InterruptedException {
         Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
         String output = new String(process.getInputStream().readAllBytes()).strip();
         if (process.waitFor() != 0) {
@@ -253,7 +265,7 @@ public final class KometInstaller {
         }
     }
 
-    private static void deleteTree(Path root) throws IOException {
+    static void deleteTree(Path root) throws IOException {
         if (!Files.exists(root)) {
             return;
         }
@@ -267,7 +279,7 @@ public final class KometInstaller {
     }
 
     /** Turns a download's progress into words. */
-    private record Progress(Consumer<String> progress, String title) implements DownloadListener<Path> {
+    record Progress(Consumer<String> progress, String title) implements DownloadListener<Path> {
         @Override
         public void updateValue(Path result) {
         }

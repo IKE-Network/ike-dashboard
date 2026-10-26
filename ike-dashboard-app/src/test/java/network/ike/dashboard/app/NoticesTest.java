@@ -58,7 +58,7 @@ class NoticesTest {
         KnowledgeBaseFamily pizza = family(store("pizza-kb", StoreKind.ROCKS, Map.of()));
         Notice.Freshness asked = new Notice.Freshness(NOW.minus(Duration.ofHours(3)), false);
         List<Notice> notices = Notices.compute(new Notices.Inputs(List.of(pizza), List.of(), Map.of("pizza-kb", newer()),
-                Optional.of(asked), Map.of(), List.of(KOMET_1024), Optional.empty(), Optional.empty(), Map.of(), Set.of(), NOW),
+                Optional.of(asked), Map.of(), List.of(KOMET_1024), Optional.empty(), Optional.empty(), Map.of(), Set.of(), Optional.empty(), NOW),
                 id -> false);
 
         assertThat(notices).singleElement().satisfies(notice -> {
@@ -124,7 +124,7 @@ class NoticesTest {
         assertThat(collection.id()).isEqualTo("collection:SOLOR:RxNorm,SOLOR + GUDID");
 
         assertThat(Notices.compute(new Notices.Inputs(List.of(pizza), List.of(), Map.of(), Optional.empty(), Map.of(),
-                List.of(KOMET_1024), Optional.empty(), Optional.of(catalog), Map.of(), Set.of(), NOW), id -> false))
+                List.of(KOMET_1024), Optional.empty(), Optional.of(catalog), Map.of(), Set.of(), Optional.empty(), NOW), id -> false))
                 .extracting(Notice::title).as("tracking none, they are counted with the rest")
                 .contains("3 more knowledge bases on Nexus");
     }
@@ -136,7 +136,7 @@ class NoticesTest {
         NexusCatalog.Catalog catalog = catalog(offer("solor-kb", NOW.minus(Duration.ofDays(1))));
         List<Notice> notices = Notices.compute(new Notices.Inputs(List.of(), List.of(oldCopy), Map.of(),
                 Optional.of(new Notice.Freshness(NOW, true)), Map.of(), List.of(KOMET_1024), Optional.empty(),
-                Optional.of(catalog), Map.of(), Set.of(), NOW), id -> false);
+                Optional.of(catalog), Map.of(), Set.of(), Optional.empty(), NOW), id -> false);
 
         assertThat(notices).singleElement().satisfies(notice -> {
             assertThat(notice.title()).isEqualTo("A managed build of solor-kb is on Nexus");
@@ -193,12 +193,65 @@ class NoticesTest {
                 Optional.of(release), Optional.empty(), Map.of()), id -> false)).as("not when it is installed").isEmpty();
     }
 
+    @Test
+    void aNewerDashboardIsOfferedWithOneActionAndOnlyWhenNewer() {
+        KometRelease newer = dashboard("26.1026.15");
+        SelfUpdate.Placement placement = new SelfUpdate.Placement(new SelfUpdate.Running(Path.of("/A/IKE Dashboard.app"),
+                "26.1025.2202"), SelfUpdate.Location.IN_PLACE, Path.of("/A/IKE Dashboard.app"));
+
+        assertThat(Notices.compute(withDashboard(new SelfUpdate.State(placement, Optional.of(newer))), id -> false))
+                .singleElement().satisfies(notice -> {
+                    assertThat(notice.title()).isEqualTo("IKE Dashboard 26.1026.15 is available");
+                    assertThat(notice.detail()).startsWith("You have 26.1025.2202. It replaces this one");
+                    assertThat(notice.action()).contains(new NoticeAction.UpdateDashboard(newer));
+                    assertThat(notice.freshness()).as("as of when Nexus was asked").isPresent();
+                });
+        assertThat(Notices.compute(withDashboard(new SelfUpdate.State(placement, Optional.of(dashboard("26.1025.2202")))),
+                id -> false)).as("not the version running").isEmpty();
+    }
+
+    @Test
+    void aDashboardThatCannotChangeWhereItIsSaysWhereTheUpdateGoes() {
+        SelfUpdate.Placement placement = new SelfUpdate.Placement(new SelfUpdate.Running(
+                Path.of("/Applications/IKE Dashboard.app"), "26.1025.2202"), SelfUpdate.Location.APPLICATIONS,
+                Path.of("/Users/someone/Applications/IKE Dashboard.app"));
+
+        assertThat(Notices.compute(withDashboard(new SelfUpdate.State(placement, Optional.of(dashboard("26.1026.15")))),
+                id -> false)).singleElement().extracting(Notice::detail).asString()
+                .contains("This one is in /Applications, which you cannot change, so the new one goes in"
+                        + " /Users/someone/Applications");
+    }
+
+    @Test
+    void aTranslocatedDashboardAsksToBeMovedRatherThanUpdated() {
+        SelfUpdate.Placement placement = SelfUpdate.place(new SelfUpdate.Running(Path.of(
+                "/private/var/folders/x1/abc/T/AppTranslocation/3F1C2A/d/IKE Dashboard.app"), "26.1025.2011"),
+                Path.of("/Users/someone"));
+
+        assertThat(Notices.compute(withDashboard(new SelfUpdate.State(placement, Optional.of(dashboard("26.1026.15")))),
+                id -> false)).singleElement().satisfies(notice -> {
+                    assertThat(notice.title()).isEqualTo("Move the IKE Dashboard into your Applications folder");
+                    assertThat(notice.action()).contains(new NoticeAction.MoveDashboard());
+                });
+    }
+
+    private static Notices.Inputs withDashboard(SelfUpdate.State state) {
+        return new Notices.Inputs(List.of(), List.of(), Map.of(), Optional.of(new Notice.Freshness(NOW, true)), Map.of(),
+                List.of(KOMET_1024), Optional.empty(), Optional.empty(), Map.of(), Set.of(), Optional.of(state), NOW);
+    }
+
+    private static KometRelease dashboard(String version) {
+        return new KometRelease(version, KometRelease.Source.NEXUS, URI.create("https://nexus.example/" + version), 1,
+                Optional.empty(), Optional.empty(), Optional.of(new Coordinate(SelfUpdate.GROUP, SelfUpdate.ARTIFACT, version)),
+                "osx-aarch64");
+    }
+
     private static Notices.Inputs inputs(List<KnowledgeBaseFamily> families, Map<String, BuildStatus> statuses,
                                          Map<Path, ChangeSetCheck.Finding> changeSets, List<KometInstallation> komets,
                                          Optional<KometRelease> release, Optional<NexusCatalog.Catalog> catalog,
                                          Map<Path, List<RepositorySync.Status>> sync) {
         return new Notices.Inputs(families, List.of(), statuses, Optional.of(new Notice.Freshness(NOW, true)), changeSets, komets,
-                release, catalog, sync, Set.of(DashboardSettings.DEFAULT_COLLECTIONS), NOW);
+                release, catalog, sync, Set.of(DashboardSettings.DEFAULT_COLLECTIONS), Optional.empty(), NOW);
     }
 
     private static BuildStatus newer() {

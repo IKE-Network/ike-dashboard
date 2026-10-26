@@ -103,20 +103,40 @@ public final class KometReleases {
      */
     public static Optional<KometRelease> newestOnNexus(HttpClient http, String repositoryUrl, String classifier)
             throws IOException, InterruptedException {
+        return newestOnNexus(http, repositoryUrl, GROUP, ARTIFACT, classifier);
+    }
+
+    /**
+     * The newest version of a zipped application on Nexus that has a zip for a platform: the newest
+     * version in its {@code maven-metadata.xml} whose classified zip answers, with the {@code .sha1}
+     * Nexus keeps beside it. Komet's image and the dashboard's own application are found this way.
+     *
+     * @param http          the client
+     * @param repositoryUrl the repository
+     * @param group         the group
+     * @param artifact      the artifact
+     * @param classifier    the platform
+     * @return the zip, if one is deployed
+     * @throws IOException          if Nexus cannot be asked
+     * @throws InterruptedException if interrupted
+     */
+    public static Optional<KometRelease> newestOnNexus(HttpClient http, String repositoryUrl, String group,
+                                                       String artifact, String classifier)
+            throws IOException, InterruptedException {
         String base = repositoryUrl.endsWith("/") ? repositoryUrl : repositoryUrl + "/";
-        String directory = base + GROUP.replace('.', '/') + "/" + ARTIFACT + "/";
+        String directory = base + group.replace('.', '/') + "/" + artifact + "/";
         HttpResponse<byte[]> metadata = http.send(HttpRequest.newBuilder(URI.create(directory + "maven-metadata.xml"))
                 .timeout(TIMEOUT).GET().build(), HttpResponse.BodyHandlers.ofByteArray());
         if (metadata.statusCode() == 404) {
             return Optional.empty();
         }
         if (metadata.statusCode() != 200) {
-            throw new IOException("Nexus answered " + metadata.statusCode() + " for the komet-app metadata");
+            throw new IOException("Nexus answered " + metadata.statusCode() + " for the " + artifact + " metadata");
         }
         List<String> versions = new ArrayList<>(versions(metadata.body()));
         versions.sort(Comparator.comparing((String version) -> version, KometInstallations::compareVersions).reversed());
         for (String version : versions) {
-            URI zip = URI.create(directory + version + "/" + ARTIFACT + "-" + version + "-" + classifier + ".zip");
+            URI zip = URI.create(directory + version + "/" + artifact + "-" + version + "-" + classifier + ".zip");
             HttpResponse<Void> head = http.send(HttpRequest.newBuilder(zip).timeout(TIMEOUT)
                     .method("HEAD", HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.discarding());
             if (head.statusCode() != 200) {
@@ -128,7 +148,7 @@ public final class KometReleases {
                     ? Optional.of("sha1:" + sha1.body().strip().split("\\s+")[0]) : Optional.empty();
             return Optional.of(new KometRelease(version, KometRelease.Source.NEXUS, zip,
                     head.headers().firstValueAsLong("Content-Length").orElse(-1), checksum, Optional.empty(),
-                    Optional.of(new Coordinate(GROUP, ARTIFACT, version)), classifier));
+                    Optional.of(new Coordinate(group, artifact, version)), classifier));
         }
         return Optional.empty();
     }
