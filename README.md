@@ -8,12 +8,18 @@ The design is the `dev-ike-dashboard` topic in `ike-lab-documents`.
 
 ## Download
 
-The newest IKE Dashboard for a Mac with Apple silicon, signed and notarized:
+The newest IKE Dashboard, as an installer like Komet's:
 
-<https://github.com/IKE-Network/ike-dashboard/releases/latest/download/IKE-Dashboard-osx-aarch64.zip>
+- **Mac with Apple silicon**, signed and notarized:
+  <https://github.com/IKE-Network/ike-dashboard/releases/latest/download/IKE-Dashboard-osx-aarch64.pkg>.
+  Open it and follow the installer, which puts `IKE Dashboard.app` in `/Applications`.
+- **Windows (64-bit)**:
+  <https://github.com/IKE-Network/ike-dashboard/releases/latest/download/IKE-Dashboard-windows-x86_64.msi>.
+  It installs for you alone, with no administrator password, and adds IKE Dashboard to the Start
+  menu. It is not signed yet, so SmartScreen may say *Windows protected your PC*: choose *More info*,
+  then *Run anyway*.
 
-Unzip it and move `IKE Dashboard.app` into `~/Applications` or `/Applications` before opening it.
-From then on it updates itself (see [Self-update](#self-update)). The link never changes, and
+From then on it updates itself (see [Self-update](#self-update)). The links never change, and
 <https://ike.network/dashboard> is the page to send people to.
 [Releases](https://github.com/IKE-Network/ike-dashboard/releases) keeps the older versions.
 
@@ -80,10 +86,24 @@ placeholders from the environment, so run it from a shell that has them.
 open "ike-dashboard-app/target/app/IKE Dashboard.app"
 ```
 
-`-Papp` makes `IKE Dashboard.app` with jpackage, on a runtime jlinked from the dashboard's modules, its
-version the build clock's (`ike:jpackage-props`), unsigned. Adding `-Psigned-app` signs it with the Developer
-ID under the hardened runtime and notarizes and staples it (`ike:notarize`, ike-tooling 271 on); that needs the
-signing identity and the `notarytool` keychain profile, which the installer build's agent holds.
+`-Papp` makes the application with jpackage, on a runtime jlinked from the dashboard's modules, its
+version the build clock's (`ike:jpackage-props`), unsigned: `IKE Dashboard.app` on macOS, the folder
+`IKE Dashboard` (with `IKE Dashboard.exe`) on Windows. Adding `-Psigned-app` on macOS signs it with the
+Developer ID under the hardened runtime and notarizes and staples it (`ike:notarize`, ike-tooling 271 on);
+that needs the signing identity and the `notarytool` keychain profile, which the installer build's agent
+holds.
+
+The installer is made from that application after the build, into `ike-dashboard-app/target/installer`:
+
+```bash
+./mvnw -pl ike-dashboard-app -Papp exec:exec@jpackage-installer
+```
+
+On macOS it is a `.pkg` (signed with the Developer ID Installer under `-Psigned-app`, then notarized by
+`ike:notarize@notarize-installer`), whose postinstall hands the application to the person who installed
+it so it can update itself in place. On Windows it is a per-user `.msi` (WiX 3 on the `PATH`), with a
+Start-menu entry and a shortcut. An MSI's version allows at most 255.255.65535, so the `.msi` takes
+`dashboard.msi.version`; the Windows installer build names both versions (see [Releases](#releases)).
 
 ## Self-update
 
@@ -91,7 +111,7 @@ The dashboard updates itself in plain Java (decision 2 of `dev-ike-dashboard`), 
 installs Komet versions. When it runs as the application, it asks Nexus, on start and every hour, for
 the newest `ike-dashboard-app` with a zip for this machine, as it asks for `komet-app`. A newer one
 than the one running is a Notices card, *IKE Dashboard <version> is available*, whose one action,
-*Update and restart*:
+*Update and restart*, on macOS:
 
 1. downloads the zip through the local Maven repository, as a transfer that can be cancelled and
    resumed, and checks it against the `.sha1` Nexus keeps beside it;
@@ -119,18 +139,36 @@ Where the dashboard runs decides where the update goes:
   quarantine so macOS opens it in place, and restarts it there. If a dashboard as new is already
   there, it opens that one instead.
 
+On Windows the steps are the same, without a signature: the dashboard is not signed yet (KEC,
+2026-10-26), so the `.sha1` is the check. Java unpacks the zip, which must hold the dashboard
+(`app\IKE Dashboard.cfg` runs `network.ike.dashboard.app`) of that version; the helper is
+`.ike-dashboard-update\swap.ps1`, run by PowerShell, logging to
+`%LOCALAPPDATA%\IKE Dashboard\logs\self-update.log`, and it starts the new `IKE Dashboard.exe`. The
+`.msi` installs into `%LOCALAPPDATA%\IKE Dashboard`, which the person can write, so the update goes in
+place; one that cannot be written goes into `%LOCALAPPDATA%\Programs\IKE Dashboard`. Nothing is
+translocated.
+
 A dashboard run from a build (`javafx:run`, or `DashboardCommand` on a JDK) is not an application and
 offers no update. From a shell, `DashboardCommand self-update "<path>/IKE Dashboard.app"` does steps
 1–3 for a named application, with the helper waiting for the command to end.
 
 ## Releases
 
-TeamCity's **Publish to GitHub** (IKE Dashboard project, run by hand) runs **Installer macOS**, which
-signs the application with the Developer ID, notarizes and staples it, and deploys it to Nexus
-`ike-public` as `network.ike.dashboard:ike-dashboard-app:<version>:zip:osx-aarch64`. It then publishes
-the same zip as release `v<version>`, under the version-free name `IKE-Dashboard-osx-aarch64.zip` with
-its `.sha256`, and marks it Latest, which is what keeps the download link stable. Older versions stay
-on the releases page and on Nexus.
+The dashboard comes as Komet does (KEC, 2026-10-26): an installer for people on each platform, and a
+zipped application on Nexus for the self-update. TeamCity's **Publish to GitHub** (IKE Dashboard
+project, run by hand) runs:
+
+- **Installer macOS**, which signs the application with the Developer ID, notarizes and staples it, and
+  deploys it to Nexus `ike-public` as `network.ike.dashboard:ike-dashboard-app:<version>:zip:osx-aarch64`;
+  then makes the `.pkg` from it, signed, notarized and stapled. Its build number is the version.
+- **Installer Windows**, on the Windows agent, which runs every test there, makes the application under
+  the macOS build's version, deploys it as `…:zip:windows-x86_64`, and makes the `.msi` from it. The
+  `.msi`'s own version is `yy.M.<minute of the month>`, which an MSI allows and which still sorts.
+
+It then publishes both installers as release `v<version>`, under the version-free names
+`IKE-Dashboard-osx-aarch64.pkg` and `IKE-Dashboard-windows-x86_64.msi`, each with its `.sha256`, and
+marks it Latest, which is what keeps the download links stable. Older versions stay on the releases page
+and on Nexus.
 
 ## Build
 
