@@ -105,6 +105,13 @@ it so it can update itself in place. On Windows it is a per-user `.msi` (WiX 3 o
 Start-menu entry and a shortcut. An MSI's version allows at most 255.255.65535, so the `.msi` takes
 `dashboard.msi.version`; the Windows installer build names both versions (see [Releases](#releases)).
 
+The icon is the IKE pill of the brand guide (`brand-logo-powered-by` in `ike-lab-documents`) on a
+Midnight tile: an `.icns` for the macOS application, an `.ico` for the Windows launcher and `.msi`, a
+`.png` for Linux, and the window's own icon. The `.pkg` shows the pill in place of jpackage's Duke, and
+the application's `Info.plist` (`src/main/jpackage-resources/mac`) names the macOS its runtime is
+built for, 11.0. The SVGs in `ike-dashboard-app/src/main/icons` are the source; after changing one,
+run `render-icons.sh` there on macOS and commit what it writes.
+
 ## Self-update
 
 The dashboard updates itself in plain Java (decision 2 of `dev-ike-dashboard`), with the code that

@@ -18,10 +18,13 @@ package network.ike.dashboard.app;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.scene.Scene;
+import javafx.scene.image.Image;
 import javafx.stage.Stage;
 import network.ike.dashboard.download.RepositoryHttpClients;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.net.http.HttpClient;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -93,6 +96,24 @@ public final class DashboardApp extends Application {
         launch(DashboardApp.class, args);
     }
 
+    /**
+     * The window's icon, the IKE pill of the brand guide, at the sizes Windows and Linux choose from;
+     * macOS shows the application bundle's icon instead. Rendered by {@code src/main/icons/render-icons.sh}.
+     *
+     * @return the icon, smallest first
+     */
+    static List<Image> icons() {
+        List<Image> icons = new ArrayList<>();
+        for (int pixels : new int[] {16, 32, 48, 64, 128, 256}) {
+            try (InputStream png = DashboardApp.class.getResourceAsStream("icon-" + pixels + ".png")) {
+                icons.add(new Image(png));
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }
+        return icons;
+    }
+
     @Override
     public void start(Stage stage) {
         settings = DashboardSettings.current();
@@ -122,6 +143,7 @@ public final class DashboardApp extends Application {
         view.setDismissed(dismissals::dismissed);
         view.setOnDismiss(dismissals::dismiss);
         stage.setTitle("IKE Dashboard");
+        stage.getIcons().setAll(icons());
         stage.setScene(new Scene(view, 1080, 640));
         stage.show();
         placement = SelfUpdate.running().map(running -> SelfUpdate.place(running, Path.of(System.getProperty("user.home"))));

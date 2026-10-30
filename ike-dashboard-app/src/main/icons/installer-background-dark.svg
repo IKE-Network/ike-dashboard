@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The macOS installer's background in dark mode: the IKE pill with a white wordmark. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 143 222" width="143" height="222">
+  <defs>
+    <linearGradient id="pill" x1="918.06" y1="103.86" x2="1363.88" y2="103.86" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f4bfb9"/>
+      <stop offset="1" stop-color="#c98cec"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(71.5 171) scale(0.2580) translate(-1140.97 -103.86)">
+    <rect x="924.37" y="6.31" width="433.2" height="195.11" rx="97.56" ry="97.56" fill="none" stroke="url(#pill)" stroke-width="12.61"/>
+    <path fill="#ffffff" d="M1020.77,51.58h20.79v104.56h-20.79V51.58Z"/>
+    <path fill="#ffffff" d="M1280.87,137.98v18.16h-96.26V51.58h94.8v18.16h-74.01v23.58h65.22v18.16h-65.22v26.51h75.47Z"/>
+    <path fill="#ffffff" d="M1063.24,51.58h20.75v46.13l53.51-46.13h31.81l-49.8,43.07,53.16,61.49h-27.49l-41.4-47.88-19.78,17.11v30.77h-20.75V51.58Z"/>
+  </g>
+</svg>

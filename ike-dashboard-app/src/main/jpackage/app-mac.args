@@ -1,2 +1,5 @@
 --mac-package-identifier network.ike.dashboard
 --mac-package-name "IKE Dashboard"
+--mac-app-category developer-tools
+--copyright "Copyright © 2026 IKE Network"
+--resource-dir "${project.basedir}/src/main/jpackage-resources/mac"

@@ -198,6 +198,8 @@
                                     <arguments>
                                         <argument>@${project.build.directory}/jpackage/app.args</argument>
                                         <argument>@${project.build.directory}/jpackage/app-${dashboard.os}.args</argument>
+                                        <argument>--icon</argument>
+                                        <argument>${dashboard.icon}</argument>
                                         <argument>--dest</argument>
                                         <argument>${project.build.directory}/app</argument>
                                         <argument>--module-path</argument>
@@ -295,8 +297,9 @@
             </build>
         </profile>
 
-        <!-- What differs by the OS the build runs on: the argfiles jpackage reads, and the image's
-             folder an installer is made from. -->
+        <!-- What differs by the OS the build runs on: the argfiles jpackage reads, the image's
+             folder an installer is made from, and the icon in the form the OS takes, rendered from
+             the IKE pill of the brand guide by src/main/icons/render-icons.sh. -->
         <profile>
             <id>mac</id>
             <activation>
@@ -307,6 +310,7 @@
             <properties>
                 <dashboard.os>mac</dashboard.os>
                 <dashboard.app.folder>IKE Dashboard.app</dashboard.app.folder>
+                <dashboard.icon>${project.basedir}/src/main/jpackage-resources/mac/IKE Dashboard.icns</dashboard.icon>
             </properties>
         </profile>
         <profile>
@@ -319,6 +323,7 @@
             <properties>
                 <dashboard.os>windows</dashboard.os>
                 <dashboard.app.folder>IKE Dashboard</dashboard.app.folder>
+                <dashboard.icon>${project.basedir}/src/main/jpackage-resources/windows/IKE Dashboard.ico</dashboard.icon>
                 <!-- jpackage-props' Windows version is MSI-safe; the installer build names its own. -->
                 <dashboard.msi.version>${jpackage.app.version}</dashboard.msi.version>
             </properties>
@@ -334,6 +339,7 @@
             <properties>
                 <dashboard.os>linux</dashboard.os>
                 <dashboard.app.folder>IKE Dashboard</dashboard.app.folder>
+                <dashboard.icon>${project.basedir}/src/main/jpackage-resources/linux/IKE Dashboard.png</dashboard.icon>
             </properties>
         </profile>
     </profiles>
