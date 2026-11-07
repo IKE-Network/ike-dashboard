@@ -30,7 +30,7 @@ public sealed interface NoticeAction {
     String label();
 
     /**
-     * Download a store from Nexus into {@code ~/Solor}: a knowledge base not yet here, or a newer build of one that is.
+     * Download a store from Nexus into {@code ~/Solor}: a knowledge base not yet here.
      *
      * @param coordinate the knowledge base's coordinate
      * @param classifier the store's classifier
@@ -43,14 +43,58 @@ public sealed interface NoticeAction {
     }
 
     /**
-     * Upgrade the change sets of a store in a Komet with no window.
+     * Upgrade a store to the newest build in place, keeping every change set, the preferences and every
+     * repository in it, with the previous build kept beside it (decision 20).
+     *
+     * @param store      the store
+     * @param coordinate the knowledge base's coordinate
+     * @param classifier the store's classifier
+     */
+    record Upgrade(KnowledgeBase store, Coordinate coordinate, String classifier) implements NoticeAction {
+        @Override
+        public String label() {
+            return "Upgrade";
+        }
+    }
+
+    /**
+     * Reinstall a store: the newest build under the same name, with nothing of the person's; the old
+     * store goes to the Trash (decision 20).
+     *
+     * @param store      the store
+     * @param coordinate the knowledge base's coordinate
+     * @param classifier the store's classifier
+     */
+    record Reinstall(KnowledgeBase store, Coordinate coordinate, String classifier) implements NoticeAction {
+        @Override
+        public String label() {
+            return "Reinstall";
+        }
+    }
+
+    /**
+     * Install a copy of the newest build beside the copy the person has, with the version appended
+     * (decision 20).
+     *
+     * @param coordinate the knowledge base's coordinate
+     * @param classifier the store's classifier
+     */
+    record InstallCopy(Coordinate coordinate, String classifier) implements NoticeAction {
+        @Override
+        public String label() {
+            return "Install a copy";
+        }
+    }
+
+    /**
+     * Put a store's previous build back, carrying the work done since (decision 20).
      *
      * @param store the store
      */
-    record UpgradeChangeSets(KnowledgeBase store) implements NoticeAction {
+    record Restore(KnowledgeBase store) implements NoticeAction {
         @Override
         public String label() {
-            return "Upgrade change sets";
+            return "Restore";
         }
     }
 

@@ -200,50 +200,42 @@ class DashboardViewSnapshotTest {
     }
 
     @Test
-    void aStoreWhoseChangeSetsNeedAnUpgradeOffersIt(@TempDir Path solor) throws Exception {
+    void aStoreWithANewerBuildOffersUpgradeAndACopyAndKeepsThePreviousBuild(@TempDir Path solor) throws Exception {
         store(solor, "pizza-kb", "20250627.1-20261023.232318-6");
         describe(solor.resolve("pizza-kb"), "pizza-kb", "Pizza Knowledge Base", "rocks", new java.awt.Color(0xe65100), true);
-        Path changeSets = Files.createDirectories(ChangeSetCheck.folder(solor.resolve("pizza-kb")));
-        try (java.io.InputStream in = getClass().getResourceAsStream("/change-sets/format-3-without-patterns.zip")) {
-            Files.copy(in, changeSets.resolve("Author 20261023T183430PDT EVY ike-cs.zip"));
-        }
+        store(solor, "pizza-kb.previous", "20250627.1-20261020.120000-5");
+        describe(solor.resolve("pizza-kb.previous"), "pizza-kb", "Pizza Knowledge Base", "rocks", new java.awt.Color(0xe65100), true);
         List<KnowledgeBaseFamily> families = KnowledgeBaseFamily.managed(KnowledgeBaseScanner.scan(solor));
-        Path store = families.getFirst().latest().orElseThrow().path();
-        ChangeSetCheck.Finding finding = ChangeSetCheck.check(store);
-        KometInstallation upgrades = new KometInstallation("Komet 26.1101.900", "26.1101.900",
-                Path.of("/Applications/IKE/Komet/komet-26.1101.900"), Path.of("/Applications/IKE/Komet/komet-26.1101.900/bin/launchKomet"));
-        KometInstallation tooOld = new KometInstallation("Komet 26.1024.1356", "26.1024.1356",
-                Path.of("/Applications/IKE/Komet/komet-26.1024.1356"), Path.of("/Applications/IKE/Komet/komet-26.1024.1356/bin/launchKomet"));
-        Path log = Files.writeString(solor.resolve("komet-upgrade.log"), "log");
-        KometLauncher.UpgradeRun run = new KometLauncher.UpgradeRun(0, """
-                # Change-set upgrade
+        KnowledgeBase store = families.getFirst().latest().orElseThrow();
+        KometInstallation checks = new KometInstallation("Komet 26.1108.1200", "26.1108.1200",
+                Path.of("/Applications/IKE/Komet/komet-26.1108.1200"), Path.of("/Applications/IKE/Komet/komet-26.1108.1200/bin/launchKomet"));
+        KometInstallation tooOld = new KometInstallation("Komet 26.1101.1542", "26.1101.1542",
+                Path.of("/Applications/IKE/Komet/komet-26.1101.1542"), Path.of("/Applications/IKE/Komet/komet-26.1101.1542/bin/launchKomet"));
+        BuildStatus newer = new BuildStatus(BuildStatus.State.NEWER, "newer build",
+                Optional.of(new SnapshotMetadata.Deploy("20250627.1-20261106.183100-8", Instant.parse("2026-11-06T18:31:00Z"))));
+        Path log = Files.writeString(solor.resolve("komet-load.log"), "log");
+        KometLauncher.HeadlessRun run = new KometLauncher.HeadlessRun(1, """
+                # Change-set load
 
-                Knowledge base: /Users/kec/Solor/pizza-kb
+                Knowledge base: /Users/kec/Solor/pizza-kb.upgrade
 
-                - 1 file(s) chosen
-                - 1 change set(s) upgraded to format 3 (1 from format 3 without patterns)
-                - 0 already current
-                - 0 empty file(s) skipped (sessions that wrote nothing)
-                - 0 other file(s) skipped, not change sets
-                - 0 left as they were, naming components the knowledge base does not hold
-
-                ## Replaced
-
-                1 change set(s) replaced by their upgrades; the originals are in
-                `/Users/kec/ike-archive/2026-10-24-change-set-originals.tar.gz`.""", log);
+                - 3 file(s) found, 2 already registered
+                - 0 loaded
+                - 1 refused: `Author 20261101T100000PST AAA ike-cs.zip` names a component the knowledge base does not hold""", log);
 
         CompletableFuture<WritableImage> offered = new CompletableFuture<>();
         CompletableFuture<List<String>> offeredButtons = new CompletableFuture<>();
+        CompletableFuture<List<String>> oldKometButtons = new CompletableFuture<>();
         CompletableFuture<List<String>> oldKometTexts = new CompletableFuture<>();
         CompletableFuture<WritableImage> report = new CompletableFuture<>();
         Platform.runLater(() -> {
             try {
                 DashboardView view = new DashboardView();
-                view.setKomets(List.of(upgrades));
+                view.setKomets(List.of(checks));
                 view.setFamilies(families);
-                view.setChangeSets(store, finding);
+                view.setStatus("pizza-kb", newer);
                 view.select("pizza-kb");
-                Scene scene = new Scene(view, 1080, 480);
+                Scene scene = new Scene(view, 1080, 520);
                 view.applyCss();
                 view.layout();
                 offered.complete(scene.snapshot(null));
@@ -254,34 +246,42 @@ class DashboardViewSnapshotTest {
                 DashboardView old = new DashboardView();
                 old.setKomets(List.of(tooOld));
                 old.setFamilies(families);
-                old.setChangeSets(store, finding);
+                old.setStatus("pizza-kb", newer);
                 old.select("pizza-kb");
-                new Scene(old, 1080, 480);
+                new Scene(old, 1080, 520);
                 old.applyCss();
                 old.layout();
+                oldKometButtons.complete(old.lookupAll(".button").stream()
+                        .map(node -> (javafx.scene.control.Button) node)
+                        .filter(button -> !button.isDisable()).map(javafx.scene.control.Button::getText).toList());
                 oldKometTexts.complete(old.lookupAll(".label").stream()
                         .map(node -> ((javafx.scene.control.Label) node).getText()).toList());
 
-                Scene reportScene = new Scene(DashboardView.upgradeReport(run), 820, 420);
+                Scene reportScene = new Scene(DashboardView.runReport(run), 820, 420);
                 reportScene.getRoot().applyCss();
                 reportScene.getRoot().layout();
                 report.complete(reportScene.snapshot(null));
             } catch (RuntimeException e) {
                 offered.completeExceptionally(e);
                 offeredButtons.completeExceptionally(e);
+                oldKometButtons.completeExceptionally(e);
                 oldKometTexts.completeExceptionally(e);
                 report.completeExceptionally(e);
             }
         });
 
-        assertThat(finding.needed()).isEqualTo(1);
-        assertThat(offeredButtons.get(30, TimeUnit.SECONDS)).contains("Upgrade change sets");
+        assertThat(store.name()).isEqualTo("pizza-kb");
+        assertThat(StoreUpgrade.previous(families.getFirst())).map(KnowledgeBase::name).contains("pizza-kb.previous");
+        assertThat(offeredButtons.get(30, TimeUnit.SECONDS)).contains("Upgrade", "Install a copy", "Restore")
+                .doesNotContain("Download");
+        assertThat(oldKometButtons.get(30, TimeUnit.SECONDS)).as("without a Komet that checks the new build, only a copy")
+                .contains("Install a copy").doesNotContain("Upgrade");
         assertThat(oldKometTexts.get(30, TimeUnit.SECONDS))
-                .contains("1 change set needs an upgrade to load in a 64-bit store: 1 in format 3 naming no pattern.")
-                .anyMatch(text -> text.startsWith("Needs Komet " + LauncherChoice.UPGRADE_CHANGE_SETS_SINCE));
-        write(offered.get(30, TimeUnit.SECONDS), Path.of("target", "dashboard-change-sets.png"));
-        write(report.get(30, TimeUnit.SECONDS), Path.of("target", "change-set-upgrade-report.png"));
-        assertThat(Path.of("target", "dashboard-change-sets.png")).isNotEmptyFile();
+                .anyMatch(text -> text.startsWith("Upgrading in place needs Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE))
+                .anyMatch(text -> text.startsWith("The build before the upgrade is kept beside this one as pizza-kb.previous"));
+        write(offered.get(30, TimeUnit.SECONDS), Path.of("target", "dashboard-upgrade.png"));
+        write(report.get(30, TimeUnit.SECONDS), Path.of("target", "change-set-load-report.png"));
+        assertThat(Path.of("target", "dashboard-upgrade.png")).isNotEmptyFile();
     }
 
     private static Coordinate coordinate(String artifactId) {

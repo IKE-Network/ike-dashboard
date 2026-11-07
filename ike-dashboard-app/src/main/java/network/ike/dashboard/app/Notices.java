@@ -56,7 +56,6 @@ public final class Notices {
      * @param unmanaged    the entries in {@code ~/Solor} the dashboard does not manage
      * @param statuses     the newer-build check's finding for each, by name
      * @param nexusChecked when Nexus was last asked, and whether that worked
-     * @param changeSets   the change-set check's finding for each store, by its folder
      * @param komets       the Komets installed, newest first
      * @param kometRelease the newest Komet build found, if one was
      * @param catalog      what Nexus offers, once asked
@@ -66,8 +65,7 @@ public final class Notices {
      * @param now          the time the notices are for
      */
     public record Inputs(List<KnowledgeBaseFamily> families, List<KnowledgeBase> unmanaged, Map<String, BuildStatus> statuses,
-                         Optional<Notice.Freshness> nexusChecked, Map<Path, ChangeSetCheck.Finding> changeSets,
-                         List<KometInstallation> komets, Optional<KometRelease> kometRelease,
+                         Optional<Notice.Freshness> nexusChecked, List<KometInstallation> komets, Optional<KometRelease> kometRelease,
                          Optional<NexusCatalog.Catalog> catalog, Map<Path, List<RepositorySync.Status>> sync,
                          Set<String> collections, Optional<SelfUpdate.State> dashboard, Instant now) {
 
@@ -78,7 +76,6 @@ public final class Notices {
          * @param unmanaged    the entries not managed
          * @param statuses     the newer-build findings
          * @param nexusChecked when Nexus was last asked
-         * @param changeSets   the change-set findings
          * @param komets       the Komets installed
          * @param kometRelease the newest Komet build found
          * @param catalog      what Nexus offers
@@ -91,7 +88,6 @@ public final class Notices {
             families = List.copyOf(families);
             unmanaged = List.copyOf(unmanaged);
             statuses = Map.copyOf(statuses);
-            changeSets = Map.copyOf(changeSets);
             komets = List.copyOf(komets);
             sync = Map.copyOf(sync);
             collections = Set.copyOf(collections);
@@ -111,7 +107,6 @@ public final class Notices {
             family.latest().ifPresent(copy -> {
                 inputs.sync().getOrDefault(copy.path(), List.of())
                         .forEach(status -> sync(notices, family, status));
-                changeSets(notices, family, copy, inputs.changeSets().getOrDefault(copy.path(), ChangeSetCheck.Finding.NONE));
                 noKomet(notices, family, copy, inputs);
             });
             newerBuild(notices, family, inputs);
@@ -164,17 +159,6 @@ public final class Notices {
                 ? "Komet's sync does this." : "Use git in " + status.repository().folder() + ".";
     }
 
-    private static void changeSets(List<Notice> notices, KnowledgeBaseFamily family, KnowledgeBase copy,
-                                   ChangeSetCheck.Finding finding) {
-        if (finding.needed() == 0) {
-            return;
-        }
-        notices.add(new Notice("change-sets:" + copy.path() + ":" + finding.needed(), Notice.Urgency.AT_RISK,
-                plural(finding.needed(), "change set", "change sets") + " of " + family.displayName() + " need an upgrade",
-                finding.text() + ".", Optional.of(family.name()),
-                Optional.of(new NoticeAction.UpgradeChangeSets(copy)), Optional.empty()));
-    }
-
     private static void noKomet(List<Notice> notices, KnowledgeBaseFamily family, KnowledgeBase copy, Inputs inputs) {
         if (!copy.kind().opensInKomet() || LauncherChoice.choose(inputs.komets(), copy).isPresent()) {
             return;
@@ -194,14 +178,23 @@ public final class Notices {
         if (status.state() != BuildStatus.State.NEWER) {
             return;
         }
-        family.latestIdentified().ifPresent(identified -> identified.coordinate().ifPresent(coordinate ->
-                notices.add(new Notice("newer:" + family.name() + ":" + status.newest().map(SnapshotMetadata.Deploy::value)
-                        .orElse(""), Notice.Urgency.ACTION, "A newer build of " + family.displayName() + " is on Nexus",
-                        status.newest().map(deploy -> "Deployed " + WHEN.format(deploy.updated()) + ". ").orElse("")
-                                + "It downloads beside the copy you have, which stays as it is.",
-                        Optional.of(family.name()),
-                        Optional.of(new NoticeAction.Download(coordinate, identified.kind().classifier())),
-                        inputs.nexusChecked()))));
+        family.latestIdentified().ifPresent(identified -> identified.coordinate().ifPresent(coordinate -> {
+            // Upgrade keeps the person's work in place (decision 20); it needs a Komet that validates the
+            // new build with no window. Without one, the newer build can still be installed beside.
+            boolean upgradable = LauncherChoice.chooseForLoad(inputs.komets(), identified).isPresent();
+            String deployed = status.newest().map(deploy -> "Deployed " + WHEN.format(deploy.updated()) + ". ").orElse("");
+            notices.add(new Notice("newer:" + family.name() + ":" + status.newest().map(SnapshotMetadata.Deploy::value)
+                    .orElse(""), Notice.Urgency.ACTION, "A newer build of " + family.displayName() + " is on Nexus",
+                    deployed + (upgradable
+                            ? "Upgrade keeps your change sets, preferences and repositories; the build you have stays"
+                                    + " beside it until you remove it."
+                            : "It installs a copy beside the one you have, which stays as it is. Upgrading in place"
+                                    + " needs Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE + " or later."),
+                    Optional.of(family.name()),
+                    Optional.of(upgradable ? new NoticeAction.Upgrade(identified, coordinate, identified.kind().classifier())
+                            : new NoticeAction.InstallCopy(coordinate, identified.kind().classifier())),
+                    inputs.nexusChecked()));
+        }));
     }
 
     private static void newerKomet(List<Notice> notices, Inputs inputs) {
@@ -311,7 +304,7 @@ public final class Notices {
                 .toList();
     }
 
-    private static String plural(int count, String one, String many) {
+    static String plural(int count, String one, String many) {
         return count + " " + (count == 1 ? one : many);
     }
 }

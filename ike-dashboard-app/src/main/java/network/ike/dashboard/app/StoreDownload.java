@@ -139,9 +139,53 @@ public final class StoreDownload {
                 transfer::cancelWith);
     }
 
+    /**
+     * Downloads the newest deploy of a store into a folder named by the caller, for an upgrade's working
+     * folder or a reinstall under the store's own name ({@link StoreUpgrade}). The folder must not exist:
+     * the dashboard never writes over a store.
+     *
+     * @param http            the client to download with
+     * @param repository      the repository and its login
+     * @param coordinate      the knowledge base's coordinate
+     * @param classifier      the store's classifier; a protobuf's is refused
+     * @param destination     where the store unpacks
+     * @param localRepository the local Maven repository the zip is cached in
+     * @param transfer        shows the progress, and cancels the download when asked
+     * @return the unpacked store, {@code destination}
+     * @throws CancellationException if the person cancelled it
+     * @throws Exception if the folder exists, Nexus has no such deploy, or the download fails
+     */
+    public static Path downloadTo(HttpClient http, RepositoryAccess repository, Coordinate coordinate, String classifier,
+                                  Path destination, Path localRepository, Transfer transfer) throws Exception {
+        if (NexusCatalog.PROTOBUF_CLASSIFIERS.contains(classifier)) {
+            throw new IllegalArgumentException("A protobuf (" + classifier + ") is placed as a zip, not unpacked into a folder");
+        }
+        return download(http, repository, coordinate, classifier, Optional.empty(), destination.getParent(), localRepository,
+                transfer, transfer::cancelWith, fileVersion -> {
+                    if (Files.exists(destination)) {
+                        throw new IOException(destination + " already exists; the dashboard never writes over a store");
+                    }
+                    return destination;
+                });
+    }
+
+    /** Where a store unpacks, given the deploy that was resolved. */
+    @FunctionalInterface
+    private interface Destination {
+        Path of(String fileVersion) throws IOException;
+    }
+
     private static Path download(HttpClient http, RepositoryAccess repository, Coordinate coordinate, String classifier,
                                  Optional<NexusCatalog.Described> described, Path solor, Path localRepository,
                                  DownloadListener<Path> listener, Consumer<Runnable> cancelWith) throws Exception {
+        return download(http, repository, coordinate, classifier, described, solor, localRepository, listener, cancelWith,
+                fileVersion -> destination(solor, coordinate.artifactId(), fileVersion));
+    }
+
+    private static Path download(HttpClient http, RepositoryAccess repository, Coordinate coordinate, String classifier,
+                                 Optional<NexusCatalog.Described> described, Path solor, Path localRepository,
+                                 DownloadListener<Path> listener, Consumer<Runnable> cancelWith, Destination where)
+            throws Exception {
         String fileVersion = coordinate.version();
         if (coordinate.snapshot()) {
             fileVersion = newestDeploy(http, repository, coordinate, classifier)
@@ -167,7 +211,7 @@ public final class StoreDownload {
             }
             return zip;
         }
-        Path destination = destination(solor, coordinate.artifactId(), fileVersion);
+        Path destination = where.of(fileVersion);
         MavenDataStoreDownloadTask task = repository.credentials().isPresent()
                 ? MavenDataStoreDownloadTask.unpackTask(http, uri, cached, destination,
                 MavenDataStoreDownloadTask.AssetVerification.NONE, repository.credentials().get())

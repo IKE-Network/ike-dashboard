@@ -42,15 +42,37 @@ class NoticesTest {
     void workAtRiskComesBeforeWhatCanBeDoneAndNewsComesLast() {
         KnowledgeBaseFamily pizza = family(store("pizza-kb", StoreKind.ROCKS, Map.of()));
         Path store = pizza.latest().orElseThrow().path();
-        List<Notice> notices = Notices.compute(inputs(List.of(pizza), Map.of("pizza-kb", newer()),
-                Map.of(store, new ChangeSetCheck.Finding(0, 2, 0, 5)), List.of(KOMET_1024),
+        RepositorySync.Repository changeSets = new RepositorySync.Repository(store.resolve("changeSets"), "change sets");
+        RepositorySync.Status unpushed = new RepositorySync.Status(changeSets, "main", 0, 2, RepositorySync.Remote.CURRENT, 0,
+                Optional.of(new Notice.Freshness(NOW, true)), "");
+        List<Notice> notices = Notices.compute(inputs(List.of(pizza), Map.of("pizza-kb", newer()), List.of(KOMET_1024),
                 Optional.of(release("26.1025.900")), Optional.of(catalog(offer("solor-nuva-kb", NOW.minus(Duration.ofDays(1))))),
-                Map.of()), id -> false);
+                Map.of(store, List.of(unpushed))), id -> false);
 
         assertThat(notices).extracting(Notice::urgency).containsExactly(
                 Notice.Urgency.AT_RISK, Notice.Urgency.ACTION, Notice.Urgency.ACTION, Notice.Urgency.ACTION);
-        assertThat(notices.getFirst().title()).isEqualTo("2 change sets of Pizza need an upgrade");
-        assertThat(notices.getFirst().action()).containsInstanceOf(NoticeAction.UpgradeChangeSets.class);
+        assertThat(notices.getFirst().title()).isEqualTo("2 commits not pushed from Pizza, change sets");
+    }
+
+    @Test
+    void aNewerBuildOffersUpgradeWhenAKometCanCheckItAndACopyOtherwise() {
+        KnowledgeBaseFamily pizza = family(store("pizza-kb", StoreKind.ROCKS, Map.of()));
+        KnowledgeBase latest = pizza.latest().orElseThrow();
+        KometInstallation checks = komet("26.1107.1831");
+
+        List<Notice> withChecker = Notices.compute(inputs(List.of(pizza), Map.of("pizza-kb", newer()), List.of(checks, KOMET_1024),
+                Optional.empty(), Optional.empty(), Map.of()), id -> false);
+        List<Notice> without = Notices.compute(inputs(List.of(pizza), Map.of("pizza-kb", newer()), List.of(KOMET_1024),
+                Optional.empty(), Optional.empty(), Map.of()), id -> false);
+
+        assertThat(withChecker).singleElement().satisfies(notice -> {
+            assertThat(notice.action()).contains(new NoticeAction.Upgrade(latest, PIZZA, "rkb"));
+            assertThat(notice.detail()).contains("Upgrade keeps your change sets, preferences and repositories");
+        });
+        assertThat(without).singleElement().satisfies(notice -> {
+            assertThat(notice.action()).contains(new NoticeAction.InstallCopy(PIZZA, "rkb"));
+            assertThat(notice.detail()).contains("needs Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE);
+        });
     }
 
     @Test
@@ -58,12 +80,12 @@ class NoticesTest {
         KnowledgeBaseFamily pizza = family(store("pizza-kb", StoreKind.ROCKS, Map.of()));
         Notice.Freshness asked = new Notice.Freshness(NOW.minus(Duration.ofHours(3)), false);
         List<Notice> notices = Notices.compute(new Notices.Inputs(List.of(pizza), List.of(), Map.of("pizza-kb", newer()),
-                Optional.of(asked), Map.of(), List.of(KOMET_1024), Optional.empty(), Optional.empty(), Map.of(), Set.of(), Optional.empty(), NOW),
+                Optional.of(asked), List.of(KOMET_1024), Optional.empty(), Optional.empty(), Map.of(), Set.of(), Optional.empty(), NOW),
                 id -> false);
 
         assertThat(notices).singleElement().satisfies(notice -> {
             assertThat(notice.title()).isEqualTo("A newer build of Pizza is on Nexus");
-            assertThat(notice.action()).contains(new NoticeAction.Download(PIZZA, "rkb"));
+            assertThat(notice.action()).contains(new NoticeAction.InstallCopy(PIZZA, "rkb"));
             assertThat(notice.freshness()).as("offline, it is shown as of the last check").contains(asked);
             assertThat(notice.id()).isEqualTo("newer:pizza-kb:20250627.1-20261024.001942-7");
         });
@@ -72,7 +94,7 @@ class NoticesTest {
     @Test
     void aDismissedNoticeIsLeftOut() {
         KnowledgeBaseFamily pizza = family(store("pizza-kb", StoreKind.ROCKS, Map.of()));
-        List<Notice> notices = Notices.compute(inputs(List.of(pizza), Map.of("pizza-kb", newer()), Map.of(),
+        List<Notice> notices = Notices.compute(inputs(List.of(pizza), Map.of("pizza-kb", newer()),
                 List.of(KOMET_1024), Optional.empty(), Optional.empty(), Map.of()),
                 "newer:pizza-kb:20250627.1-20261024.001942-7"::equals);
 
@@ -87,7 +109,7 @@ class NoticesTest {
                 offer("solor-nuva-kb", NOW.minus(Duration.ofDays(2))),
                 offer("rxnorm-kb", NOW.minus(Duration.ofDays(40))),
                 offer("gudid-kb", NOW.minus(Duration.ofDays(90))));
-        List<Notice> notices = Notices.compute(inputs(List.of(pizza), Map.of(), Map.of(), List.of(KOMET_1024),
+        List<Notice> notices = Notices.compute(inputs(List.of(pizza), Map.of(), List.of(KOMET_1024),
                 Optional.empty(), Optional.of(catalog), Map.of()), id -> false);
 
         assertThat(notices).extracting(Notice::title)
@@ -106,7 +128,7 @@ class NoticesTest {
                 new NexusCatalog.Offer(coordinate("solor-kb"), "reasoned-pb", 52_000_000, NOW.minus(Duration.ofDays(1)),
                         "ike-snapshots"));
 
-        List<Notice> notices = Notices.compute(inputs(List.of(), Map.of(), Map.of(), List.of(KOMET_1024),
+        List<Notice> notices = Notices.compute(inputs(List.of(), Map.of(), List.of(KOMET_1024),
                 Optional.empty(), Optional.of(catalog), Map.of()), id -> false);
 
         assertThat(notices).extracting(Notice::title).as("the Nexus window lists protobufs under their knowledge base")
@@ -129,7 +151,7 @@ class NoticesTest {
                 coordinate("solor-gudid-kb"), inCollection("solor-gudid-kb", "SOLOR + GUDID", "solor"),
                 coordinate("dex-kb"), inCollection("dex-kb", "DeX", null)));
 
-        List<Notice> notices = Notices.compute(inputs(List.of(pizza), Map.of(), Map.of(), List.of(KOMET_1024),
+        List<Notice> notices = Notices.compute(inputs(List.of(pizza), Map.of(), List.of(KOMET_1024),
                 Optional.empty(), Optional.of(catalog), Map.of()), id -> false);
 
         assertThat(notices).extracting(Notice::title).as("one recently deployed, the collection, and the rest counted")
@@ -140,7 +162,7 @@ class NoticesTest {
         assertThat(collection.action()).contains(new NoticeAction.Browse());
         assertThat(collection.id()).isEqualTo("collection:SOLOR:RxNorm,SOLOR + GUDID");
 
-        assertThat(Notices.compute(new Notices.Inputs(List.of(pizza), List.of(), Map.of(), Optional.empty(), Map.of(),
+        assertThat(Notices.compute(new Notices.Inputs(List.of(pizza), List.of(), Map.of(), Optional.empty(),
                 List.of(KOMET_1024), Optional.empty(), Optional.of(catalog), Map.of(), Set.of(), Optional.empty(), NOW), id -> false))
                 .extracting(Notice::title).as("tracking none, they are counted with the rest")
                 .contains("3 more knowledge bases on Nexus");
@@ -152,7 +174,7 @@ class NoticesTest {
                 Optional.empty(), Map.of(), Instant.parse("2026-10-16T13:02:00Z"));
         NexusCatalog.Catalog catalog = catalog(offer("solor-kb", NOW.minus(Duration.ofDays(1))));
         List<Notice> notices = Notices.compute(new Notices.Inputs(List.of(), List.of(oldCopy), Map.of(),
-                Optional.of(new Notice.Freshness(NOW, true)), Map.of(), List.of(KOMET_1024), Optional.empty(),
+                Optional.of(new Notice.Freshness(NOW, true)), List.of(KOMET_1024), Optional.empty(),
                 Optional.of(catalog), Map.of(), Set.of(), Optional.empty(), NOW), id -> false);
 
         assertThat(notices).singleElement().satisfies(notice -> {
@@ -165,7 +187,7 @@ class NoticesTest {
     void aStoreNoInstalledKometOpensOffersTheKometThatDoes() {
         KnowledgeBaseFamily format3 = family(store("pizza-kb", StoreKind.ROCKS, Map.of(KnowledgeBase.ENTITY_FORMAT, "3")));
         KometRelease release = release("26.1025.900");
-        List<Notice> notices = Notices.compute(inputs(List.of(format3), Map.of(), Map.of(), List.of(komet("26.1016.346")),
+        List<Notice> notices = Notices.compute(inputs(List.of(format3), Map.of(), List.of(komet("26.1016.346")),
                 Optional.of(release), Optional.empty(), Map.of()), id -> false);
 
         assertThat(notices).filteredOn(notice -> notice.title().startsWith("No installed Komet")).singleElement()
@@ -183,7 +205,7 @@ class NoticesTest {
                 new RepositorySync.Status(changeSets, "main", 3, 1, RepositorySync.Remote.BEHIND, 2, Optional.of(checked), ""),
                 new RepositorySync.Status(preferences, "main", 0, 0, RepositorySync.Remote.UNKNOWN, 0, Optional.empty(),
                         "Could not resolve host: github.com"));
-        List<Notice> notices = Notices.compute(inputs(List.of(pizza), Map.of(), Map.of(), List.of(KOMET_1024),
+        List<Notice> notices = Notices.compute(inputs(List.of(pizza), Map.of(), List.of(KOMET_1024),
                 Optional.empty(), Optional.empty(), Map.of(store, states)), id -> false);
 
         assertThat(notices).extracting(Notice::urgency, Notice::title).containsExactly(
@@ -199,14 +221,14 @@ class NoticesTest {
     @Test
     void aNewerKometIsOfferedAgainstTheNewestInstalled() {
         KometRelease release = release("26.1025.900");
-        List<Notice> notices = Notices.compute(inputs(List.of(), Map.of(), Map.of(), List.of(KOMET_1024),
+        List<Notice> notices = Notices.compute(inputs(List.of(), Map.of(), List.of(KOMET_1024),
                 Optional.of(release), Optional.empty(), Map.of()), id -> false);
 
         assertThat(notices).singleElement().satisfies(notice -> {
             assertThat(notice.title()).isEqualTo("Komet 26.1025.900 is available");
             assertThat(notice.action()).contains(new NoticeAction.InstallKomet(release));
         });
-        assertThat(Notices.compute(inputs(List.of(), Map.of(), Map.of(), List.of(komet("26.1025.900")),
+        assertThat(Notices.compute(inputs(List.of(), Map.of(), List.of(komet("26.1025.900")),
                 Optional.of(release), Optional.empty(), Map.of()), id -> false)).as("not when it is installed").isEmpty();
     }
 
@@ -253,7 +275,7 @@ class NoticesTest {
     }
 
     private static Notices.Inputs withDashboard(SelfUpdate.State state) {
-        return new Notices.Inputs(List.of(), List.of(), Map.of(), Optional.of(new Notice.Freshness(NOW, true)), Map.of(),
+        return new Notices.Inputs(List.of(), List.of(), Map.of(), Optional.of(new Notice.Freshness(NOW, true)),
                 List.of(KOMET_1024), Optional.empty(), Optional.empty(), Map.of(), Set.of(), Optional.of(state), NOW);
     }
 
@@ -264,10 +286,10 @@ class NoticesTest {
     }
 
     private static Notices.Inputs inputs(List<KnowledgeBaseFamily> families, Map<String, BuildStatus> statuses,
-                                         Map<Path, ChangeSetCheck.Finding> changeSets, List<KometInstallation> komets,
+                                         List<KometInstallation> komets,
                                          Optional<KometRelease> release, Optional<NexusCatalog.Catalog> catalog,
                                          Map<Path, List<RepositorySync.Status>> sync) {
-        return new Notices.Inputs(families, List.of(), statuses, Optional.of(new Notice.Freshness(NOW, true)), changeSets, komets,
+        return new Notices.Inputs(families, List.of(), statuses, Optional.of(new Notice.Freshness(NOW, true)), komets,
                 release, catalog, sync, Set.of(DashboardSettings.DEFAULT_COLLECTIONS), Optional.empty(), NOW);
     }
 

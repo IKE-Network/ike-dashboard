@@ -82,7 +82,9 @@ public final class KnowledgeBaseScanner {
         try (Stream<Path> entries = Files.list(solor)) {
             for (Path entry : entries.sorted(Comparator.comparing(path -> path.getFileName().toString())).toList()) {
                 String name = entry.getFileName().toString();
-                if (name.startsWith(".") || !(Files.isDirectory(entry) || name.endsWith(".zip"))) {
+                if (name.startsWith(".") || StoreUpgrade.isWork(name)
+                        || !(Files.isDirectory(entry) || name.endsWith(".zip"))) {
+                    // A dot entry is the dashboard's own; an upgrade's working folder is not yet a store.
                     continue;
                 }
                 found.add(inspect(entry));

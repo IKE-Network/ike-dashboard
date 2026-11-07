@@ -38,10 +38,13 @@ public final class KometLauncher {
 
     private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
-    /** Komet's option that upgrades change sets with no window ({@code LaunchOptions} in komet-desktop). */
-    static final String UPGRADE_ARGUMENT = "upgrade-change-sets";
-    /** The line Komet prints before the report ({@code ChangeSetUpgradeCommand.REPORT_START}). */
-    static final String REPORT_START = "----- change-set upgrade report -----";
+    /**
+     * Komet's option that loads a store's unregistered change sets with no window
+     * ({@code LaunchOptions} in komet-desktop; decision 20 of the {@code dev-ike-dashboard} topic).
+     */
+    static final String LOAD_ARGUMENT = "load-change-sets";
+    /** The line Komet prints before the report ({@code ChangeSetLoadCommand.REPORT_START}). */
+    static final String REPORT_START = "----- change-set load report -----";
     /** The line Komet prints after the report. */
     static final String REPORT_END = "----- end of report -----";
 
@@ -107,29 +110,30 @@ public final class KometLauncher {
     }
 
     /**
-     * The command that upgrades a knowledge base's change sets in a Komet with no window
-     * (IKE-Network/ike-issues#1313): {@code ChangeSetUpgradeCommand} in komet-desktop.
+     * The command that loads a knowledge base's unregistered change sets in a Komet with no window:
+     * {@code ChangeSetLoadCommand} in komet-desktop. The same load every open of the store runs, so a
+     * clean run says the store opens and holds every change set carried into it.
      *
-     * @param komet         the Komet, one {@link LauncherChoice#upgradesChangeSets} accepts
-     * @param knowledgeBase the knowledge base whose change sets are upgraded against it
+     * @param komet         the Komet, one {@link LauncherChoice#loadsChangeSets} accepts
+     * @param knowledgeBase the knowledge base
      * @return the command and its arguments
      */
-    public static List<String> upgradeCommand(KometInstallation komet, KnowledgeBase knowledgeBase) {
-        return List.of(komet.executable().toString(), "--kb=" + knowledgeBase.path(), "--" + UPGRADE_ARGUMENT);
+    public static List<String> loadCommand(KometInstallation komet, KnowledgeBase knowledgeBase) {
+        return List.of(komet.executable().toString(), "--kb=" + knowledgeBase.path(), "--" + LOAD_ARGUMENT);
     }
 
     /**
-     * What an upgrade run did.
+     * What a run of Komet with no window did.
      *
-     * @param exitStatus the Komet's exit status: 0 clean, 1 something left without a pattern or
-     *                   failed, 2 nothing done
+     * @param exitStatus the Komet's exit status: 0 clean, 1 a change set refused or failed, 2 nothing
+     *                   done
      * @param report     the report Komet printed, Markdown; empty when it printed none
      * @param log        the run's whole output
      */
-    public record UpgradeRun(int exitStatus, String report, Path log) {
+    public record HeadlessRun(int exitStatus, String report, Path log) {
 
         /**
-         * Whether every change set is upgraded or current.
+         * Whether every change set is in the store.
          *
          * @return {@code true} for exit status 0
          */
@@ -157,9 +161,9 @@ public final class KometLauncher {
     }
 
     /**
-     * Upgrades a knowledge base's change sets in a Komet with no window, and waits for it. Komet
-     * archives the originals it replaces in {@code ~/ike-archive}. The store must not be open in
-     * another Komet; Komet refuses, and says so, when it is.
+     * Loads a knowledge base's unregistered change sets in a Komet with no window, and waits for it:
+     * the validation of an upgrade ({@link StoreUpgrade}). The store must not be open in another
+     * Komet; Komet refuses, and says so, when it is.
      *
      * @param komet         the Komet
      * @param knowledgeBase the knowledge base
@@ -169,18 +173,18 @@ public final class KometLauncher {
      * @throws IOException          if Komet cannot be started
      * @throws InterruptedException if the wait is interrupted
      */
-    public static UpgradeRun upgradeChangeSets(KometInstallation komet, KnowledgeBase knowledgeBase,
-                                               Map<String, String> environment, Path logFolder)
+    public static HeadlessRun loadChangeSets(KometInstallation komet, KnowledgeBase knowledgeBase,
+                                             Map<String, String> environment, Path logFolder)
             throws IOException, InterruptedException {
         Files.createDirectories(logFolder);
-        Path log = logFolder.resolve("komet-upgrade-" + knowledgeBase.name() + "-" + LocalDateTime.now().format(STAMP) + ".log");
-        ProcessBuilder builder = new ProcessBuilder(upgradeCommand(komet, knowledgeBase))
+        Path log = logFolder.resolve("komet-load-" + knowledgeBase.name() + "-" + LocalDateTime.now().format(STAMP) + ".log");
+        ProcessBuilder builder = new ProcessBuilder(loadCommand(komet, knowledgeBase))
                 .redirectErrorStream(true)
                 .redirectOutput(log.toFile());
         builder.environment().putAll(launcherEnvironment(komet, environment));
         Process process = builder.start();
         int status = process.waitFor();
-        return new UpgradeRun(status, report(Files.readString(log)), log);
+        return new HeadlessRun(status, report(Files.readString(log)), log);
     }
 
     /**

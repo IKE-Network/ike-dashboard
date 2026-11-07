@@ -199,7 +199,6 @@ public final class DashboardCommand {
         RepositoryAccess access = access(settings);
         NewerBuildCheck newer = new NewerBuildCheck(http, access);
         Map<String, BuildStatus> statuses = new HashMap<>();
-        Map<Path, ChangeSetCheck.Finding> changeSets = new HashMap<>();
         Map<Path, List<RepositorySync.Status>> sync = new HashMap<>();
         Optional<RepositorySync.Git> git = RepositorySync.Git.find();
         Instant now = Instant.now();
@@ -207,7 +206,6 @@ public final class DashboardCommand {
             family.latestIdentified().map(newer::check).ifPresent(status -> statuses.put(family.name(), status));
             Optional<KnowledgeBase> latest = family.latest().filter(copy -> copy.kind().opensInKomet());
             if (latest.isPresent()) {
-                changeSets.put(latest.get().path(), ChangeSetCheck.check(latest.get().path()));
                 List<RepositorySync.Status> states = new ArrayList<>();
                 if (git.isPresent()) {
                     for (RepositorySync.Repository repository : RepositorySync.find(latest.get().path())) {
@@ -243,7 +241,7 @@ public final class DashboardCommand {
             }
         }
         List<Notice> notices = Notices.compute(new Notices.Inputs(families, KnowledgeBaseFamily.unmanaged(knowledgeBases), statuses,
-                Optional.of(new Notice.Freshness(now, true)), changeSets, komets, release, catalog, sync,
+                Optional.of(new Notice.Freshness(now, true)), komets, release, catalog, sync,
                 settings.collections(), dashboard, now),
                 NoticeDismissals.current()::dismissed);
         out.printf("%d notices%s%n", notices.size(), git.isPresent() ? "" : " (no git found: repository sync not checked)");

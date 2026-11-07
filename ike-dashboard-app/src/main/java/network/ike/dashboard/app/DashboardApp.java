@@ -26,6 +26,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.net.http.HttpClient;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -134,7 +135,9 @@ public final class DashboardApp extends Application {
         view.setOnTrash(this::trash);
         view.setOnBrowse(this::loadCatalog);
         view.setOnInstallKomet(this::installKomet);
-        view.setOnUpgradeChangeSets(this::upgradeChangeSets);
+        view.setOnUpgrade(this::upgrade);
+        view.setOnReinstall(this::reinstall);
+        view.setOnRestore(this::restore);
         view.setOnUpdateDashboard(this::updateDashboard);
         view.setOnMoveDashboard(this::moveDashboard);
         view.setOnReveal(path -> run(() -> Finder.reveal(path), "Could not show " + path));
@@ -197,7 +200,6 @@ public final class DashboardApp extends Application {
                 return;
             }
             current = families;
-            checkChangeSets(families);
             checkNetwork(families);
         });
     }
@@ -330,49 +332,7 @@ public final class DashboardApp extends Application {
         Platform.runLater(() -> view.setMessage(summary));
     }
 
-    /** Runs on the work thread: which change sets of each store need an upgrade (IKE-Network/ike-issues#1313). */
-    private void checkChangeSets(List<KnowledgeBaseFamily> families) {
-        for (KnowledgeBaseFamily family : families) {
-            family.latest().filter(copy -> copy.kind().opensInKomet()).ifPresent(copy -> {
-                try {
-                    ChangeSetCheck.Finding finding = ChangeSetCheck.check(copy.path());
-                    Platform.runLater(() -> view.setChangeSets(copy.path(), finding));
-                } catch (Exception e) {
-                    Platform.runLater(() -> view.setMessage("Could not read the change sets of " + copy.name() + ": "
-                            + e.getMessage()));
-                }
-            });
-        }
-    }
 
-    /** Upgrades a store's change sets in a Komet with no window, on a thread of its own, and shows the report. */
-    private void upgradeChangeSets(KometInstallation komet, KnowledgeBase knowledgeBase) {
-        Map<String, String> environment = heapPlan(komet, knowledgeBase).environment();
-        view.setUpgrading(knowledgeBase.path(), true);
-        view.setMessage("Upgrading the change sets of " + knowledgeBase.name() + " in Komet " + komet.version() + " …");
-        Thread.ofVirtual().name("ike-dashboard-upgrade").start(() -> {
-            try {
-                KometLauncher.UpgradeRun run = KometLauncher.upgradeChangeSets(komet, knowledgeBase, environment,
-                        settings.logFolder());
-                ChangeSetCheck.Finding finding = ChangeSetCheck.check(knowledgeBase.path());
-                Platform.runLater(() -> {
-                    view.setUpgrading(knowledgeBase.path(), false);
-                    view.setChangeSets(knowledgeBase.path(), finding);
-                    view.setLastLog(run.log());
-                    view.setMessage(run.clean() ? "Upgraded the change sets of " + knowledgeBase.name()
-                            : "The change-set upgrade of " + knowledgeBase.name() + " ended with status " + run.exitStatus());
-                    view.showUpgradeReport(knowledgeBase, run);
-                });
-            } catch (Exception e) {
-                Platform.runLater(() -> {
-                    view.setUpgrading(knowledgeBase.path(), false);
-                    view.setMessage("Could not upgrade the change sets of " + knowledgeBase.name() + ": " + e.getMessage());
-                });
-            }
-        });
-    }
-
-    /** Asks Nexus which knowledge bases it offers, for the Nexus window. */
     private void loadCatalog() {
         work.submit(() -> {
             try {
@@ -412,6 +372,185 @@ public final class DashboardApp extends Application {
                         + " again picks up where this one stopped.");
             } catch (Exception e) {
                 transfer.finished(Transfer.State.FAILED, "Could not download: " + e.getMessage());
+            }
+        });
+    }
+
+    /**
+     * Upgrades a store in place on the work thread (decision 20 of the design): the newest build downloads
+     * into a working folder beside it, the person's work is carried in, Komet with no window checks that
+     * the new build opens and holds every change set, and the folders swap by rename, the old store kept
+     * as {@code <store>.previous}. Every failure leaves the store as it was, carrying the work back; a
+     * build that failed its check is kept beside the store for inspection.
+     */
+    private void upgrade(NoticeAction.Upgrade action) {
+        KnowledgeBase store = action.store();
+        Optional<KometInstallation> validator = LauncherChoice.chooseForLoad(komets, store);
+        if (validator.isEmpty()) {
+            view.setMessage("Upgrading needs Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE + " or later");
+            return;
+        }
+        List<String> refusals;
+        try {
+            refusals = StoreUpgrade.refusals(store, view.sync(store.path()), HeapSizing.Machine.current(komets).running());
+        } catch (IOException e) {
+            view.setMessage("Could not read " + store.name() + ": " + e.getMessage());
+            return;
+        }
+        if (!refusals.isEmpty()) {
+            view.showRefusals("Upgrade " + store.displayName(), refusals);
+            return;
+        }
+        KometInstallation komet = validator.get();
+        Path work = StoreUpgrade.workFolder(store.path());
+        Path previous = StoreUpgrade.previousFolder(store.path());
+        Transfer transfer = new Transfer("Upgrade " + view.nameOf(action.coordinate()));
+        view.showTransfer(transfer, Optional.of(DashboardView.upgradeKey(store.path())));
+        this.work.submit(() -> {
+            if (!transfer.started()) {
+                return;
+            }
+            boolean carried = false;
+            try {
+                transfer.phase("Downloading the newest build");
+                StoreDownload.downloadTo(RepositoryHttpClients.newClient(), DashboardCommand.access(settings), action.coordinate(),
+                        action.classifier(), work, settings.localRepository(), transfer);
+                transfer.phase("Carrying your change sets and preferences");
+                StoreUpgrade.Carried carry = StoreUpgrade.carry(store.path(), work);
+                carried = true;
+                if (!carry.conflicts().isEmpty()) {
+                    StoreUpgrade.carry(work, store.path());
+                    StoreUpgrade.deleteTree(work);
+                    transfer.finished(Transfer.State.FAILED, "Not upgraded: the new build holds " + carry.conflicts().size()
+                            + (carry.conflicts().size() == 1 ? " file" : " files") + " of the same name as yours with other"
+                            + " contents, the first " + store.path().relativize(carry.conflicts().getFirst())
+                            + ". Your store is as it was.");
+                    return;
+                }
+                transfer.phase("Checking the new build in Komet " + komet.version());
+                KnowledgeBase staged = KnowledgeBaseScanner.inspect(work);
+                KometLauncher.HeadlessRun run = KometLauncher.loadChangeSets(komet, staged, heapPlan(komet, staged).environment(),
+                        settings.logFolder());
+                if (!run.clean()) {
+                    StoreUpgrade.carry(work, store.path());
+                    transfer.finished(Transfer.State.FAILED, "Not upgraded: Komet could not load every change set into the new"
+                            + " build (status " + run.exitStatus() + "). Your store is as it was; the new build is kept beside"
+                            + " it as " + work.getFileName() + " for inspection. Move it to the " + Finder.trashName()
+                            + " to upgrade again.");
+                    Platform.runLater(() -> {
+                        view.setLastLog(run.log());
+                        view.showRunReport(store, run);
+                    });
+                    return;
+                }
+                transfer.phase("Swapping the new build in");
+                if (Files.exists(previous)) {
+                    Finder.trash(List.of(previous));
+                }
+                StoreUpgrade.swap(store.path(), work);
+                transfer.finished(Transfer.State.DONE, "Upgraded " + store.name() + ": " + carry.summary() + ". The build you"
+                        + " had is beside it as " + previous.getFileName() + "; Restore puts it back.");
+                Platform.runLater(() -> {
+                    selectAfterRefresh = KnowledgeBaseFamily.familyName(store);
+                    view.setLastLog(run.log());
+                    refresh();
+                });
+            } catch (CancellationException e) {
+                transfer.finished(Transfer.State.CANCELLED, "Cancelled before anything changed. What had downloaded is kept,"
+                        + " so upgrading again picks up where this one stopped.");
+            } catch (Exception e) {
+                String kept = "";
+                if (carried) {
+                    try {
+                        StoreUpgrade.carry(work, store.path());
+                    } catch (IOException back) {
+                        kept = " Your change sets and preferences may be in " + work.getFileName() + ": " + back.getMessage();
+                    }
+                }
+                transfer.finished(Transfer.State.FAILED, "Could not upgrade: " + e.getMessage() + "."
+                        + (kept.isEmpty() ? " Your store is as it was" + (Files.exists(work) ? "; " + work.getFileName()
+                        + " is kept beside it for inspection." : ".") : kept));
+                Platform.runLater(this::refresh);
+            }
+        });
+    }
+
+    /**
+     * Reinstalls a store on the work thread (decision 20): the store goes to the Trash, with everything in
+     * it, and the newest build downloads under the same name. The dashboard never writes over a store; the
+     * Trash is the way back.
+     */
+    private void reinstall(NoticeAction.Reinstall action) {
+        KnowledgeBase store = action.store();
+        List<String> refusals;
+        try {
+            refusals = StoreUpgrade.refusals(store, view.sync(store.path()), HeapSizing.Machine.current(komets).running());
+        } catch (IOException e) {
+            view.setMessage("Could not read " + store.name() + ": " + e.getMessage());
+            return;
+        }
+        if (!refusals.isEmpty()) {
+            view.showRefusals("Reinstall " + store.displayName(), refusals);
+            return;
+        }
+        Transfer transfer = new Transfer("Reinstall " + view.nameOf(action.coordinate()));
+        view.showTransfer(transfer, Optional.of(DashboardView.upgradeKey(store.path())));
+        work.submit(() -> {
+            if (!transfer.started()) {
+                return;
+            }
+            try {
+                transfer.phase("Moving " + store.name() + " to the " + Finder.trashName());
+                Finder.trash(List.of(store.path()));
+                Platform.runLater(this::refresh);
+                transfer.phase("Downloading the newest build");
+                StoreDownload.downloadTo(RepositoryHttpClients.newClient(), DashboardCommand.access(settings), action.coordinate(),
+                        action.classifier(), store.path(), settings.localRepository(), transfer);
+                transfer.finished(Transfer.State.DONE, "Reinstalled " + store.name() + ". The store you had is in the "
+                        + Finder.trashName() + ".");
+                Platform.runLater(() -> {
+                    selectAfterRefresh = KnowledgeBaseFamily.familyName(store);
+                    refresh();
+                });
+            } catch (CancellationException e) {
+                transfer.finished(Transfer.State.CANCELLED, "Cancelled. The store you had is in the " + Finder.trashName()
+                        + "; what had downloaded is kept, so downloading again picks up where this one stopped.");
+                Platform.runLater(this::refresh);
+            } catch (Exception e) {
+                transfer.finished(Transfer.State.FAILED, "Could not reinstall: " + e.getMessage());
+                Platform.runLater(this::refresh);
+            }
+        });
+    }
+
+    /** Puts a store's previous build back on the work thread, carrying the work done since (decision 20). */
+    private void restore(KnowledgeBase store) {
+        List<String> refusals;
+        try {
+            refusals = StoreUpgrade.refusals(store, List.of(), HeapSizing.Machine.current(komets).running());
+        } catch (IOException e) {
+            view.setMessage("Could not read " + store.name() + ": " + e.getMessage());
+            return;
+        }
+        if (!refusals.isEmpty()) {
+            view.showRefusals("Restore " + store.displayName(), refusals);
+            return;
+        }
+        view.setMessage("Restoring the previous build of " + store.name() + " …");
+        work.submit(() -> {
+            try {
+                StoreUpgrade.Carried carried = StoreUpgrade.restore(store.path());
+                Platform.runLater(() -> {
+                    selectAfterRefresh = KnowledgeBaseFamily.familyName(store);
+                    refresh();
+                    view.setMessage("Restored the previous build of " + store.name() + "; " + carried.summary()
+                            + ". The build it replaced is now the previous one.");
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    view.setMessage("Could not restore " + store.name() + ": " + e.getMessage());
+                    refresh();
+                });
             }
         });
     }

@@ -33,35 +33,36 @@ public final class LauncherChoice {
     static final String FORMAT_3_SINCE = "26.1021";
 
     /**
-     * The first Komet version that upgrades change sets with no window,
-     * {@code --upgrade-change-sets} (IKE-Network/ike-issues#1313): the first build after the
-     * change landed. An older Komet does not know the option and would open its window instead.
+     * The first Komet version that loads a store's unregistered change sets with no window,
+     * {@code --load-change-sets} (decision 20 of the {@code dev-ike-dashboard} topic): the first build
+     * after the change landed, 2026-11-07 18:31 UTC. An older Komet does not know the option and would
+     * open its window instead.
      */
-    static final String UPGRADE_CHANGE_SETS_SINCE = "26.1024.1820";
+    static final String LOAD_CHANGE_SETS_SINCE = "26.1107.1831";
 
     private LauncherChoice() {
     }
 
     /**
-     * The Komet that upgrades a store's change sets: the newest that reads the store and knows
-     * {@code --upgrade-change-sets}.
+     * The Komet that validates an upgrade: the newest that reads the store and knows
+     * {@code --load-change-sets}.
      *
      * @param komets        the Komets installed, newest first
      * @param knowledgeBase the store
      * @return the Komet, or empty when none installed can
      */
-    public static Optional<KometInstallation> chooseForUpgrade(List<KometInstallation> komets, KnowledgeBase knowledgeBase) {
-        return choose(komets, knowledgeBase).filter(LauncherChoice::upgradesChangeSets);
+    public static Optional<KometInstallation> chooseForLoad(List<KometInstallation> komets, KnowledgeBase knowledgeBase) {
+        return choose(komets, knowledgeBase).filter(LauncherChoice::loadsChangeSets);
     }
 
     /**
-     * Whether a Komet upgrades change sets with no window.
+     * Whether a Komet loads a store's unregistered change sets with no window.
      *
      * @param komet the Komet
-     * @return {@code true} from {@value #UPGRADE_CHANGE_SETS_SINCE} on
+     * @return {@code true} from {@value #LOAD_CHANGE_SETS_SINCE} on
      */
-    public static boolean upgradesChangeSets(KometInstallation komet) {
-        return KometInstallations.compareVersions(komet.version(), UPGRADE_CHANGE_SETS_SINCE) >= 0;
+    public static boolean loadsChangeSets(KometInstallation komet) {
+        return KometInstallations.compareVersions(komet.version(), LOAD_CHANGE_SETS_SINCE) >= 0;
     }
 
     /**

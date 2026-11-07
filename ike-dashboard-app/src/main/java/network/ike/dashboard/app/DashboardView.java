@@ -116,7 +116,7 @@ public final class DashboardView extends BorderPane {
     private final ToggleButton byRecent = new ToggleButton("Recent");
     private final Button refresh = new Button("Refresh");
     private final Label updates = new Label();
-    private final Button updateAll = new Button("Download all");
+    private final Button updateAll = new Button("Upgrade all");
     private final HBox updateBar = new HBox(8);
     private final Button fromNexus = new Button("Get from Nexus…");
     private final NexusBrowser browser = new NexusBrowser();
@@ -155,9 +155,9 @@ public final class DashboardView extends BorderPane {
     private Consumer<KometRelease> onUpdateDashboard = release -> { };
     private Runnable onMoveDashboard = () -> { };
     private boolean updatingDashboard;
-    private final Map<Path, ChangeSetCheck.Finding> changeSets = new HashMap<>();
-    private final Set<Path> upgrading = new java.util.HashSet<>();
-    private BiConsumer<KometInstallation, KnowledgeBase> onUpgradeChangeSets = (komet, knowledgeBase) -> { };
+    private Consumer<NoticeAction.Upgrade> onUpgrade = action -> { };
+    private Consumer<NoticeAction.Reinstall> onReinstall = action -> { };
+    private Consumer<KnowledgeBase> onRestore = store -> { };
     private final Button home = new Button("Notices");
     private boolean showingNotices = true;
     private List<Notice> notices = List.of();
@@ -210,7 +210,7 @@ public final class DashboardView extends BorderPane {
         updateBar.setStyle("-fx-background-color: #fff3e0;");
         updateBar.managedProperty().bind(updateBar.visibleProperty());
         updateBar.setVisible(false);
-        updateAll.setOnAction(event -> newerBuilds().forEach(family -> download(family)));
+        updateAll.setOnAction(event -> newerBuilds().forEach(this::upgradeOrCopy));
         home.setMaxWidth(Double.MAX_VALUE);
         home.setAlignment(Pos.CENTER_LEFT);
         home.setOnAction(event -> showNotices());
@@ -517,79 +517,96 @@ public final class DashboardView extends BorderPane {
     }
 
     /**
-     * Records which of a store's change sets need an upgrade (IKE-Network/ike-issues#1313).
-     *
-     * @param store   the store's folder
-     * @param finding what its change-set folder holds
-     */
-    public void setChangeSets(Path store, ChangeSetCheck.Finding finding) {
-        changeSets.put(store, finding);
-        refreshNotices();
-        selected().filter(family -> family.latest().map(KnowledgeBase::path).filter(store::equals).isPresent())
-                .ifPresent(family -> showDetail());
-    }
-
-    /**
-     * What the check last found in a store's change-set folder.
-     *
-     * @param store the store's folder
-     * @return the finding; {@link ChangeSetCheck.Finding#NONE} before a check
-     */
-    public ChangeSetCheck.Finding changeSets(Path store) {
-        return changeSets.getOrDefault(store, ChangeSetCheck.Finding.NONE);
-    }
-
-    /**
-     * Marks a store's change-set upgrade as running, so it is not started twice.
-     *
-     * @param store   the store's folder
-     * @param running whether its upgrade is running
-     */
-    public void setUpgrading(Path store, boolean running) {
-        if (running) {
-            upgrading.add(store);
-        } else {
-            upgrading.remove(store);
-        }
-        showDetail();
-    }
-
-    /**
-     * What Upgrade change sets does, once confirmed, given the Komet and the store.
+     * What Upgrade does, once confirmed.
      *
      * @param action the action
      */
-    public void setOnUpgradeChangeSets(BiConsumer<KometInstallation, KnowledgeBase> action) {
-        onUpgradeChangeSets = action;
+    public void setOnUpgrade(Consumer<NoticeAction.Upgrade> action) {
+        onUpgrade = action;
     }
 
     /**
-     * Shows what an upgrade run reported, in a window of its own.
+     * What Reinstall does, once confirmed.
+     *
+     * @param action the action
+     */
+    public void setOnReinstall(Consumer<NoticeAction.Reinstall> action) {
+        onReinstall = action;
+    }
+
+    /**
+     * What Restore does, once confirmed, given the store whose previous build goes back.
+     *
+     * @param action the action
+     */
+    public void setOnRestore(Consumer<KnowledgeBase> action) {
+        onRestore = action;
+    }
+
+    /**
+     * The sync state last recorded for a store's repositories.
+     *
+     * @param store the store's folder
+     * @return its repositories' states; none before a check
+     */
+    public List<RepositorySync.Status> sync(Path store) {
+        return sync.getOrDefault(store, List.of());
+    }
+
+    /**
+     * The key an upgrade is known by while it runs, so it is not started twice.
+     *
+     * @param store the store's folder
+     * @return the key
+     */
+    public static String upgradeKey(Path store) {
+        return "upgrade:" + store;
+    }
+
+    /**
+     * Says why an operation did not start, each refusal with what to do.
+     *
+     * @param title    the operation
+     * @param refusals the refusals ({@link StoreUpgrade#refusals})
+     */
+    public void showRefusals(String title, List<String> refusals) {
+        Alert alert = new Alert(Alert.AlertType.WARNING);
+        alert.setTitle(title);
+        alert.setHeaderText(title + " did not start");
+        alert.setContentText(String.join("\n\n", refusals));
+        if (getScene() != null) {
+            alert.initOwner(getScene().getWindow());
+        }
+        alert.show();
+    }
+
+    /**
+     * Shows what a run of Komet with no window reported, in a window of its own.
      *
      * @param knowledgeBase the store
      * @param run           what the run did
      */
-    public void showUpgradeReport(KnowledgeBase knowledgeBase, KometLauncher.UpgradeRun run) {
+    public void showRunReport(KnowledgeBase knowledgeBase, KometLauncher.HeadlessRun run) {
         Stage window = new Stage();
-        window.setTitle("Change-set upgrade — " + knowledgeBase.displayName());
+        window.setTitle("Change-set load — " + knowledgeBase.displayName());
         if (getScene() != null) {
             window.initOwner(getScene().getWindow());
         }
-        window.setScene(new Scene(upgradeReport(run), 820, 560));
+        window.setScene(new Scene(runReport(run), 820, 560));
         window.show();
     }
 
     /**
-     * The report of an upgrade run: its outcome, then the report's text, selectable.
+     * The report of a run: its outcome, then the report's text, selectable.
      *
      * @param run what the run did
      * @return the pane
      */
-    static BorderPane upgradeReport(KometLauncher.UpgradeRun run) {
+    static BorderPane runReport(KometLauncher.HeadlessRun run) {
         Label outcome = new Label(switch (run.exitStatus()) {
-            case 0 -> "Every change set is upgraded or current. The originals replaced are in ~/ike-archive.";
-            case 1 -> "Some change sets are left as they were; the report names what their knowledge base does not hold.";
-            default -> "Komet did not upgrade: status " + run.exitStatus() + ".";
+            case 0 -> "Every change set is in the store.";
+            case 1 -> "Some change sets were refused; the report names what the knowledge base does not hold.";
+            default -> "Komet did not run the load: status " + run.exitStatus() + ".";
         });
         outcome.setWrapText(true);
         outcome.setStyle(run.clean() ? "-fx-text-fill: #2e7d32;" : run.exitStatus() == 1 ? ATTENTION : PROBLEM);
@@ -676,7 +693,7 @@ public final class DashboardView extends BorderPane {
     }
 
     private void refreshNotices() {
-        notices = Notices.compute(new Notices.Inputs(families, List.copyOf(unmanaged), statuses, nexusChecked, changeSets, komets, kometRelease,
+        notices = Notices.compute(new Notices.Inputs(families, List.copyOf(unmanaged), statuses, nexusChecked, komets, kometRelease,
                 catalogLoaded ? Optional.of(catalog) : Optional.empty(), sync, collections, dashboard, Instant.now()),
                 dismissed);
         long atRisk = notices.stream().filter(notice -> notice.urgency() == Notice.Urgency.AT_RISK).count();
@@ -724,9 +741,16 @@ public final class DashboardView extends BorderPane {
         notice.action().ifPresent(action -> {
             boolean updating = updatingDashboard
                     && (action instanceof NoticeAction.UpdateDashboard || action instanceof NoticeAction.MoveDashboard);
-            boolean running = updating || action instanceof NoticeAction.Download(Coordinate coordinate, String classifier)
-                    && transferring(downloadKey(coordinate, classifier));
-            Button button = new Button(updating ? "Updating …" : running ? "Downloading …" : action.label());
+            boolean downloading = switch (action) {
+                case NoticeAction.Download(Coordinate coordinate, String classifier) -> transferring(downloadKey(coordinate, classifier));
+                case NoticeAction.InstallCopy(Coordinate coordinate, String classifier) -> transferring(downloadKey(coordinate, classifier));
+                default -> false;
+            };
+            boolean upgrading = action instanceof NoticeAction.Upgrade(KnowledgeBase store, Coordinate c, String k)
+                    && transferring(upgradeKey(store.path()));
+            boolean running = updating || downloading || upgrading;
+            Button button = new Button(updating ? "Updating …" : upgrading ? "Upgrading …" : downloading ? "Downloading …"
+                    : action.label());
             button.setDisable(running);
             button.setMinWidth(Region.USE_PREF_SIZE);
             button.setOnAction(event -> act(action));
@@ -751,10 +775,10 @@ public final class DashboardView extends BorderPane {
     private void act(NoticeAction action) {
         switch (action) {
             case NoticeAction.Download(Coordinate coordinate, String classifier) -> onDownload.accept(coordinate, classifier);
-            case NoticeAction.UpgradeChangeSets(KnowledgeBase store) -> LauncherChoice.chooseForUpgrade(komets, store)
-                    .ifPresentOrElse(komet -> confirmUpgrade(komet, store, changeSets(store.path())),
-                            () -> setMessage("Upgrading change sets needs Komet " + LauncherChoice.UPGRADE_CHANGE_SETS_SINCE
-                                    + " or later"));
+            case NoticeAction.InstallCopy(Coordinate coordinate, String classifier) -> onDownload.accept(coordinate, classifier);
+            case NoticeAction.Upgrade upgrade -> confirmUpgrade(upgrade);
+            case NoticeAction.Reinstall reinstall -> confirmReinstall(reinstall);
+            case NoticeAction.Restore(KnowledgeBase store) -> confirmRestore(store);
             case NoticeAction.InstallKomet(KometRelease release) -> onInstallKomet.accept(release);
             case NoticeAction.UpdateDashboard(KometRelease release) -> onUpdateDashboard.accept(release);
             case NoticeAction.MoveDashboard() -> onMoveDashboard.run();
@@ -1145,10 +1169,17 @@ public final class DashboardView extends BorderPane {
         updates.setText(newer == 1 ? "1 newer build on Nexus" : newer + " newer builds on Nexus");
     }
 
-    private void download(KnowledgeBaseFamily family) {
+    private void upgradeOrCopy(KnowledgeBaseFamily family) {
         family.latestIdentified().ifPresent(identified -> identified.coordinate()
-                .filter(coordinate -> !transferring(downloadKey(coordinate, identified.kind().classifier())))
-                .ifPresent(coordinate -> onDownload.accept(coordinate, identified.kind().classifier())));
+                .filter(coordinate -> !transferring(downloadKey(coordinate, identified.kind().classifier()))
+                        && !transferring(upgradeKey(identified.path())))
+                .ifPresent(coordinate -> {
+                    if (LauncherChoice.chooseForLoad(komets, identified).isPresent()) {
+                        onUpgrade.accept(new NoticeAction.Upgrade(identified, coordinate, identified.kind().classifier()));
+                    } else {
+                        onDownload.accept(coordinate, identified.kind().classifier());
+                    }
+                }));
     }
 
     private void rebuild() {
@@ -1250,23 +1281,38 @@ public final class DashboardView extends BorderPane {
         BuildStatus status = status(family.name());
         if (status.state() == BuildStatus.State.NEWER && status.newest().isPresent()) {
             Label newer = new Label("A newer build is on Nexus, deployed " + WHEN.format(status.newest().get().updated()));
+            newer.setWrapText(true);
             KnowledgeBase identified = family.latestIdentified().orElse(copy);
-            boolean running = identified.coordinate()
-                    .map(coordinate -> transferring(downloadKey(coordinate, identified.kind().classifier()))).orElse(false);
-            Button download = new Button(running ? "Downloading …" : "Download");
-            download.setDisable(running);
-            download.setOnAction(event -> identified.coordinate()
-                    .ifPresent(coordinate -> onDownload.accept(coordinate, identified.kind().classifier())));
+            String classifier = identified.kind().classifier();
+            boolean downloading = identified.coordinate()
+                    .map(coordinate -> transferring(downloadKey(coordinate, classifier))).orElse(false);
+            boolean upgrading = transferring(upgradeKey(identified.path()));
+            Optional<KometInstallation> validator = LauncherChoice.chooseForLoad(komets, identified);
+            Button upgrade = new Button(upgrading ? "Upgrading …" : "Upgrade");
+            upgrade.setDisable(upgrading || downloading || validator.isEmpty() || identified.coordinate().isEmpty());
+            upgrade.setMinWidth(Region.USE_PREF_SIZE);
+            upgrade.setOnAction(event -> identified.coordinate().ifPresent(coordinate ->
+                    confirmUpgrade(new NoticeAction.Upgrade(identified, coordinate, classifier))));
+            Button copyBeside = new Button(downloading ? "Downloading …" : "Install a copy");
+            copyBeside.setDisable(downloading || upgrading);
+            copyBeside.setMinWidth(Region.USE_PREF_SIZE);
+            copyBeside.setOnAction(event -> identified.coordinate()
+                    .ifPresent(coordinate -> onDownload.accept(coordinate, classifier)));
             Region gap = new Region();
             HBox.setHgrow(gap, Priority.ALWAYS);
-            HBox box = new HBox(10, newer, gap, download);
-            box.setAlignment(Pos.CENTER_LEFT);
+            HBox.setHgrow(newer, Priority.ALWAYS);
+            HBox row = new HBox(10, newer, gap, upgrade, copyBeside);
+            row.setAlignment(Pos.CENTER_LEFT);
+            VBox box = new VBox(4, row, muted(validator.isPresent()
+                    ? "Upgrade keeps your change sets, preferences and repositories, and keeps the build you have beside it."
+                    : "Upgrading in place needs Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE + " or later, which checks the"
+                            + " new build with no window; a copy can be installed beside."));
             box.setPadding(new Insets(8, 10, 8, 10));
             box.setStyle("-fx-background-color: #fff3e0; -fx-background-radius: 6;");
             detail.getChildren().add(box);
         }
 
-        changeSetBox(copy).ifPresent(detail.getChildren()::add);
+        StoreUpgrade.previous(family).ifPresent(previous -> detail.getChildren().add(previousBox(copy, previous)));
 
         Optional<KometInstallation> komet = launcher(copy);
         Button open = new Button("Open");
@@ -1406,51 +1452,80 @@ public final class DashboardView extends BorderPane {
         return label;
     }
 
-    /** The offer to upgrade a store's change sets, when some need it. */
-    private Optional<Node> changeSetBox(KnowledgeBase copy) {
-        ChangeSetCheck.Finding finding = changeSets(copy.path());
-        if (finding.needed() == 0) {
-            return Optional.empty();
-        }
-        Label text = new Label(finding.text() + ".");
+    /** The row for a store's previous build, kept beside it since the upgrade (decision 20). */
+    private Node previousBox(KnowledgeBase copy, KnowledgeBase previous) {
+        Label text = new Label("The build before the upgrade is kept beside this one as " + previous.name() + " ("
+                + DashboardCommand.size(previous.sizeBytes()) + ", " + previous.resolvedVersion().orElse("version unknown") + ").");
         text.setWrapText(true);
-        Optional<KometInstallation> komet = LauncherChoice.chooseForUpgrade(komets, copy);
-        boolean running = upgrading.contains(copy.path());
-        Button upgrade = new Button(running ? "Upgrading change sets …" : "Upgrade change sets");
-        upgrade.setDisable(running || komet.isEmpty());
-        upgrade.setOnAction(event -> komet.ifPresent(chosen -> confirmUpgrade(chosen, copy, finding)));
-        upgrade.setMinWidth(Region.USE_PREF_SIZE);
+        HBox.setHgrow(text, Priority.ALWAYS);
+        boolean busy = transferring(upgradeKey(copy.path()));
+        Button restore = new Button("Restore");
+        restore.setDisable(busy);
+        restore.setMinWidth(Region.USE_PREF_SIZE);
+        restore.setOnAction(event -> confirmRestore(copy));
+        Button trash = new Button("Move to " + Finder.trashName() + "…");
+        trash.setDisable(busy);
+        trash.setMinWidth(Region.USE_PREF_SIZE);
+        trash.setOnAction(event -> confirmTrash(List.of(previous)));
         Region gap = new Region();
         HBox.setHgrow(gap, Priority.ALWAYS);
-        HBox row = new HBox(10, text, gap, upgrade);
+        HBox row = new HBox(10, text, gap, restore, trash);
         row.setAlignment(Pos.CENTER_LEFT);
-        HBox.setHgrow(text, Priority.ALWAYS);
-        VBox box = new VBox(4, row);
-        if (komet.isEmpty()) {
-            Label need = muted("Needs Komet " + LauncherChoice.UPGRADE_CHANGE_SETS_SINCE + " or later, which upgrades"
-                    + " change sets with no window.");
-            box.getChildren().add(need);
-        }
-        box.setPadding(new Insets(8, 10, 8, 10));
-        box.setStyle("-fx-background-color: #fff3e0; -fx-background-radius: 6;");
-        return Optional.of(box);
+        row.setPadding(new Insets(8, 10, 8, 10));
+        row.setStyle("-fx-background-color: #eef3f8; -fx-background-radius: 6;");
+        return row;
     }
 
-    private void confirmUpgrade(KometInstallation komet, KnowledgeBase copy, ChangeSetCheck.Finding finding) {
+    private void confirmUpgrade(NoticeAction.Upgrade action) {
+        KnowledgeBase store = action.store();
+        Optional<KometInstallation> validator = LauncherChoice.chooseForLoad(komets, store);
+        if (validator.isEmpty()) {
+            setMessage("Upgrading needs Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE + " or later");
+            return;
+        }
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-        alert.setTitle("Upgrade change sets");
-        alert.setHeaderText("Upgrade " + finding.needed() + " change set" + (finding.needed() == 1 ? "" : "s") + " of "
-                + copy.displayName() + "?");
-        alert.setContentText("Komet " + komet.version() + " opens " + copy.name() + " with no window, rewrites each"
-                + " change set in format 3 with the pattern of every component it refers to, as the store holds it,"
-                + " and replaces the originals, which it first archives in ~/ike-archive. A change set that refers to"
-                + " a component the store does not hold is left as it was. Quit any Komet that has this store open"
-                + " first.");
+        alert.setTitle("Upgrade");
+        alert.setHeaderText("Upgrade " + store.displayName() + " to the newest build?");
+        alert.setContentText("The new build downloads beside " + store.name() + "; your change sets, preferences and"
+                + " repositories are carried into it; Komet " + validator.get().version() + " checks, with no window, that it"
+                + " opens and holds every change set; then it takes the store's place. The build you have stays beside it"
+                + " as " + StoreUpgrade.previousFolder(store.path()).getFileName() + " until you remove it, and Restore puts"
+                + " it back. Quit any Komet that has this store open first.");
         alert.getButtonTypes().setAll(ButtonType.CANCEL, ButtonType.OK);
         if (getScene() != null) {
             alert.initOwner(getScene().getWindow());
         }
-        alert.showAndWait().filter(ButtonType.OK::equals).ifPresent(ok -> onUpgradeChangeSets.accept(komet, copy));
+        alert.showAndWait().filter(ButtonType.OK::equals).ifPresent(ok -> onUpgrade.accept(action));
+    }
+
+    private void confirmReinstall(NoticeAction.Reinstall action) {
+        KnowledgeBase store = action.store();
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.setTitle("Reinstall");
+        alert.setHeaderText("Reinstall " + store.displayName() + " from scratch?");
+        alert.setContentText(store.name() + " (" + DashboardCommand.size(store.sizeBytes()) + ") moves to the "
+                + Finder.trashName() + " with everything in it: change sets, preferences and repositories. The newest build"
+                + " then downloads under the same name. The " + Finder.trashName() + " is the way back. Quit any Komet that"
+                + " has this store open first.");
+        alert.getButtonTypes().setAll(ButtonType.CANCEL, ButtonType.OK);
+        if (getScene() != null) {
+            alert.initOwner(getScene().getWindow());
+        }
+        alert.showAndWait().filter(ButtonType.OK::equals).ifPresent(ok -> onReinstall.accept(action));
+    }
+
+    private void confirmRestore(KnowledgeBase store) {
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.setTitle("Restore");
+        alert.setHeaderText("Put back the previous build of " + store.displayName() + "?");
+        alert.setContentText("The build you have now steps aside and becomes the previous one, and the previous build takes"
+                + " its place. The change sets and preferences written since are carried into it, so nothing is lost, and"
+                + " Restore again swaps them back. Quit any Komet that has this store open first.");
+        alert.getButtonTypes().setAll(ButtonType.CANCEL, ButtonType.OK);
+        if (getScene() != null) {
+            alert.initOwner(getScene().getWindow());
+        }
+        alert.showAndWait().filter(ButtonType.OK::equals).ifPresent(ok -> onRestore.accept(store));
     }
 
     private static String nexusNote(BuildStatus status) {
@@ -1540,6 +1615,12 @@ public final class DashboardView extends BorderPane {
             MenuItem memory = new MenuItem("Memory…");
             memory.setOnAction(event -> onEditHeap.accept(copy));
             items.add(memory);
+            copy.coordinate().filter(coordinate -> copy.identified() && !StoreUpgrade.isPrevious(copy.name())).ifPresent(coordinate -> {
+                MenuItem reinstall = new MenuItem("Reinstall…");
+                reinstall.setDisable(transferring(upgradeKey(copy.path())) || transferring(downloadKey(coordinate, copy.kind().classifier())));
+                reinstall.setOnAction(event -> confirmReinstall(new NoticeAction.Reinstall(copy, coordinate, copy.kind().classifier())));
+                items.add(reinstall);
+            });
         }
         MenuItem reveal = new MenuItem("Show in " + Finder.name());
         reveal.setOnAction(event -> onReveal.accept(copy.path()));
