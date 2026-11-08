@@ -58,9 +58,14 @@ From then on it updates itself (see [Self-update](#self-update)). The links neve
   A store has three operations (decision 20 of `dev-ike-dashboard`). *Upgrade* brings it to the newest
   build in place: the build downloads into `<store>.upgrade` beside it, the change-set folders, the
   preferences and every git repository in the store are carried into it, a Komet from 26.1107.1831 on
-  checks with no window (`--load-change-sets`) that it opens and holds every change set, and the two
+  checks with no window (`--load-change-sets`) that it opens and loads every change set, and the two
   folders swap by rename, the old store kept as `<store>.previous` until it is removed; *Restore* swaps
-  them back, carrying along the work done since. Every failure leaves the store as it was. *Reinstall*
+  them back, carrying along the work done since. When some change sets do not load, the dashboard says
+  what each contains, who packaged it and why it was refused, and the person cancels the upgrade or
+  sets them aside in `unprocessedChangeSets/`, which Komet never reads and later upgrades carry along
+  (`IKE-Network/ike-issues#1356`); a change set in a git repository with a remote is never moved out.
+  Transfers run three at a time, one check in Komet at a time (`IKE-Network/ike-issues#1354`). Every
+  failure leaves the store as it was. *Reinstall*
   moves the store to the Trash and downloads the newest build under the same name. *Install a copy*
   unpacks the newest build beside the copy there is, with the version appended. Nothing is ever written
   over. Older change sets are loaded by Komet at open, never rewritten: the dashboard no longer offers a

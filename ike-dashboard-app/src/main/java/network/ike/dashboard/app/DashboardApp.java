@@ -37,6 +37,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -470,7 +471,7 @@ public final class DashboardApp extends Application {
     /**
      * Upgrades a store in place on a transfer thread (decision 20 of the design): the newest build downloads
      * into a working folder beside it, the person's work is carried in, Komet with no window checks that
-     * the new build opens and holds every change set, and the folders swap by rename, the old store kept
+     * the new build opens and loads every change set, and the folders swap by rename, the old store kept
      * as {@code <store>.previous}. Every failure leaves the store as it was, carrying the work back; a
      * build that failed its check is kept beside the store for inspection.
      */
@@ -496,6 +497,7 @@ public final class DashboardApp extends Application {
             return;
         }
         KometInstallation komet = validator.get();
+        List<RepositorySync.Status> sync = view.sync(store.path());
         Path work = StoreUpgrade.workFolder(store.path());
         Path previous = StoreUpgrade.previousFolder(store.path());
         Transfer transfer = new Transfer("Upgrade " + view.nameOf(action.coordinate()));
@@ -506,6 +508,7 @@ public final class DashboardApp extends Application {
                 return;
             }
             boolean carried = false;
+            List<Path[]> setAside = List.of();
             try {
                 transfer.phase("Downloading the newest build");
                 StoreDownload.downloadTo(RepositoryHttpClients.newClient(), DashboardCommand.access(settings), action.coordinate(),
@@ -516,43 +519,73 @@ public final class DashboardApp extends Application {
                 if (!carry.conflicts().isEmpty()) {
                     StoreUpgrade.carry(work, store.path());
                     StoreUpgrade.deleteTree(work);
-                    transfer.finished(Transfer.State.FAILED, "Not upgraded: the new build holds " + carry.conflicts().size()
+                    transfer.finished(Transfer.State.FAILED, "Not upgraded: the new build contains " + carry.conflicts().size()
                             + (carry.conflicts().size() == 1 ? " file" : " files") + " of the same name as yours with other"
                             + " contents, the first " + store.path().relativize(carry.conflicts().getFirst())
                             + ". Your store is as it was.");
                     return;
                 }
-                if (!kometCheck.tryAcquire()) {
-                    transfer.phase("Waiting for another upgrade's check in Komet");
-                    while (!kometCheck.tryAcquire(1, TimeUnit.SECONDS)) {
-                        if (transfer.cancelled()) {
-                            StoreUpgrade.carry(work, store.path());
-                            carried = false;
-                            StoreUpgrade.deleteTree(work);
-                            transfer.finished(Transfer.State.CANCELLED, "Cancelled before anything changed. The new build"
-                                    + " stays in your local repository, so upgrading again starts from it.");
-                            return;
-                        }
-                    }
+                Optional<KometLauncher.HeadlessRun> checked = check(komet, work, transfer);
+                if (checked.isEmpty()) {
+                    StoreUpgrade.carry(work, store.path());
+                    carried = false;
+                    StoreUpgrade.deleteTree(work);
+                    transfer.finished(Transfer.State.CANCELLED, "Cancelled before anything changed. The new build"
+                            + " stays in your local repository, so upgrading again starts from it.");
+                    return;
                 }
-                KometLauncher.HeadlessRun run;
-                try {
-                    transfer.phase("Checking the new build in Komet " + komet.version());
-                    KnowledgeBase staged = KnowledgeBaseScanner.inspect(work);
-                    run = KometLauncher.loadChangeSets(komet, staged, heapPlan(komet, staged).environment(),
-                            settings.logFolder());
-                } finally {
-                    kometCheck.release();
+                KometLauncher.HeadlessRun run = checked.get();
+                List<RefusedChangeSets.Refusal> refused = run.exitStatus() == 1 ? RefusedChangeSets.parse(run.report()) : List.of();
+                if (!run.clean() && !refused.isEmpty()) {
+                    // Some change sets do not load (ike-issues#1356): the person cancels, or sets them aside and goes on.
+                    List<RefusedChangeSets.Summary> summaries = refused.stream()
+                            .map(refusal -> RefusedChangeSets.analyze(work, refusal)).toList();
+                    Optional<String> whyNoAside = sharedRepository(store.path(), refused, sync);
+                    transfer.phase("Waiting for your choice: " + DashboardView.refusedHeader(refused.size()).toLowerCase());
+                    CompletableFuture<Boolean> choice = new CompletableFuture<>();
+                    KometLauncher.HeadlessRun first = run;
+                    Platform.runLater(() -> {
+                        view.setLastLog(first.log());
+                        choice.complete(view.chooseForRefused(store, summaries, whyNoAside, first));
+                    });
+                    if (!choice.get()) {
+                        StoreUpgrade.carry(work, store.path());
+                        carried = false;
+                        StoreUpgrade.deleteTree(work);
+                        transfer.finished(Transfer.State.CANCELLED, "Not upgraded: " + DashboardView.refusedHeader(refused.size())
+                                .toLowerCase() + ". Your store is as it was; the new build stays in your local repository,"
+                                + " so upgrading again starts from it.");
+                        return;
+                    }
+                    transfer.phase("Setting aside " + refused.size() + (refused.size() == 1 ? " change set" : " change sets"));
+                    setAside = RefusedChangeSets.setAside(work, refused);
+                    // What remains must load: the files that did are registered, so Komet loads nothing twice.
+                    checked = check(komet, work, transfer);
+                    if (checked.isEmpty()) {
+                        RefusedChangeSets.putBack(setAside);
+                        setAside = List.of();
+                        StoreUpgrade.carry(work, store.path());
+                        carried = false;
+                        StoreUpgrade.deleteTree(work);
+                        transfer.finished(Transfer.State.CANCELLED, "Cancelled before anything changed. The new build"
+                                + " stays in your local repository, so upgrading again starts from it.");
+                        return;
+                    }
+                    run = checked.get();
                 }
                 if (!run.clean()) {
+                    RefusedChangeSets.putBack(setAside);
+                    setAside = List.of();
                     StoreUpgrade.carry(work, store.path());
+                    carried = false;
                     transfer.finished(Transfer.State.FAILED, "Not upgraded: Komet could not load every change set into the new"
                             + " build (status " + run.exitStatus() + "). Your store is as it was; the new build is kept beside"
                             + " it as " + work.getFileName() + " for inspection. Move it to the " + Finder.trashName()
                             + " to upgrade again.");
+                    KometLauncher.HeadlessRun failed = run;
                     Platform.runLater(() -> {
-                        view.setLastLog(run.log());
-                        view.showRunReport(store, run);
+                        view.setLastLog(failed.log());
+                        view.showRunReport(store, failed);
                     });
                     return;
                 }
@@ -562,11 +595,14 @@ public final class DashboardApp extends Application {
                 }
                 StoreUpgrade.swap(store.path(), work);
                 release(List.of(store.path()));
-                transfer.finished(Transfer.State.DONE, "Upgraded " + store.name() + ": " + carry.summary() + ". The build you"
-                        + " had is beside it as " + previous.getFileName() + "; Restore puts it back.");
+                transfer.finished(Transfer.State.DONE, "Upgraded " + store.name() + ": " + carry.summary()
+                        + (setAside.isEmpty() ? "" : "; " + setAside.size() + (setAside.size() == 1 ? " change set" : " change sets")
+                        + " set aside in " + RefusedChangeSets.UNPROCESSED_FOLDER) + ". The build you had is beside it as "
+                        + previous.getFileName() + "; Restore puts it back.");
+                KometLauncher.HeadlessRun done = run;
                 Platform.runLater(() -> {
                     selectAfterRefresh = KnowledgeBaseFamily.familyName(store);
-                    view.setLastLog(run.log());
+                    view.setLastLog(done.log());
                     refresh();
                 });
             } catch (CancellationException e) {
@@ -574,12 +610,13 @@ public final class DashboardApp extends Application {
                         + " so upgrading again picks up where this one stopped.");
             } catch (Exception e) {
                 String kept = "";
-                if (carried) {
-                    try {
+                try {
+                    RefusedChangeSets.putBack(setAside);
+                    if (carried) {
                         StoreUpgrade.carry(work, store.path());
-                    } catch (IOException back) {
-                        kept = " Your change sets and preferences may be in " + work.getFileName() + ": " + back.getMessage();
                     }
+                } catch (IOException back) {
+                    kept = " Your change sets and preferences may be in " + work.getFileName() + ": " + back.getMessage();
                 }
                 release(List.of(store.path()));
                 transfer.finished(Transfer.State.FAILED, "Could not upgrade: " + e.getMessage() + "."
@@ -590,6 +627,60 @@ public final class DashboardApp extends Application {
                 release(List.of(store.path()));
             }
         });
+    }
+
+    /**
+     * Checks a new build in Komet with no window, one check at a time across upgrades.
+     *
+     * @param komet    the Komet that checks it
+     * @param work     the new build, with the person's work carried in
+     * @param transfer the upgrade
+     * @return what Komet reported; empty when the person cancelled while it waited its turn
+     */
+    private Optional<KometLauncher.HeadlessRun> check(KometInstallation komet, Path work, Transfer transfer)
+            throws IOException, InterruptedException {
+        if (!kometCheck.tryAcquire()) {
+            transfer.phase("Waiting for another upgrade's check in Komet");
+            while (!kometCheck.tryAcquire(1, TimeUnit.SECONDS)) {
+                if (transfer.cancelled()) {
+                    return Optional.empty();
+                }
+            }
+        }
+        try {
+            transfer.phase("Checking the new build in Komet " + komet.version());
+            KnowledgeBase staged = KnowledgeBaseScanner.inspect(work);
+            return Optional.of(KometLauncher.loadChangeSets(komet, staged, heapPlan(komet, staged).environment(),
+                    settings.logFolder()));
+        } finally {
+            kometCheck.release();
+        }
+    }
+
+    /**
+     * Why refused change sets cannot be set aside: one is in a git repository with a remote, where moving it
+     * out would reach everyone else as a deletion.
+     *
+     * @param store    the store
+     * @param refused  the refused files, relative to the store
+     * @param sync     the store's repositories
+     * @return the reason, or empty when they can be set aside
+     */
+    static Optional<String> sharedRepository(Path store, List<RefusedChangeSets.Refusal> refused,
+                                             List<RepositorySync.Status> sync) {
+        for (RefusedChangeSets.Refusal refusal : refused) {
+            Path file = store.resolve(refusal.file()).toAbsolutePath().normalize();
+            for (RepositorySync.Status status : sync) {
+                if (status.remote() != RepositorySync.Remote.NONE
+                        && file.startsWith(status.repository().folder().toAbsolutePath().normalize())) {
+                    return Optional.of(refusal.file().getFileName() + " is in the git repository "
+                            + status.repository().label() + ", which has a remote: moving it out would reach everyone"
+                            + " else as a deletion, and Komet cannot yet leave a change set in place unread. This upgrade"
+                            + " can only be cancelled.");
+                }
+            }
+        }
+        return Optional.empty();
     }
 
     /**

@@ -180,7 +180,7 @@ final class HeapView {
             content.append("Rocks keeps its data off the heap, so a smaller heap may open and browse it, and run out "
                     + "under a heavier load.");
         } else {
-            content.append("A spined store holds all of its data on the heap, so it does not open in less.");
+            content.append("A spined store keeps all of its data on the heap, so it does not open in less.");
             content.append(" A Rocks copy keeps its data off the heap: the rule asks ")
                     .append(HeapSizing.gb(HeapSizing.need(HeapSizing.Rule.DEFAULTS, StoreKind.ROCKS, plan.data(),
                             store.statedAxiomBytes().orElse(0L)).total()))

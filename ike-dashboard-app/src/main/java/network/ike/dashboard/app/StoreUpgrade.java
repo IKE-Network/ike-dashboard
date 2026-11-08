@@ -48,8 +48,12 @@ public final class StoreUpgrade {
     /** The suffix of the folder the old store is kept in after the swap, until the person removes it. */
     public static final String PREVIOUS_SUFFIX = ".previous";
 
-    /** The folders of change sets, merged file by file. */
-    static final List<String> CHANGE_SET_FOLDERS = List.of("changeSets", "instanceChangeSets");
+    /**
+     * The folders of change sets, merged file by file: the two Komet reads, and the one refused change sets
+     * are set aside in, which Komet never reads ({@link RefusedChangeSets#UNPROCESSED_FOLDER}).
+     */
+    static final List<String> CHANGE_SET_FOLDERS = List.of("changeSets", "instanceChangeSets",
+            RefusedChangeSets.UNPROCESSED_FOLDER);
 
     /** The preferences folder, replaced whole. */
     static final String PREFERENCES = "preferences";

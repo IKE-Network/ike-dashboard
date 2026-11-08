@@ -30,6 +30,7 @@ import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Hyperlink;
@@ -581,6 +582,87 @@ public final class DashboardView extends BorderPane {
     }
 
     /**
+     * Asks what to do about the change sets an upgrade's check in Komet refused ({@code IKE-Network/ike-issues#1356}):
+     * cancel the upgrade, leaving the store as it was, or set them aside and go on. Each is shown in words; Komet's
+     * report is under Show Details. Runs on the JavaFX thread and waits for the answer.
+     *
+     * @param store      the store being upgraded
+     * @param summaries  the refused change sets
+     * @param whyNoAside why they cannot be set aside, or empty when they can
+     * @param run        the check, for its report
+     * @return {@code true} to set them aside and go on; {@code false} to cancel the upgrade
+     */
+    public boolean chooseForRefused(KnowledgeBase store, List<RefusedChangeSets.Summary> summaries,
+                                    Optional<String> whyNoAside, KometLauncher.HeadlessRun run) {
+        ButtonType cancel = new ButtonType("Cancel upgrade", ButtonBar.ButtonData.CANCEL_CLOSE);
+        ButtonType aside = new ButtonType("Set aside and upgrade", ButtonBar.ButtonData.OK_DONE);
+        Alert alert = new Alert(Alert.AlertType.WARNING);
+        alert.setTitle("Upgrade " + store.displayName());
+        alert.setHeaderText(refusedHeader(summaries.size()));
+        Label text = new Label(refusedText(summaries, whyNoAside));
+        text.setWrapText(true);
+        text.setMaxWidth(620);
+        ScrollPane content = new ScrollPane(text);
+        content.setFitToWidth(true);
+        content.setPrefViewportHeight(Math.min(360, 90 + 80 * summaries.size()));
+        alert.getDialogPane().setContent(content);
+        alert.getDialogPane().setExpandableContent(runReport(run));
+        alert.getButtonTypes().setAll(whyNoAside.isPresent() ? List.of(cancel) : List.of(cancel, aside));
+        if (getScene() != null) {
+            alert.initOwner(getScene().getWindow());
+        }
+        return alert.showAndWait().filter(aside::equals).isPresent();
+    }
+
+    /**
+     * The heading of the choice about refused change sets.
+     *
+     * @param count how many were refused
+     * @return the heading
+     */
+    static String refusedHeader(int count) {
+        return (count == 1 ? "A change set does" : count + " change sets do") + " not load into the new build";
+    }
+
+    /**
+     * The refused change sets in words, then the choice.
+     *
+     * @param summaries  the refused change sets
+     * @param whyNoAside why they cannot be set aside, or empty when they can
+     * @return the text
+     */
+    static String refusedText(List<RefusedChangeSets.Summary> summaries, Optional<String> whyNoAside) {
+        StringBuilder out = new StringBuilder();
+        for (RefusedChangeSets.Summary summary : summaries) {
+            out.append(summary.fileName()).append('\n');
+            List<String> what = new ArrayList<>();
+            if (!summary.contents().isEmpty()) {
+                what.add(summary.contents());
+            }
+            what.addAll(summary.names());
+            if (!what.isEmpty()) {
+                out.append("    ").append(String.join(" · ", what)).append('\n');
+            }
+            if (!summary.packager().isEmpty() || !summary.packaged().isEmpty()) {
+                out.append("    Packaged").append(summary.packager().isEmpty() ? "" : " by " + summary.packager())
+                        .append(summary.packaged().isEmpty() ? "" : " on " + when(summary.packaged())).append('\n');
+            }
+            out.append("    ").append(summary.reason()).append("\n\n");
+        }
+        out.append(whyNoAside.orElse("Set aside moves " + (summaries.size() == 1 ? "it" : "them") + " to "
+                + RefusedChangeSets.UNPROCESSED_FOLDER + " in the store, which Komet does not read, and goes on with the"
+                + " upgrade; " + (summaries.size() == 1 ? "it stays" : "they stay") + " with the store through later"
+                + " upgrades. Cancel leaves your store as it was."));
+        return out.toString();
+    }
+
+    /** A manifest's package date, {@code 2026-11-08T03:11:44.097814}, to the minute. */
+    private static String when(String packaged) {
+        String shown = packaged.replace('T', ' ');
+        return shown.length() > 16 ? shown.substring(0, 16) : shown;
+    }
+
+    /**
      * Shows what a run of Komet with no window reported, in a window of its own.
      *
      * @param knowledgeBase the store
@@ -605,7 +687,7 @@ public final class DashboardView extends BorderPane {
     static BorderPane runReport(KometLauncher.HeadlessRun run) {
         Label outcome = new Label(switch (run.exitStatus()) {
             case 0 -> "Every change set is in the store.";
-            case 1 -> "Some change sets were refused; the report names what the knowledge base does not hold.";
+            case 1 -> "Some change sets were refused; the report names what the knowledge base does not contain.";
             default -> "Komet did not run the load: status " + run.exitStatus() + ".";
         });
         outcome.setWrapText(true);
@@ -1488,7 +1570,7 @@ public final class DashboardView extends BorderPane {
         alert.setHeaderText("Upgrade " + store.displayName() + " to the newest build?");
         alert.setContentText("The new build downloads beside " + store.name() + "; your change sets, preferences and"
                 + " repositories are carried into it; Komet " + validator.get().version() + " checks, with no window, that it"
-                + " opens and holds every change set; then it takes the store's place. The build you have stays beside it"
+                + " opens and loads every change set; then it takes the store's place. The build you have stays beside it"
                 + " as " + StoreUpgrade.previousFolder(store.path()).getFileName() + " until you remove it, and Restore puts"
                 + " it back. Quit any Komet that has this store open first.");
         alert.getButtonTypes().setAll(ButtonType.CANCEL, ButtonType.OK);
@@ -1648,7 +1730,7 @@ public final class DashboardView extends BorderPane {
                 + " (" + DashboardCommand.size(bytes) + ") to the " + Finder.trashName() + "?");
         alert.setContentText((copies.size() == 1 ? "" : copies.stream().map(KnowledgeBase::name)
                 .collect(Collectors.joining("\n", "", "\n\n")))
-                + "A copy you edited may hold work no build has. Quit any Komet that has one open first. "
+                + "A copy you edited may contain work that no build contains. Quit any Komet that has one open first. "
                 + "The space comes back when the " + Finder.trashName() + " is emptied.");
         alert.getButtonTypes().setAll(ButtonType.CANCEL, ButtonType.OK);
         if (getScene() != null) {

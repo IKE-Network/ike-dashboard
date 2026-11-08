@@ -441,7 +441,7 @@ public final class SelfUpdate {
             progress.accept("Unpacking the IKE Dashboard " + release.version() + " …");
             Path unpacked = Files.createDirectories(staging.resolve("unpacked"));
             KometInstaller.unpack(zip, unpacked, platform);
-            Path app = KometInstaller.only(unpacked, Files::isDirectory, "The download holds no application");
+            Path app = KometInstaller.only(unpacked, Files::isDirectory, "The download contains no application");
             progress.accept("Checking the IKE Dashboard " + release.version()
                     + (platform == OperatingSystem.MAC ? " with Gatekeeper …" : " …"));
             check(app, release.version(), platform);

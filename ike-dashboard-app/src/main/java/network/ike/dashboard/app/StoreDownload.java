@@ -404,7 +404,7 @@ public final class StoreDownload {
             return plain;
         }
         if (fileVersion.equals(KnowledgeBaseScanner.ikeAttributes(plain).get(KnowledgeBase.RESOLVED_VERSION))) {
-            throw new IOException(plain + " already holds " + fileVersion);
+            throw new IOException(plain + " already contains " + fileVersion);
         }
         Path beside = solor.resolve(artifactId + "-" + fileVersion);
         if (Files.exists(beside)) {

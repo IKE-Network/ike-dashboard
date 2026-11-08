@@ -181,7 +181,7 @@ public final class KometInstaller {
             Path app;
             try (Stream<Path> found = Files.find(expanded, 3, (path, attributes) -> attributes.isDirectory()
                     && path.getFileName().toString().endsWith(".app"))) {
-                app = found.findFirst().orElseThrow(() -> new IOException("The package holds no application"));
+                app = found.findFirst().orElseThrow(() -> new IOException("The package contains no application"));
             }
             run(List.of("codesign", "--verify", "--deep", "--strict", app.toString()));
             Path target = installLocation.resolve(app.getFileName().toString());
