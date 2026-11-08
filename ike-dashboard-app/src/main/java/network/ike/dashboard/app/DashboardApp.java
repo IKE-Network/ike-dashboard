@@ -411,7 +411,7 @@ public final class DashboardApp extends Application {
             }
         }
         String summary = families.size() + " knowledge bases"
-                + (newer == 0 ? " · all current with Nexus" : " · " + newer + " with a newer build")
+                + (newer == 0 ? " · all up to date" : " · " + newer + " with a newer version")
                 + (problem == null ? "" : " · " + problem);
         Platform.runLater(() -> view.setMessage(summary));
     }
@@ -458,8 +458,7 @@ public final class DashboardApp extends Application {
                     view.setMessage("Downloaded " + Names.of(store.getFileName()));
                 });
             } catch (CancellationException e) {
-                transfer.finished(Transfer.State.CANCELLED, "Cancelled. What had downloaded is kept, so downloading it"
-                        + " again picks up where this one stopped.");
+                transfer.finished(Transfer.State.CANCELLED, "Cancelled. The part already downloaded is kept, so the next try continues from there.");
             } catch (Exception e) {
                 transfer.finished(Transfer.State.FAILED, "Could not download: " + e.getMessage());
             } finally {
@@ -510,19 +509,19 @@ public final class DashboardApp extends Application {
             boolean carried = false;
             List<Path[]> setAside = List.of();
             try {
-                transfer.phase("Downloading the newest build");
+                transfer.phase("Downloading the latest version");
                 StoreDownload.downloadTo(RepositoryHttpClients.newClient(), DashboardCommand.access(settings), action.coordinate(),
                         action.classifier(), work, settings.localRepository(), transfer);
-                transfer.phase("Carrying your change sets and preferences");
+                transfer.phase("Moving your change sets, preferences and repositories into it");
                 StoreUpgrade.Carried carry = StoreUpgrade.carry(store.path(), work);
                 carried = true;
                 if (!carry.conflicts().isEmpty()) {
                     StoreUpgrade.carry(work, store.path());
                     StoreUpgrade.deleteTree(work);
-                    transfer.finished(Transfer.State.FAILED, "Not upgraded: the new build contains " + carry.conflicts().size()
-                            + (carry.conflicts().size() == 1 ? " file" : " files") + " of the same name as yours with other"
-                            + " contents, the first " + Names.of(store.path().relativize(carry.conflicts().getFirst()))
-                            + ". Your store is as it was.");
+                    transfer.finished(Transfer.State.FAILED, "Not upgraded. The new version has "
+                            + carry.conflicts().size() + (carry.conflicts().size() == 1 ? " file" : " files")
+                            + " with the same name as yours but different contents. The first is "
+                            + Names.of(store.path().relativize(carry.conflicts().getFirst())) + ". Your folder is as it was.");
                     return;
                 }
                 Optional<KometLauncher.HeadlessRun> checked = check(komet, work, transfer);
@@ -530,8 +529,8 @@ public final class DashboardApp extends Application {
                     StoreUpgrade.carry(work, store.path());
                     carried = false;
                     StoreUpgrade.deleteTree(work);
-                    transfer.finished(Transfer.State.CANCELLED, "Cancelled before anything changed. The new build"
-                            + " stays in your local repository, so upgrading again starts from it.");
+                    transfer.finished(Transfer.State.CANCELLED, "Cancelled. Nothing in your folder changed. The download"
+                            + " is kept, so the next upgrade does not download it again.");
                     return;
                 }
                 KometLauncher.HeadlessRun run = checked.get();
@@ -552,9 +551,9 @@ public final class DashboardApp extends Application {
                         StoreUpgrade.carry(work, store.path());
                         carried = false;
                         StoreUpgrade.deleteTree(work);
-                        transfer.finished(Transfer.State.CANCELLED, "Not upgraded: " + DashboardView.refusedHeader(refused.size())
-                                .toLowerCase() + ". Your store is as it was; the new build stays in your local repository,"
-                                + " so upgrading again starts from it.");
+                        transfer.finished(Transfer.State.CANCELLED, "Not upgraded. " + DashboardView.refusedHeader(refused.size())
+                                + ". Your folder is as it was. The download is kept, so the next upgrade does not download"
+                                + " it again.");
                         return;
                     }
                     transfer.phase("Setting aside " + refused.size() + (refused.size() == 1 ? " change set" : " change sets"));
@@ -567,8 +566,8 @@ public final class DashboardApp extends Application {
                         StoreUpgrade.carry(work, store.path());
                         carried = false;
                         StoreUpgrade.deleteTree(work);
-                        transfer.finished(Transfer.State.CANCELLED, "Cancelled before anything changed. The new build"
-                                + " stays in your local repository, so upgrading again starts from it.");
+                        transfer.finished(Transfer.State.CANCELLED, "Cancelled. Nothing in your folder changed. The"
+                                + " download is kept, so the next upgrade does not download it again.");
                         return;
                     }
                     run = checked.get();
@@ -578,9 +577,9 @@ public final class DashboardApp extends Application {
                     setAside = List.of();
                     StoreUpgrade.carry(work, store.path());
                     carried = false;
-                    transfer.finished(Transfer.State.FAILED, "Not upgraded: Komet could not load every change set into the new"
-                            + " build (status " + run.exitStatus() + "). Your store is as it was; the new build is kept beside"
-                            + " it as " + Names.of(work.getFileName()) + " for inspection. Move it to the " + Finder.trashName()
+                    transfer.finished(Transfer.State.FAILED, "Not upgraded. Komet could not load every change set into the"
+                            + " new version. Its exit status was " + run.exitStatus() + ". Your folder is as it was. The new"
+                            + " version is kept next to it as " + Names.of(work.getFileName()) + " so you can look at it. Move it to the " + Finder.trashName()
                             + " to upgrade again.");
                     KometLauncher.HeadlessRun failed = run;
                     Platform.runLater(() -> {
@@ -589,7 +588,7 @@ public final class DashboardApp extends Application {
                     });
                     return;
                 }
-                transfer.phase("Swapping the new build in");
+                transfer.phase("Putting the new version in place");
                 if (Files.exists(previous)) {
                     Finder.trash(List.of(previous));
                 }
@@ -598,9 +597,9 @@ public final class DashboardApp extends Application {
                 String old;
                 try {
                     Finder.trash(List.of(previous));
-                    old = "The build you had is in the " + Finder.trashName() + ".";
+                    old = "The old version is in the " + Finder.trashName() + ". You can restore it from there if you need it.";
                 } catch (IOException | InterruptedException e) {
-                    old = "The build you had is beside it as " + Names.of(previous.getFileName()) + "; it could not be moved to the "
+                    old = "The old version is next to it as " + Names.of(previous.getFileName()) + ". It could not be moved to the "
                             + Finder.trashName() + " (" + e.getMessage() + ").";
                 }
                 release(List.of(store.path()));
@@ -614,8 +613,8 @@ public final class DashboardApp extends Application {
                     refresh();
                 });
             } catch (CancellationException e) {
-                transfer.finished(Transfer.State.CANCELLED, "Cancelled before anything changed. What had downloaded is kept,"
-                        + " so upgrading again picks up where this one stopped.");
+                transfer.finished(Transfer.State.CANCELLED, "Cancelled. Nothing in your folder changed. The part already"
+                        + " downloaded is kept, so the next upgrade continues from there.");
             } catch (Exception e) {
                 String kept = "";
                 try {
@@ -624,12 +623,12 @@ public final class DashboardApp extends Application {
                         StoreUpgrade.carry(work, store.path());
                     }
                 } catch (IOException back) {
-                    kept = " Your change sets and preferences may be in " + Names.of(work.getFileName()) + ": " + back.getMessage();
+                    kept = " Your change sets and preferences may still be in " + Names.of(work.getFileName()) + ": " + back.getMessage();
                 }
                 release(List.of(store.path()));
                 transfer.finished(Transfer.State.FAILED, "Could not upgrade: " + e.getMessage() + "."
-                        + (kept.isEmpty() ? " Your store is as it was" + (Files.exists(work) ? "; " + Names.of(work.getFileName())
-                        + " is kept beside it for inspection." : ".") : kept));
+                        + (kept.isEmpty() ? " Your folder is as it was." + (Files.exists(work) ? " " + Names.of(work.getFileName())
+                        + " is kept next to it so you can look at it." : "") : kept));
                 Platform.runLater(this::refresh);
             } finally {
                 release(List.of(store.path()));
@@ -648,7 +647,7 @@ public final class DashboardApp extends Application {
     private Optional<KometLauncher.HeadlessRun> check(KometInstallation komet, Path work, Transfer transfer)
             throws IOException, InterruptedException {
         if (!kometCheck.tryAcquire()) {
-            transfer.phase("Waiting for another upgrade's check in Komet");
+            transfer.phase("Waiting for another upgrade to finish its check in Komet");
             while (!kometCheck.tryAcquire(1, TimeUnit.SECONDS)) {
                 if (transfer.cancelled()) {
                     return Optional.empty();
@@ -656,7 +655,7 @@ public final class DashboardApp extends Application {
             }
         }
         try {
-            transfer.phase("Checking the new build in Komet " + komet.version());
+            transfer.phase("Checking in Komet " + komet.version() + ", in the background, that every change set loads");
             KnowledgeBase staged = KnowledgeBaseScanner.inspect(work);
             return Optional.of(KometLauncher.loadChangeSets(komet, staged, heapPlan(komet, staged).environment(),
                     settings.logFolder()));
@@ -682,9 +681,9 @@ public final class DashboardApp extends Application {
                 if (status.remote() != RepositorySync.Remote.NONE
                         && file.startsWith(status.repository().folder().toAbsolutePath().normalize())) {
                     return Optional.of(Names.of(refusal.file().getFileName()) + " is in the git repository "
-                            + status.repository().label() + ", which has a remote: moving it out would reach everyone"
-                            + " else as a deletion, and Komet cannot yet leave a change set in place unread. This upgrade"
-                            + " can only be cancelled.");
+                            + status.repository().label() + ", which is shared through a remote. Moving it out would delete"
+                            + " it for everyone who shares that repository, so it cannot be set aside. Cancel the upgrade"
+                            + " for now.");
                 }
             }
         }
@@ -725,11 +724,11 @@ public final class DashboardApp extends Application {
                 arriving.add(store.path());
                 Finder.trash(List.of(store.path()));
                 Platform.runLater(this::refresh);
-                transfer.phase("Downloading the newest build");
+                transfer.phase("Downloading the latest version");
                 StoreDownload.downloadTo(RepositoryHttpClients.newClient(), DashboardCommand.access(settings), action.coordinate(),
                         action.classifier(), store.path(), settings.localRepository(), transfer);
                 release(List.of(store.path()));
-                transfer.finished(Transfer.State.DONE, "Reinstalled " + Names.of(store.name()) + ". The store you had is in the "
+                transfer.finished(Transfer.State.DONE, "Reinstalled " + Names.of(store.name()) + ". The old folder is in the "
                         + Finder.trashName() + ".");
                 Platform.runLater(() -> {
                     selectAfterRefresh = KnowledgeBaseFamily.familyName(store);
@@ -737,8 +736,8 @@ public final class DashboardApp extends Application {
                 });
             } catch (CancellationException e) {
                 release(List.of(store.path()));
-                transfer.finished(Transfer.State.CANCELLED, "Cancelled. The store you had is in the " + Finder.trashName()
-                        + "; what had downloaded is kept, so downloading again picks up where this one stopped.");
+                transfer.finished(Transfer.State.CANCELLED, "Cancelled. The old folder is in the " + Finder.trashName()
+                        + ". The part already downloaded is kept, so the next try continues from there.");
                 Platform.runLater(this::refresh);
             } catch (Exception e) {
                 release(List.of(store.path()));
@@ -810,8 +809,7 @@ public final class DashboardApp extends Application {
                     view.setMessage("Installed Komet " + installed.version() + " in " + installed.bundle().getParent());
                 });
             } catch (CancellationException e) {
-                transfer.finished(Transfer.State.CANCELLED, "Cancelled. What had downloaded is kept, so installing it"
-                        + " again picks up where this one stopped.");
+                transfer.finished(Transfer.State.CANCELLED, "Cancelled. The part already downloaded is kept, so the next try continues from there.");
                 Platform.runLater(() -> view.setInstalling(false));
             } catch (Exception e) {
                 transfer.finished(Transfer.State.FAILED, "Could not install Komet " + release.version() + ": " + e.getMessage());
@@ -851,8 +849,7 @@ public final class DashboardApp extends Application {
                 restartAs(where, staged);
                 transfer.finished(Transfer.State.DONE, "Restarting as the IKE Dashboard " + release.version());
             } catch (CancellationException e) {
-                transfer.finished(Transfer.State.CANCELLED, "Cancelled. What had downloaded is kept, so updating"
-                        + " again picks up where this one stopped.");
+                transfer.finished(Transfer.State.CANCELLED, "Cancelled. The part already downloaded is kept, so the next try continues from there.");
                 Platform.runLater(() -> view.setUpdatingDashboard(false));
             } catch (Exception e) {
                 transfer.finished(Transfer.State.FAILED, "Could not update the dashboard: " + e.getMessage());
@@ -868,7 +865,7 @@ public final class DashboardApp extends Application {
     private void moveDashboard() {
         SelfUpdate.Placement where = placement.orElseThrow();
         if (othersUnderWay(0)) {
-            view.setMessage("The dashboard restarts when it moves; move it once the transfers have finished");
+            view.setMessage("Moving the dashboard restarts it. Move it once the downloads have finished.");
             return;
         }
         view.setUpdatingDashboard(true);
@@ -984,7 +981,7 @@ public final class DashboardApp extends Application {
             HeapSizing.setOverride(stores, knowledgeBase, edit.override());
             view.heapChanged();
             view.setMessage(edit.override().map(need -> Names.of(knowledgeBase.name()) + " opens with " + need.text())
-                    .orElse(Names.of(knowledgeBase.name()) + " opens with the rule's heap"));
+                    .orElse(Names.of(knowledgeBase.name()) + " opens with the memory the dashboard works out for it"));
         });
     }
 

@@ -71,6 +71,6 @@ public final class StoreLock {
      * @return what to do
      */
     static String refusal(KnowledgeBase store) {
-        return Names.of(store.name()) + " is open in a Komet; quit it first.";
+        return Names.of(store.name()) + " is open in Komet. Quit Komet, then try again.";
     }
 }

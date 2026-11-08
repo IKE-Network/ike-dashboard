@@ -116,8 +116,7 @@ public final class StoreUpgrade {
         List<String> refusals = new ArrayList<>();
         Path path = store.path().toAbsolutePath().normalize();
         running.stream().filter(komet -> komet.store().map(open -> open.toAbsolutePath().normalize()).filter(path::equals).isPresent())
-                .findFirst().ifPresent(komet -> refusals.add(Names.of(store.name()) + " is open in a Komet (process "
-                        + komet.pid() + "); quit it first."));
+                .findFirst().ifPresent(komet -> refusals.add(StoreLock.refusal(store)));
         if (refusals.isEmpty() && StoreLock.openInKomet(store.path())) {
             refusals.add(StoreLock.refusal(store));
         }
@@ -144,7 +143,7 @@ public final class StoreUpgrade {
         }
         Path work = workFolder(store.path());
         if (Files.exists(work)) {
-            refusals.add("An earlier upgrade left " + Names.of(work.getFileName()) + " beside the store, kept for inspection; move it to"
+            refusals.add("An earlier upgrade left the folder " + Names.of(work.getFileName()) + " next to this one. Move it to"
                     + " the " + Finder.trashName() + " to upgrade again.");
         }
         return List.copyOf(refusals);
@@ -182,8 +181,9 @@ public final class StoreUpgrade {
          */
         public String summary() {
             return moved.size() + (moved.size() == 1 ? " folder" : " folders") + " and " + merged.size()
-                    + (merged.size() == 1 ? " file" : " files") + " carried"
-                    + (conflicts.isEmpty() ? "" : "; " + conflicts.size() + " left behind, differing from the new build's");
+                    + (merged.size() == 1 ? " file" : " files") + " moved into the new version"
+                    + (conflicts.isEmpty() ? "" : ". " + conflicts.size() + " left behind, because the new version has a"
+                    + " different file with the same name");
         }
     }
 

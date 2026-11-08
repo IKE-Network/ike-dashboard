@@ -73,7 +73,7 @@ class DashboardViewNoticesTest {
         });
 
         assertThat(shown).contains("Notices", "1 file not committed in Pizza, change sets",
-                "A newer build of Pizza is on Nexus", "Notices  ·  2  (1 at risk)");
+                "A newer version of Pizza is on Nexus", "Notices  ·  2  (1 at risk)");
     }
 
     /**
@@ -146,7 +146,7 @@ class DashboardViewNoticesTest {
         });
 
         assertThat(dismissed).singleElement().asString().startsWith("sync-uncommitted:");
-        assertThat(left).containsExactly("A newer build of Pizza is on Nexus");
+        assertThat(left).containsExactly("A newer version of Pizza is on Nexus");
     }
 
     @Test

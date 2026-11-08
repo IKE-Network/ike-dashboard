@@ -65,7 +65,7 @@ class StoreUpgradeTest {
         assertThat(store.resolve("rocks/CURRENT")).as("the old data stays").hasContent("old data");
         assertThat(carried.conflicts()).isEmpty();
         assertThat(carried.moved()).isNotEmpty();
-        assertThat(carried.summary()).contains("carried");
+        assertThat(carried.summary()).contains("moved into the new version");
     }
 
     @Test
@@ -143,11 +143,11 @@ class StoreUpgradeTest {
         List<String> refusals = StoreUpgrade.refusals(copy, List.of(status), List.of(open));
 
         assertThat(refusals).hasSize(5);
-        assertThat(refusals.get(0)).contains("open in a Komet (process 4242)");
+        assertThat(refusals.get(0)).contains("is open in Komet. Quit Komet");
         assertThat(refusals.get(1)).contains("still writing").contains("ike-cs.spool");
         assertThat(refusals.get(2)).contains("2 files not committed in change sets");
         assertThat(refusals.get(3)).contains("1 commit not pushed from change sets");
-        assertThat(refusals.get(4)).contains("pizza-kb.upgrade").contains("kept for inspection");
+        assertThat(refusals.get(4)).contains("pizza-kb.upgrade").contains("Move it to the");
     }
 
     @Test

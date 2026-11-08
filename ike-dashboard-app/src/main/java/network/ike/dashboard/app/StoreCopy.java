@@ -71,11 +71,11 @@ public final class StoreCopy {
             return Optional.of("Give the new folder a name.");
         }
         if (trimmed.startsWith(".") || trimmed.contains("/") || trimmed.contains("\\") || trimmed.contains(":")) {
-            return Optional.of("A folder name cannot start with a dot or hold / \\ or :.");
+            return Optional.of("A folder name cannot start with a dot or contain /, \\ or :.");
         }
         if (StoreUpgrade.isWork(trimmed) || trimmed.toLowerCase(Locale.ROOT).endsWith(StoreUpgrade.PREVIOUS_SUFFIX)) {
-            return Optional.of("Names ending " + StoreUpgrade.WORK_SUFFIX + ", " + PARTIAL_SUFFIX + " or "
-                    + StoreUpgrade.PREVIOUS_SUFFIX + " are the dashboard's own.");
+            return Optional.of("The dashboard uses names ending in " + StoreUpgrade.WORK_SUFFIX + ", " + PARTIAL_SUFFIX
+                    + " or " + StoreUpgrade.PREVIOUS_SUFFIX + " for itself.");
         }
         if (Files.exists(store.resolveSibling(trimmed)) || Files.exists(store.resolveSibling(trimmed + PARTIAL_SUFFIX))) {
             return Optional.of(Names.of(trimmed) + " is already in " + Names.of(store.getParent()) + ".");
@@ -97,8 +97,7 @@ public final class StoreCopy {
         List<String> refusals = new ArrayList<>();
         Path path = store.path().toAbsolutePath().normalize();
         running.stream().filter(komet -> komet.store().map(open -> open.toAbsolutePath().normalize()).filter(path::equals).isPresent())
-                .findFirst().ifPresent(komet -> refusals.add(Names.of(store.name()) + " is open in a Komet (process "
-                        + komet.pid() + "); quit it first."));
+                .findFirst().ifPresent(komet -> refusals.add(StoreLock.refusal(store)));
         if (refusals.isEmpty() && StoreLock.openInKomet(store.path())) {
             refusals.add(StoreLock.refusal(store));
         }

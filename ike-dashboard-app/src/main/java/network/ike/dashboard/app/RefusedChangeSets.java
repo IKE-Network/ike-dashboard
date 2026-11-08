@@ -142,7 +142,7 @@ public final class RefusedChangeSets {
         if (missing.find()) {
             long count = UUID.matcher(missing.group(1)).results().count();
             return "It refers to " + (count == 1 ? "a component" : count + " components")
-                    + " that neither this build nor any other change set contains.";
+                    + " that is not in this version of the knowledge base or in any other change set.";
         }
         return detail.isBlank() ? "Komet gave no reason." : detail;
     }

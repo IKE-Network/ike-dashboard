@@ -283,8 +283,8 @@ class DashboardViewSnapshotTest {
         assertThat(oldKometButtons.get(30, TimeUnit.SECONDS)).as("without a Komet that checks the new build, only a copy")
                 .contains("Install a copy").doesNotContain("Upgrade");
         assertThat(oldKometTexts.get(30, TimeUnit.SECONDS))
-                .anyMatch(text -> text.startsWith("Upgrading in place needs Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE))
-                .anyMatch(text -> text.startsWith("Each copy is a folder of its own, upgraded on its own"))
+                .anyMatch(text -> text.startsWith("To upgrade this folder you need Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE))
+                .anyMatch(text -> text.startsWith("Each folder is a separate copy"))
                 .noneMatch(text -> text.contains(".previous"));
         write(offered.get(30, TimeUnit.SECONDS), Path.of("target", "dashboard-upgrade.png"));
         write(report.get(30, TimeUnit.SECONDS), Path.of("target", "change-set-load-report.png"));

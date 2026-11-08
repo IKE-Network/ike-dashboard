@@ -83,7 +83,7 @@ class StoreCopyTest {
         List<String> refusals = StoreCopy.refusals(copy, List.of(new HeapSizing.Running(4242, Optional.of(store), 1, 0)));
 
         assertThat(refusals).hasSize(2);
-        assertThat(refusals.get(0)).contains("open in a Komet (process 4242)");
+        assertThat(refusals.get(0)).contains("is open in Komet. Quit Komet");
         assertThat(refusals.get(1)).contains("still writing");
     }
 

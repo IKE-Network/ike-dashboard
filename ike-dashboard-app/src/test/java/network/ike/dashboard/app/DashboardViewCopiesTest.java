@@ -92,7 +92,7 @@ class DashboardViewCopiesTest {
                 .contains(new NoticeAction.Upgrade(teaching, PIZZA, "rkb"));
         assertThat(words.get(30, TimeUnit.SECONDS))
                 .anyMatch(text -> text.startsWith(DashboardView.OTHER_COPIES + " (2)"))
-                .anyMatch(text -> text.startsWith("Each copy is a folder of its own, upgraded on its own"))
+                .anyMatch(text -> text.startsWith("Each folder is a separate copy"))
                 .contains("pizza-card-leak-demo", "pizza-teaching")
                 .noneMatch(text -> text.startsWith("A newer build is on Nexus"));
         assertThat(enabledButtons.get(30, TimeUnit.SECONDS)).filteredOn("Upgrade…"::equals).hasSize(2);

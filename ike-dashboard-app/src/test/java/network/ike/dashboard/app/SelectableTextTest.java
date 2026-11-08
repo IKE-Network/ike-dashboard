@@ -54,14 +54,16 @@ class SelectableTextTest {
 
         String text = DashboardView.upgradeText(copy, "26.1108.1917");
 
-        assertThat(DashboardView.upgradeHeader(copy)).isEqualTo("Upgrade SOLOR + GUDID Knowledge Base to the newest build?");
-        assertThat(Names.plain(text)).startsWith("Your copy of SOLOR + GUDID Knowledge Base is the folder"
-                        + " solor-gudid-card-leak-demo in ~/Solor, assembled ")
-                .contains("downloads into solor-gudid-card-leak-demo.upgrade beside it")
-                .contains("takes the name solor-gudid-card-leak-demo")
-                .contains("the build you have now goes to the " + Finder.trashName())
-                .contains("Other folders of SOLOR + GUDID Knowledge Base are not changed")
-                .doesNotContain(".previous", "Quit any Komet")
+        assertThat(DashboardView.upgradeHeader(copy)).isEqualTo("Upgrade SOLOR + GUDID Knowledge Base to the latest version?");
+        assertThat(Names.plain(text)).startsWith("This upgrades the folder solor-gudid-card-leak-demo in ~/Solor."
+                        + " The version in it was made on 2026-11-05 at ")
+                .contains("downloads into a new folder, solor-gudid-card-leak-demo.upgrade.")
+                .contains("the new folder is renamed solor-gudid-card-leak-demo")
+                .contains("the old version goes to the " + Finder.trashName())
+                .contains("You can restore it from the " + Finder.trashName() + " if you need it.")
+                .contains("If the check fails, nothing changes")
+                .contains("Your other folders of SOLOR + GUDID Knowledge Base are not changed.")
+                .doesNotContain(".previous", "Quit any Komet", "way back", "build")
                 .contains("Komet 26.1108.1917");
         assertThat(text).as("file and folder names are marked for bold")
                 .contains(Names.of("solor-gudid-card-leak-demo"), Names.of("~/Solor"),
@@ -101,7 +103,7 @@ class SelectableTextTest {
                 words.complete(areas);
                 SelectableText body = areas.get(1);
                 List<String> picked = new java.util.ArrayList<>();
-                body.select(0, "Your copy of".length());
+                body.select(0, "This upgrades".length());
                 picked.add(body.selectedText());
                 int path = body.getText().indexOf("~/Solor");
                 body.selectWordAt(path + 3);
@@ -110,7 +112,7 @@ class SelectableTextTest {
                 bold.complete(body.lookupAll("Text").stream().map(Text.class::cast)
                         .filter(run -> run.getFont().getStyle().toLowerCase(java.util.Locale.ROOT).contains("bold"))
                         .map(Text::getText).toList());
-                body.select(0, "Your copy of".length());
+                body.select(0, "This upgrades".length());
                 drawn.complete(scene.snapshot(null));
             } catch (RuntimeException | AssertionError e) {
                 words.completeExceptionally(e);
@@ -125,12 +127,12 @@ class SelectableTextTest {
             assertThat(area.isFocusTraversable()).as("the keyboard goes to the buttons").isFalse();
             assertThat(area.getHeight()).as("as tall as its text").isGreaterThan(10);
         });
-        assertThat(areas.get(0).getText()).isEqualTo("Upgrade SOLOR + GUDID Knowledge Base to the newest build?");
+        assertThat(areas.get(0).getText()).isEqualTo("Upgrade SOLOR + GUDID Knowledge Base to the latest version?");
         assertThat(areas.get(1).getHeight()).as("several wrapped lines").isGreaterThan(3 * areas.get(0).getHeight());
         assertThat(selected.get(30, TimeUnit.SECONDS)).as("a drag's range, and a double-click's whole path")
-                .containsExactly("Your copy of", "~/Solor");
+                .containsExactly("This upgrades", "~/Solor");
         assertThat(bold.get(30, TimeUnit.SECONDS)).contains("solor-gudid-card-leak-demo", "~/Solor",
-                "solor-gudid-card-leak-demo.upgrade").doesNotContain("Your copy of SOLOR + GUDID Knowledge Base is the folder ");
+                "solor-gudid-card-leak-demo.upgrade").doesNotContain("This upgrades the folder ");
         write(drawn.get(30, TimeUnit.SECONDS), Path.of("target", "dashboard-upgrade-dialog.png"));
     }
 

@@ -33,7 +33,7 @@ public record BuildStatus(State state, String detail, Optional<SnapshotMetadata.
         /** The store is the newest build. */
         CURRENT("current"),
         /** Nexus has a newer build. */
-        NEWER("newer build"),
+        NEWER("newer version"),
         /** Nexus has the coordinate's metadata, but no comparison could be made. */
         UNKNOWN("cannot tell"),
         /** The store does not say which build it is. */

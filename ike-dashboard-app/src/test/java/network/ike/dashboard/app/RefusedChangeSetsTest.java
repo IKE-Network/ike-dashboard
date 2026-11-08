@@ -80,8 +80,8 @@ class RefusedChangeSetsTest {
         assertThat(summary.packaged()).isEqualTo("2026-11-08T03:11:44.097814");
         assertThat(summary.contents()).isEqualTo("11 semantics, 11 STAMPs");
         assertThat(summary.names()).containsExactly("Komet Narrator (Claude)", "Narration");
-        assertThat(summary.reason()).isEqualTo("It refers to a component that neither this build nor any other"
-                + " change set contains.");
+        assertThat(summary.reason()).isEqualTo("It refers to a component that is not in this version of the"
+                + " knowledge base or in any other change set.");
     }
 
     @Test
@@ -131,13 +131,13 @@ class RefusedChangeSetsTest {
 
         String text = Names.plain(DashboardView.refusedText(List.of(summary), Optional.empty()));
 
-        assertThat(DashboardView.refusedHeader(1)).isEqualTo("A change set does not load into the new build");
-        assertThat(DashboardView.refusedHeader(2)).isEqualTo("2 change sets do not load into the new build");
+        assertThat(DashboardView.refusedHeader(1)).isEqualTo("A change set could not be loaded into the new version");
+        assertThat(DashboardView.refusedHeader(2)).isEqualTo("2 change sets could not be loaded into the new version");
         assertThat(text).contains(NARRATION,
                 "11 semantics, 11 STAMPs · Komet Narrator (Claude) · Narration",
                 "Packaged by KOMET user (SOLOR) on 2026-11-08 03:11",
-                "neither this build nor any other change set contains",
-                "Set aside moves it to unprocessedChangeSets");
+                "is not in this version of the knowledge base or in any other change set",
+                "Set aside moves it into the folder unprocessedChangeSets");
         assertThat(text).doesNotContain(" hold");
     }
 
@@ -152,7 +152,7 @@ class RefusedChangeSetsTest {
         Optional<String> local = DashboardApp.sharedRepository(store, refused, List.of(new RepositorySync.Status(
                 repository, "main", 0, 0, RepositorySync.Remote.NONE, 0, Optional.empty(), "")));
 
-        assertThat(shared).hasValueSatisfying(reason -> assertThat(reason).contains("change sets", "has a remote"));
+        assertThat(shared).hasValueSatisfying(reason -> assertThat(reason).contains("change sets", "shared through a remote"));
         assertThat(local).isEmpty();
     }
 

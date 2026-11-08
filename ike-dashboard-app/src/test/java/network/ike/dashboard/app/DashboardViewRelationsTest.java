@@ -80,7 +80,7 @@ class DashboardViewRelationsTest {
                         "protobuf, unreasoned  20260601.2-20261026.160451-9")
                 .doesNotContain("Included in");
         assertThat(shown.getLast()).as("the source, a protobuf, which the link selected")
-                .contains("selected snomedct-kb", "Protobufs only. Komet loads a protobuf into a store; it does not open it.",
+                .contains("selected snomedct-kb", "Only protobuf files. Komet cannot open these directly. It loads them into a knowledge base.",
                         "Included in", "link SOLOR", "link SOLOR GUDID");
     }
 

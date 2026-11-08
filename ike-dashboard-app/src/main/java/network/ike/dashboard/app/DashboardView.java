@@ -104,6 +104,8 @@ public final class DashboardView extends BorderPane {
 
     private static final DateTimeFormatter WHEN = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
             .withZone(ZoneId.systemDefault());
+    private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneId.systemDefault());
+    private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault());
     private static final String MUTED = "-fx-text-fill: #6b6b6b;";
 
     /** The section that lists a knowledge base's copies other than the one the detail shows. */
@@ -657,7 +659,7 @@ public final class DashboardView extends BorderPane {
      * @return the heading
      */
     static String refusedHeader(int count) {
-        return (count == 1 ? "A change set does" : count + " change sets do") + " not load into the new build";
+        return (count == 1 ? "A change set" : count + " change sets") + " could not be loaded into the new version";
     }
 
     /**
@@ -685,10 +687,11 @@ public final class DashboardView extends BorderPane {
             }
             out.append("    ").append(summary.reason()).append("\n\n");
         }
-        out.append(whyNoAside.orElse("Set aside moves " + (summaries.size() == 1 ? "it" : "them") + " to "
-                + Names.of(RefusedChangeSets.UNPROCESSED_FOLDER) + " in the store, which Komet does not read, and goes on with the"
-                + " upgrade; " + (summaries.size() == 1 ? "it stays" : "they stay") + " with the store through later"
-                + " upgrades. Cancel leaves your store as it was."));
+        String them = summaries.size() == 1 ? "it" : "them";
+        out.append(whyNoAside.orElse("Set aside moves " + them + " into the folder "
+                + Names.of(RefusedChangeSets.UNPROCESSED_FOLDER) + ", where Komet does not load " + them
+                + ", and finishes the upgrade. " + (summaries.size() == 1 ? "It stays" : "They stay")
+                + " there through later upgrades.\n\nCancel stops the upgrade and leaves your folder as it was."));
         return out.toString();
     }
 
@@ -722,9 +725,10 @@ public final class DashboardView extends BorderPane {
      */
     static BorderPane runReport(KometLauncher.HeadlessRun run) {
         Label outcome = new Label(switch (run.exitStatus()) {
-            case 0 -> "Every change set is in the store.";
-            case 1 -> "Some change sets were refused; the report names what the knowledge base does not contain.";
-            default -> "Komet did not run the load: status " + run.exitStatus() + ".";
+            case 0 -> "Every change set loaded.";
+            case 1 -> "Some change sets could not be loaded. The report below says what each one refers to that this"
+                    + " knowledge base does not contain.";
+            default -> "Komet stopped before it loaded the change sets. Its exit status was " + run.exitStatus() + ".";
         });
         outcome.setWrapText(true);
         outcome.setStyle(run.clean() ? "-fx-text-fill: #2e7d32;" : run.exitStatus() == 1 ? ATTENTION : PROBLEM);
@@ -859,7 +863,7 @@ public final class DashboardView extends BorderPane {
         notices.forEach(notice -> box.getChildren().add(noticeCard(notice)));
         box.getChildren().add(muted(nexusChecked
                 .map(checked -> checked.current() ? "Nexus checked " + WHEN.format(checked.checkedAt())
-                        : "Nexus could not be reached; what it showed as of " + WHEN.format(checked.checkedAt()))
+                        : "Could not reach Nexus. This is what it listed at " + WHEN.format(checked.checkedAt()) + ".")
                 .orElse("Nexus not checked yet")));
     }
 
@@ -872,7 +876,7 @@ public final class DashboardView extends BorderPane {
         }
         notice.freshness().ifPresent(freshness -> {
             SelectableText checked = muted(freshness.current() ? "checked " + WHEN.format(freshness.checkedAt())
-                    : "as of " + WHEN.format(freshness.checkedAt()) + "; the last check failed");
+                    : "from " + WHEN.format(freshness.checkedAt()) + ". The latest check failed.");
             checked.setStyle("-fx-font-size: 11px;" + MUTED);
             text.getChildren().add(checked);
         });
@@ -1313,7 +1317,7 @@ public final class DashboardView extends BorderPane {
     private void updateBanner() {
         int newer = newerBuilds().size();
         updateBar.setVisible(newer > 0);
-        updates.setText(newer == 1 ? "1 newer build on Nexus" : newer + " newer builds on Nexus");
+        updates.setText(newer == 1 ? "1 newer version on Nexus" : newer + " newer versions on Nexus");
     }
 
     private void upgradeOrCopy(KnowledgeBaseFamily family) {
@@ -1390,10 +1394,10 @@ public final class DashboardView extends BorderPane {
         SelectableText why = SelectableText.of("Not managed: " + String.join("; ", entry.descriptor().problems()) + ".");
         why.setStyle(ATTENTION);
         detail.getChildren().add(why);
-        detail.getChildren().add(muted("The dashboard manages a store that carries a complete knowledge-base descriptor"
-                + " (level 1) and its icon, as builds by ike-maven-plugin 268 or later do. Download a newer build to"
-                + " manage this knowledge base; this copy can be shown in " + (OperatingSystem.current() == OperatingSystem.WINDOWS ? "File Explorer" : "the Finder")
-                + " or moved to the " + Finder.trashName() + "."));
+        detail.getChildren().add(muted("This folder does not include the description the dashboard needs: the"
+                + " knowledge base's name, version and icon. Newer versions include it, so download one to manage this"
+                + " knowledge base. You can still show this folder in " + (OperatingSystem.current() == OperatingSystem.WINDOWS ? "File Explorer" : "the Finder")
+                + " or move it to the " + Finder.trashName() + "."));
         Button reveal = new Button("Show in " + Finder.name());
         reveal.setOnAction(event -> onReveal.accept(entry.path()));
         Button trash = new Button("Move to " + Finder.trashName() + "…");
@@ -1407,7 +1411,7 @@ public final class DashboardView extends BorderPane {
         Optional<KnowledgeBase> latest = family.latest();
         List<KnowledgeBase> changeSets = family.members().stream().filter(member -> member.kind() == StoreKind.CHANGE_SETS).toList();
         if (latest.isEmpty()) {
-            detail.getChildren().add(muted("Protobufs only. Komet loads a protobuf into a store; it does not open it."));
+            detail.getChildren().add(muted("Only protobuf files. Komet cannot open these directly. It loads them into a knowledge base."));
             detail.getChildren().add(section(KnowledgeBaseTree.PROTOBUFS, changeSets, true, false));
             relations(family).ifPresent(detail.getChildren()::add);
             return;
@@ -1429,8 +1433,9 @@ public final class DashboardView extends BorderPane {
         BuildStatus status = status(family.name());
         if (status.state() == BuildStatus.State.NEWER && status.newest().isPresent()) {
             KnowledgeBase identified = family.latestIdentified().orElse(copy);
-            SelectableText newer = SelectableText.of("A newer build is on Nexus, deployed "
-                    + WHEN.format(status.newest().get().updated()) + ", for your copy " + identified.whereShown() + ".");
+            SelectableText newer = SelectableText.of("A newer version is on Nexus, published "
+                    + WHEN.format(status.newest().get().updated()) + ". It can update your folder " + identified.whereShown()
+                    + ".");
             String classifier = identified.kind().classifier();
             boolean downloading = identified.coordinate()
                     .map(coordinate -> transferring(downloadKey(coordinate, classifier))).orElse(false);
@@ -1452,10 +1457,10 @@ public final class DashboardView extends BorderPane {
             HBox row = new HBox(10, newer, gap, upgrade, copyBeside);
             row.setAlignment(Pos.CENTER_LEFT);
             VBox box = new VBox(4, row, muted(validator.isPresent()
-                    ? "Upgrade keeps your change sets, preferences and repositories; the build you have goes to the "
+                    ? "Upgrade keeps your change sets, preferences and repositories. The old version goes to the "
                             + Finder.trashName() + "."
-                    : "Upgrading in place needs Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE + " or later, which checks the"
-                            + " new build with no window; a copy can be installed beside."));
+                    : "To upgrade this folder you need Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE + " or later. Until"
+                            + " then, Install a copy puts the new version in a separate folder."));
             box.setPadding(new Insets(8, 10, 8, 10));
             box.setStyle("-fx-background-color: #fff3e0; -fx-background-radius: 6;");
             detail.getChildren().add(box);
@@ -1477,8 +1482,8 @@ public final class DashboardView extends BorderPane {
         if (komet.isEmpty()) {
             Optional<KometRelease> fix = kometRelease.filter(release -> LauncherChoice.reads(release.version(), copy));
             SelectableText need = SelectableText.of(LauncherChoice.requirement(copy).map(requirement -> "Needs " + requirement
-                    + (fix.isPresent() ? "." : "; none installed reads it, and no newer build was found."))
-                    .orElse(fix.isPresent() ? "No Komet installed." : "No Komet installed, and none was found to install."));
+                    + (fix.isPresent() ? "." : ". No installed Komet can open it, and no newer Komet was found."))
+                    .orElse(fix.isPresent() ? "No Komet is installed." : "No Komet is installed, and none was found to install."));
             need.setStyle(PROBLEM);
             detail.getChildren().add(need);
             fix.ifPresent(release -> {
@@ -1488,7 +1493,7 @@ public final class DashboardView extends BorderPane {
                 install.setOnAction(event -> onInstallKomet.accept(release));
                 SelectableText from = muted("from " + release.source().label()
                         + (release.sizeBytes() > 0 ? ", " + DashboardCommand.size(release.sizeBytes()) : "")
-                        + "; installed beside the Komets you have");
+                        + ". It installs next to the Komets you have.");
                 HBox row = new HBox(10, install, from);
                 row.setAlignment(Pos.CENTER_LEFT);
                 detail.getChildren().add(row);
@@ -1583,7 +1588,7 @@ public final class DashboardView extends BorderPane {
                 openBrowser();
                 browser.select(onNexus.get());
             });
-            Tooltip.install(link, new Tooltip("Not in ~/Solor: show it in the Nexus window"));
+            Tooltip.install(link, new Tooltip("Not downloaded. Show it in the Nexus window."));
             label = link;
         } else {
             label = SelectableText.of(name);
@@ -1632,7 +1637,7 @@ public final class DashboardView extends BorderPane {
      * @return the question
      */
     static String upgradeHeader(KnowledgeBase store) {
-        return "Upgrade " + store.displayName() + " to the newest build?";
+        return "Upgrade " + store.displayName() + " to the latest version?";
     }
 
     /**
@@ -1644,15 +1649,18 @@ public final class DashboardView extends BorderPane {
      * @return the text
      */
     static String upgradeText(KnowledgeBase store, String validator) {
-        String assembled = store.assembledAt().map(at -> ", assembled " + WHEN.format(at)).orElse("");
-        return "Your copy of " + store.displayName() + " is the folder " + store.whereShown() + assembled + ".\n\n"
-                + "The newest build downloads into " + Names.of(StoreUpgrade.workFolder(store.path()).getFileName())
-                + " beside it, and your change sets, preferences and repositories are carried into it. Komet " + validator
-                + " then checks, with no window, that it opens and loads every change set. If it does, the new build"
-                + " takes the name " + Names.of(store.name()) + " and the build you have now goes to the "
-                + Finder.trashName() + ", which is the way back. If it does not, " + Names.of(store.name())
-                + " stays as it is.\n\nOther folders of " + store.displayName() + " are not changed: each is upgraded on"
-                + " its own.";
+        String assembled = store.assembledAt().map(at -> " The version in it was made on " + DAY.format(at) + " at "
+                + TIME.format(at) + ".").orElse("");
+        String name = Names.of(store.name());
+        return "This upgrades the folder " + store.whereShown() + "." + assembled + "\n\n"
+                + "1. The latest version downloads into a new folder, "
+                + Names.of(StoreUpgrade.workFolder(store.path()).getFileName()) + ".\n"
+                + "2. Your change sets, preferences and repositories move into it.\n"
+                + "3. Komet " + validator + " opens it in the background to check that every change set loads.\n"
+                + "4. If they all load, the new folder is renamed " + name + " and the old version goes to the "
+                + Finder.trashName() + ". You can restore it from the " + Finder.trashName() + " if you need it.\n\n"
+                + "If the check fails, nothing changes and " + name + " stays as it is. Your other folders of "
+                + store.displayName() + " are not changed.";
     }
 
     /**
@@ -1710,9 +1718,9 @@ public final class DashboardView extends BorderPane {
      * @return the text
      */
     static String copyText(KnowledgeBase store) {
-        return "The folder " + store.whereShown() + " is copied whole into a new folder beside it: its build, change sets,"
-                + " preferences and repositories. The two are then separate copies of " + store.displayName()
-                + ", each with its own change sets, opened and upgraded on its own.";
+        return "This copies everything in the folder " + store.whereShown() + " into a new folder next to it: the"
+                + " knowledge base, your change sets, preferences and repositories. After that the two folders are"
+                + " separate. Each keeps its own change sets and is upgraded on its own.";
     }
 
     private void confirmReinstall(NoticeAction.Reinstall action) {
@@ -1723,9 +1731,11 @@ public final class DashboardView extends BorderPane {
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
         alert.setTitle("Reinstall");
         alert.setHeaderText("Reinstall " + store.displayName() + " from scratch?");
-        alert.setContentText("The folder " + store.whereShown() + " (" + DashboardCommand.size(store.sizeBytes()) + ") moves to the "
-                + Finder.trashName() + " with everything in it: change sets, preferences and repositories. The newest build"
-                + " then downloads under the same name. The " + Finder.trashName() + " is the way back.");
+        alert.setContentText("This moves the folder " + store.whereShown() + " to the " + Finder.trashName()
+                + " with everything in it, including your change sets, preferences and repositories. It takes up "
+                + DashboardCommand.size(store.sizeBytes()) + ".\n\nThen the latest version downloads into a new folder"
+                + " with the same name. You can restore the old folder from the " + Finder.trashName()
+                + " if you need it.");
         alert.getButtonTypes().setAll(ButtonType.CANCEL, ButtonType.OK);
         if (getScene() != null) {
             alert.initOwner(getScene().getWindow());
@@ -1737,8 +1747,8 @@ public final class DashboardView extends BorderPane {
 
     private static String nexusNote(BuildStatus status) {
         return switch (status.state()) {
-            case CURRENT -> "  ·  current with Nexus";
-            case NEWER -> "  ·  newer build on Nexus";
+            case CURRENT -> "  ·  latest version";
+            case NEWER -> "  ·  newer version on Nexus";
             case NOT_ON_NEXUS, UNKNOWN, ERROR -> "  ·  " + status.state().label();
             case UNCHECKED, UNIDENTIFIED -> "";
         };
@@ -1763,8 +1773,8 @@ public final class DashboardView extends BorderPane {
         bar.setAlignment(Pos.CENTER_RIGHT);
         VBox box = new VBox(4, pane, bar);
         if (copies.stream().anyMatch(copy -> upgradeOf(copy).isPresent())) {
-            box.getChildren().add(1, muted("Each copy is a folder of its own, upgraded on its own: Upgrade brings that"
-                    + " folder to the newest build where it is and keeps its change sets, preferences and repositories."));
+            box.getChildren().add(1, muted("Each folder is a separate copy. Upgrade updates only that folder to the"
+                    + " latest version, and keeps its change sets, preferences and repositories."));
         }
         return box;
     }
@@ -1805,8 +1815,8 @@ public final class DashboardView extends BorderPane {
     private String standing(KnowledgeBase copy) {
         return newestFor(copy).map(newest -> NewerBuildCheck.compare(copy, newest).state())
                 .map(state -> switch (state) {
-                    case CURRENT -> "newest build";
-                    case NEWER -> "older build";
+                    case CURRENT -> "latest version";
+                    case NEWER -> "older version";
                     default -> "";
                 }).orElse("");
     }
@@ -1949,8 +1959,8 @@ public final class DashboardView extends BorderPane {
                 + " (" + DashboardCommand.size(bytes) + ") to the " + Finder.trashName() + "?");
         alert.setContentText((copies.size() == 1 ? "" : copies.stream().map(copy -> Names.of(copy.name()))
                 .collect(Collectors.joining("\n", "", "\n\n")))
-                + "A copy you edited may contain work that no build contains. "
-                + "The space comes back when the " + Finder.trashName() + " is emptied.");
+                + "If you changed a copy, it may contain work that is not saved anywhere else. "
+                + "The disk space is freed when you empty the " + Finder.trashName() + ".");
         alert.getButtonTypes().setAll(ButtonType.CANCEL, ButtonType.OK);
         if (getScene() != null) {
             alert.initOwner(getScene().getWindow());
@@ -1985,7 +1995,7 @@ public final class DashboardView extends BorderPane {
             mark.setStyle("-fx-font-size: 11px;");
             Optional<KnowledgeBase> latest = family.latest();
             if (status(family.name()).state() == BuildStatus.State.NEWER) {
-                mark.setText("▲ newer build");
+                mark.setText("▲ newer version");
                 mark.setStyle("-fx-font-size: 11px;" + ATTENTION);
             } else if (latest.isEmpty()) {
                 mark.setText("protobuf");

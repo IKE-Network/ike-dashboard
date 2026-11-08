@@ -67,11 +67,11 @@ class NoticesTest {
 
         assertThat(withChecker).singleElement().satisfies(notice -> {
             assertThat(notice.action()).contains(new NoticeAction.Upgrade(latest, PIZZA, "rkb"));
-            assertThat(Names.plain(notice.detail())).contains("Upgrade brings your copy, pizza-kb in /Solor, to it and keeps its change sets, preferences and repositories");
+            assertThat(Names.plain(notice.detail())).contains("Upgrade updates your folder pizza-kb in /Solor and keeps its change sets, preferences and repositories");
         });
         assertThat(without).singleElement().satisfies(notice -> {
             assertThat(notice.action()).contains(new NoticeAction.InstallCopy(PIZZA, "rkb"));
-            assertThat(notice.detail()).contains("needs Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE);
+            assertThat(notice.detail()).contains("you need Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE);
         });
     }
 
@@ -84,7 +84,7 @@ class NoticesTest {
                 id -> false);
 
         assertThat(notices).singleElement().satisfies(notice -> {
-            assertThat(notice.title()).isEqualTo("A newer build of Pizza is on Nexus");
+            assertThat(notice.title()).isEqualTo("A newer version of Pizza is on Nexus");
             assertThat(notice.action()).contains(new NoticeAction.InstallCopy(PIZZA, "rkb"));
             assertThat(notice.freshness()).as("offline, it is shown as of the last check").contains(asked);
             assertThat(notice.id()).isEqualTo("newer:pizza-kb:20250627.1-20261024.001942-7");
@@ -178,8 +178,8 @@ class NoticesTest {
                 Optional.of(catalog), Map.of(), Set.of(), Optional.empty(), NOW), id -> false);
 
         assertThat(notices).singleElement().satisfies(notice -> {
-            assertThat(notice.title()).isEqualTo("A managed build of solor-kb is on Nexus");
-            assertThat(notice.detail()).contains("You have solor-kb, which the dashboard does not manage");
+            assertThat(notice.title()).isEqualTo("A version of solor-kb that the dashboard can manage is on Nexus");
+            assertThat(notice.detail()).contains("You have solor-kb, which the dashboard cannot manage");
         });
     }
 
@@ -215,7 +215,7 @@ class NoticesTest {
                 org.assertj.core.groups.Tuple.tuple(Notice.Urgency.NEWS, "Could not check Pizza, preferences against its remote"));
         assertThat(notices.get(2).freshness()).contains(checked);
         assertThat(notices.getLast().detail()).as("never shown as current when it could not be checked")
-                .contains("whether it is behind is unknown");
+                .contains("so it may be behind");
     }
 
     @Test
@@ -241,7 +241,7 @@ class NoticesTest {
         assertThat(Notices.compute(withDashboard(new SelfUpdate.State(placement, Optional.of(newer))), id -> false))
                 .singleElement().satisfies(notice -> {
                     assertThat(notice.title()).isEqualTo("IKE Dashboard 26.1026.15 is available");
-                    assertThat(notice.detail()).startsWith("You have 26.1025.2202. It replaces this one");
+                    assertThat(notice.detail()).startsWith("You have 26.1025.2202. The new version replaces this one");
                     assertThat(notice.action()).contains(new NoticeAction.UpdateDashboard(newer));
                     assertThat(notice.freshness()).as("as of when Nexus was asked").isPresent();
                 });
@@ -256,8 +256,8 @@ class NoticesTest {
                 Path.of("/Users/someone/Applications/IKE Dashboard.app"));
 
         assertThat(Notices.compute(withDashboard(new SelfUpdate.State(placement, Optional.of(dashboard("26.1026.15")))),
-                id -> false)).singleElement().extracting(Notice::detail).asString()
-                .contains("This one is in " + Path.of("/Applications") + ", which you cannot change, so the new one goes in "
+                id -> false)).singleElement().extracting(notice -> Names.plain(notice.detail())).asString()
+                .contains("This one is in " + Path.of("/Applications") + ", where you cannot make changes, so the new one goes in "
                         + Path.of("/Users/someone/Applications"));
     }
 

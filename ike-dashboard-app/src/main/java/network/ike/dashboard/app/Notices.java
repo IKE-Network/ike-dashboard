@@ -139,13 +139,13 @@ public final class Notices {
         switch (status.remote()) {
             case BEHIND -> notices.add(new Notice("sync-behind:" + folder + ":" + status.behind(), Notice.Urgency.ACTION,
                     (status.behind() < 0 ? "Commits" : plural(status.behind(), "commit", "commits")) + " to pull into " + where,
-                    "The remote has work this copy does not; pull it before you change the same things. " + howToSync(status),
+                    "The remote has changes this folder does not have. Pull them before you change the same things. " + howToSync(status),
                     Optional.of(family.name()), show, status.freshness()));
             case UNKNOWN -> notices.add(new Notice("sync-unknown:" + folder, Notice.Urgency.NEWS,
                     "Could not check " + where + " against its remote",
                     (status.problem().isBlank() ? "" : status.problem() + ". ")
                             + status.freshness().map(last -> "Last checked " + WHEN.format(last.checkedAt()) + ".")
-                            .orElse("It has not been checked yet, so whether it is behind is unknown."),
+                            .orElse("It has not been checked successfully yet, so it may be behind."),
                     Optional.of(family.name()), show, status.freshness()));
             case NONE, UNCHECKED, CURRENT -> {
             }
@@ -167,7 +167,7 @@ public final class Notices {
         String needs = LauncherChoice.requirement(copy).map(requirement -> "It needs " + requirement + ". ").orElse("");
         notices.add(new Notice("no-komet:" + copy.path() + ":" + fix.map(KometRelease::version).orElse(""),
                 Notice.Urgency.ACTION, "No installed Komet opens " + family.displayName(),
-                needs + fix.map(release -> "Komet " + release.version() + " does.").orElse("No Komet build found reads it yet."),
+                needs + fix.map(release -> "Komet " + release.version() + " does.").orElse("No Komet that can open it has been found yet."),
                 Optional.of(family.name()),
                 Optional.of(fix.<NoticeAction>map(NoticeAction.InstallKomet::new).orElse(new NoticeAction.Show(family.name()))),
                 Optional.empty()));
@@ -182,15 +182,15 @@ public final class Notices {
             // Upgrade keeps the person's work in place (decision 20); it needs a Komet that validates the
             // new build with no window. Without one, the newer build can still be installed beside.
             boolean upgradable = LauncherChoice.chooseForLoad(inputs.komets(), identified).isPresent();
-            String deployed = status.newest().map(deploy -> "Deployed " + WHEN.format(deploy.updated()) + ". ").orElse("");
+            String deployed = status.newest().map(deploy -> "Published " + WHEN.format(deploy.updated()) + ". ").orElse("");
             notices.add(new Notice("newer:" + family.name() + ":" + status.newest().map(SnapshotMetadata.Deploy::value)
-                    .orElse(""), Notice.Urgency.ACTION, "A newer build of " + family.displayName() + " is on Nexus",
+                    .orElse(""), Notice.Urgency.ACTION, "A newer version of " + family.displayName() + " is on Nexus",
                     deployed + (upgradable
-                            ? "Upgrade brings your copy, " + identified.whereShown() + ", to it and keeps its change"
-                                    + " sets, preferences and repositories; the build it has now goes to the "
+                            ? "Upgrade updates your folder " + identified.whereShown() + " and keeps its change sets,"
+                                    + " preferences and repositories. The old version goes to the "
                                     + Finder.trashName() + "."
-                            : "It installs a copy beside the one you have, which stays as it is. Upgrading in place"
-                                    + " needs Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE + " or later."),
+                            : "Install a copy puts it in a new folder and leaves yours as it is. To upgrade your folder"
+                                    + " you need Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE + " or later."),
                     Optional.of(family.name()),
                     Optional.of(upgradable ? new NoticeAction.Upgrade(identified, coordinate, identified.kind().classifier())
                             : new NoticeAction.InstallCopy(coordinate, identified.kind().classifier())),
@@ -204,7 +204,7 @@ public final class Notices {
                 .ifPresent(release -> notices.add(new Notice("komet:" + release.version(), Notice.Urgency.ACTION,
                         inputs.komets().isEmpty() ? "No Komet is installed" : "Komet " + release.version() + " is available",
                         (inputs.komets().isEmpty() ? "" : "You have Komet " + inputs.komets().getFirst().version() + ". ")
-                                + "It installs beside the Komets you have, from " + release.source().label() + ".",
+                                + "The new one installs next to the Komets you have, from " + release.source().label() + ".",
                         Optional.empty(), Optional.of(new NoticeAction.InstallKomet(release)), inputs.nexusChecked())));
     }
 
@@ -214,9 +214,9 @@ public final class Notices {
             if (placement.location() == SelfUpdate.Location.TRANSLOCATED) {
                 notices.add(new Notice("dashboard-translocated", Notice.Urgency.ACTION,
                         "Move the IKE Dashboard into your Applications folder",
-                        "macOS runs it from a read-only copy because it was opened where it was downloaded, so it cannot"
-                                + " update itself. Moving it puts it in " + placement.target().getParent()
-                                + " and restarts it there; you can then delete the download.",
+                        "macOS is running it from a temporary read-only copy, because it was opened straight from where"
+                                + " it was downloaded. From there it cannot update itself. Moving it puts it in "
+                                + Names.of(placement.target().getParent()) + " and restarts it. You can then delete the download.",
                         Optional.empty(), Optional.of(new NoticeAction.MoveDashboard()), Optional.empty()));
                 return;
             }
@@ -224,10 +224,12 @@ public final class Notices {
                     Notice.Urgency.ACTION, "IKE Dashboard " + release.version() + " is available",
                     "You have " + placement.running().version() + ". "
                             + (placement.location() == SelfUpdate.Location.IN_PLACE
-                            ? "It replaces this one and the dashboard restarts; this one is kept until the new one has started."
-                            : "This one is in " + placement.running().bundle().getParent() + ", which you cannot change,"
-                                    + " so the new one goes in " + placement.target().getParent() + " and starts from there.")
-                            + " Running Komets are not affected.",
+                            ? "The new version replaces this one and the dashboard restarts. This one is kept until the new"
+                                    + " one has started."
+                            : "This one is in " + Names.of(placement.running().bundle().getParent()) + ", where you cannot make"
+                                    + " changes, so the new one goes in " + Names.of(placement.target().getParent())
+                                    + " and starts from there.")
+                            + " Komets that are running keep running.",
                     Optional.empty(), Optional.of(new NoticeAction.UpdateDashboard(release)), inputs.nexusChecked())));
         });
     }
@@ -269,12 +271,12 @@ public final class Notices {
                 continue;
             }
             List<String> copies = unmanagedCopies(inputs.unmanaged(), offer.coordinate());
-            String deployed = "Deployed " + WHEN.format(offer.updated()) + ", " + DashboardCommand.size(offer.sizeBytes()) + ". ";
+            String deployed = "Published " + WHEN.format(offer.updated()) + ", " + DashboardCommand.size(offer.sizeBytes()) + ". ";
             notices.add(new Notice("nexus-new:" + offer.coordinate() + ":" + offer.updated(), Notice.Urgency.ACTION,
-                    copies.isEmpty() ? "New on Nexus: " + name : "A managed build of " + name + " is on Nexus",
+                    copies.isEmpty() ? "New on Nexus: " + name : "A version of " + name + " that the dashboard can manage is on Nexus",
                     deployed + (copies.isEmpty() ? "Not in your Solor folder."
-                            : "You have " + String.join(", ", copies) + ", which the dashboard does not manage;"
-                                    + " this build carries its descriptor."),
+                            : "You have " + String.join(", ", copies) + ", which the dashboard cannot manage. This version"
+                                    + " includes the description the dashboard needs."),
                     Optional.empty(), Optional.of(new NoticeAction.Download(offer.coordinate(), offer.classifier())),
                     inputs.nexusChecked()));
         }
