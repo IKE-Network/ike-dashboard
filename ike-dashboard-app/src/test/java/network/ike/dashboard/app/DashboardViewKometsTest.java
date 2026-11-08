@@ -99,6 +99,72 @@ class DashboardViewKometsTest {
         write(drawn.get(30, TimeUnit.SECONDS), Path.of("target", "dashboard-komets.png"));
     }
 
+    @Test
+    void aPinnedKnowledgeBaseOpensInItsKometAndTheLatestOtherwise() {
+        KnowledgeBase format2 = store("pizza-kb", "2");
+        List<KometInstallation> all = List.of(NEWEST, OLDER, OLDEST);
+
+        assertThat(LauncherChoice.choose(all, format2, Optional.empty())).contains(NEWEST);
+        assertThat(LauncherChoice.choose(all, format2, Optional.of(OLDER.version()))).contains(OLDER);
+        assertThat(LauncherChoice.choose(all, format2, Optional.of("26.0101.1"))).as("a pin not installed: the latest")
+                .contains(NEWEST);
+        assertThat(LauncherChoice.choose(all, store("pizza-kb", "3"), Optional.of(OLDER.version())))
+                .as("a pin that cannot open it: the latest that can").contains(NEWEST);
+    }
+
+    @Test
+    void theKnowledgeBaseSaysWhichKometItOpensInAndThePinShowsOnTheKometTab() throws Exception {
+        CompletableFuture<List<String>> choices = new CompletableFuture<>();
+        CompletableFuture<String> chosen = new CompletableFuture<>();
+        CompletableFuture<List<String>> kometWords = new CompletableFuture<>();
+        CompletableFuture<List<String>> missingWords = new CompletableFuture<>();
+        CompletableFuture<WritableImage> drawn = new CompletableFuture<>();
+        Platform.runLater(() -> {
+            try {
+                KometPins pins = KometPins.inMemory();
+                pins.pin("pizza-kb", Optional.of(OLDER.version()));
+                DashboardView view = new DashboardView();
+                view.setKomets(List.of(NEWEST, OLDER, OLDEST));
+                view.setFamilies(List.of(new KnowledgeBaseFamily("pizza-kb", List.of(store("pizza-kb", "2")))));
+                view.setKometPins(pins);
+                Scene scene = new Scene(view, 1080, 420);
+                view.select("pizza-kb");
+                view.applyCss();
+                view.layout();
+                javafx.scene.control.ChoiceBox<?> in = (javafx.scene.control.ChoiceBox<?>) view.lookup(".choice-box");
+                choices.complete(in.getItems().stream().map(item -> in.getConverter() == null ? String.valueOf(item)
+                        : ((javafx.util.StringConverter<Object>) (javafx.util.StringConverter<?>) in.getConverter()).toString(item)).toList());
+                chosen.complete(((javafx.util.StringConverter<Object>) (javafx.util.StringConverter<?>) in.getConverter())
+                        .toString(in.getValue()));
+                drawn.complete(scene.snapshot(null));
+                view.showKomets();
+                view.applyCss();
+                view.layout();
+                kometWords.complete(Words.of(view));
+                pins.pin("pizza-kb", Optional.of("26.0101.1"));
+                view.select("pizza-kb");
+                view.showKnowledgeBases();
+                view.applyCss();
+                view.layout();
+                missingWords.complete(Words.of(view));
+            } catch (RuntimeException | AssertionError e) {
+                choices.completeExceptionally(e);
+                chosen.completeExceptionally(e);
+                kometWords.completeExceptionally(e);
+                missingWords.completeExceptionally(e);
+                drawn.completeExceptionally(e);
+            }
+        });
+
+        assertThat(choices.get(30, TimeUnit.SECONDS)).containsExactly("Latest Komet (26.1108.1917)", "Komet 26.1108.1917",
+                "Komet 26.1019.900", "Komet 26.1016.346");
+        assertThat(chosen.get(30, TimeUnit.SECONDS)).isEqualTo("Komet 26.1019.900");
+        assertThat(kometWords.get(30, TimeUnit.SECONDS)).anyMatch(text -> text.contains("Set as the Komet for Pizza."));
+        assertThat(missingWords.get(30, TimeUnit.SECONDS)).anyMatch(text -> text.startsWith(
+                "This knowledge base is set to open in Komet 26.0101.1, which is not installed."));
+        write(drawn.get(30, TimeUnit.SECONDS), Path.of("target", "dashboard-komet-choice.png"));
+    }
+
     private static KometInstallation komet(String version) {
         Path bundle = Path.of("/Applications/IKE/Komet-test-does-not-exist/komet-" + version + ".app");
         return new KometInstallation("Komet Desktop " + version, version, bundle, bundle.resolve("Contents/MacOS/Komet"));

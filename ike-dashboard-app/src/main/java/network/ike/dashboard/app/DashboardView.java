@@ -32,6 +32,7 @@ import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.ChoiceBox;
 import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.ContextMenu;
@@ -135,7 +136,6 @@ public final class DashboardView extends BorderPane {
     private Stage browserWindow;
     private final VBox detail = new VBox(10);
     private final SelectableText message = SelectableText.of("");
-    private final MenuButton kometMenu = new MenuButton();
     private final Hyperlink showLog = new Hyperlink("Show last log");
 
     private List<KnowledgeBaseFamily> families = List.of();
@@ -181,6 +181,7 @@ public final class DashboardView extends BorderPane {
     private final ScrollPane kometsView = new ScrollPane(kometsBox);
     private boolean showingKomets;
     private Consumer<List<KometInstallation>> onTrashKomets = komets -> { };
+    private KometPins pins = KometPins.inMemory();
     private final VBox noticesBox = new VBox(10);
     private final ScrollPane noticesView = new ScrollPane(noticesBox);
     private SplitPane knowledgeBasesView;
@@ -350,7 +351,7 @@ public final class DashboardView extends BorderPane {
                 onOpenFile.accept(lastLog);
             }
         });
-        HBox footer = new HBox(10, message, kometMenu, showLog);
+        HBox footer = new HBox(10, message, showLog);
         footer.setAlignment(Pos.CENTER_LEFT);
         footer.setPadding(new Insets(4, 8, 6, 8));
         transfers.setPadding(new Insets(6, 8, 0, 8));
@@ -539,22 +540,11 @@ public final class DashboardView extends BorderPane {
     }
 
     private void kometChanged() {
-        kometMenu.getItems().clear();
+        // The Komet tab is where Komets are installed and removed; the switch says when a newer one is there
+        // (KEC, 2026-11-08: the footer's Komet menu was "irrelevant for this frame").
         Optional<KometRelease> newer = newerKomet();
-        String installed = komets.isEmpty() ? "No Komet installed" : "Komet " + komets.getFirst().version()
-                + (komets.size() > 1 ? " and " + (komets.size() - 1) + " older" : "");
-        kometMenu.setText(newer.map(release -> installed + "  ·  " + release.version() + " available").orElse(installed));
-        kometMenu.setStyle(newer.isPresent() ? ATTENTION : "");
-        newer.ifPresent(release -> {
-            MenuItem install = new MenuItem("Install Komet " + release.version() + " from " + release.source().label());
-            install.setDisable(installing);
-            install.setOnAction(event -> onInstallKomet.accept(release));
-            kometMenu.getItems().add(install);
-        });
-        MenuItem versions = new MenuItem("Show Komet versions");
-        versions.setOnAction(event -> showKomets());
-        kometMenu.getItems().add(versions);
-        kometMenu.setDisable(kometMenu.getItems().isEmpty());
+        kometsTab.setText(newer.isPresent() ? "Komet  ·  new" : "Komet");
+        kometsTab.setStyle(newer.isPresent() ? ATTENTION : "");
         list.refresh();
         refreshNotices();
         showDetail();
@@ -843,6 +833,17 @@ public final class DashboardView extends BorderPane {
     }
 
     /**
+     * Which Komet each knowledge base opens in: the latest, or one it is pinned to.
+     *
+     * @param kometPins the pins
+     */
+    public void setKometPins(KometPins kometPins) {
+        pins = kometPins;
+        list.refresh();
+        showDetail();
+    }
+
+    /**
      * Whether the landing page is shown.
      *
      * @return {@code true} when the notices are
@@ -977,6 +978,10 @@ public final class DashboardView extends BorderPane {
                 about.add("It is the only Komet that can open " + only.stream().map(store -> Names.of(store.name()))
                         .collect(Collectors.joining(", ")) + ".");
             }
+            List<String> pinned = pinnedTo(komet.version());
+            if (!pinned.isEmpty()) {
+                about.add("Set as the Komet for " + String.join(", ", pinned) + ".");
+            }
             if (running) {
                 about.add("It is running now.");
             }
@@ -1003,6 +1008,14 @@ public final class DashboardView extends BorderPane {
             bar.setAlignment(Pos.CENTER_RIGHT);
             box.getChildren().add(bar);
         }
+    }
+
+    /** The knowledge bases set to open in a Komet version, by their names. */
+    private List<String> pinnedTo(String version) {
+        return pins.all().entrySet().stream().filter(entry -> entry.getValue().equals(version))
+                .map(entry -> families.stream().filter(family -> family.name().equals(entry.getKey())).findFirst()
+                        .map(KnowledgeBaseFamily::displayName).orElse(entry.getKey()))
+                .sorted().toList();
     }
 
     /** A folder as a person reads it: the home folder as {@code ~}. */
@@ -1035,6 +1048,13 @@ public final class DashboardView extends BorderPane {
         }
         text.append("Your knowledge bases are not changed. You can restore a Komet from the ").append(Finder.trashName())
                 .append(" if you need it.");
+        List<String> pinned = removing.stream().flatMap(komet -> pinnedTo(komet.version()).stream()).distinct().toList();
+        if (!pinned.isEmpty()) {
+            text.append("\n\n").append(String.join(", ", pinned)).append(pinned.size() == 1 ? " is" : " are")
+                    .append(" set to open in ").append(removing.size() == 1 ? "this Komet" : "one of these Komets")
+                    .append(". After this, ").append(pinned.size() == 1 ? "it opens" : "they open")
+                    .append(" in the latest Komet.");
+        }
         if (!stranded.isEmpty()) {
             text.append("\n\nAfter this, no installed Komet can open ")
                     .append(stranded.stream().map(store -> Names.of(store.name())).collect(Collectors.joining(", ")))
@@ -1563,7 +1583,7 @@ public final class DashboardView extends BorderPane {
     }
 
     private Optional<KometInstallation> launcher(KnowledgeBase copy) {
-        return LauncherChoice.choose(komets, copy);
+        return LauncherChoice.choose(komets, copy, pins.of(KnowledgeBaseFamily.familyName(copy)));
     }
 
     private void showDetail() {
@@ -1688,10 +1708,55 @@ public final class DashboardView extends BorderPane {
         open.setStyle("-fx-font-size: 14px; -fx-padding: 6 28 6 28;");
         open.setDisable(komet.isEmpty());
         open.setOnAction(event -> komet.ifPresent(chosen -> onOpen.accept(chosen, copy)));
-        HBox actions = new HBox(8, open, moreMenu(copy));
+        HBox actions = new HBox(8, open);
+        String pinKey = KnowledgeBaseFamily.familyName(copy);
+        Optional<String> pin = pins.of(pinKey);
+        List<KometInstallation> readers = komets.stream().filter(candidate -> LauncherChoice.reads(candidate, copy)).toList();
+        if (!readers.isEmpty()) {
+            // Which Komet it opens in, chosen here for this knowledge base (KEC, 2026-11-08): the latest, or a pin.
+            ChoiceBox<KometChoice> in = new ChoiceBox<>();
+            in.getItems().add(new KometChoice("Latest Komet (" + readers.getFirst().version() + ")", Optional.empty()));
+            readers.forEach(reader -> in.getItems().add(new KometChoice("Komet " + reader.version(), Optional.of(reader.version()))));
+            pin.filter(version -> readers.stream().noneMatch(reader -> reader.version().equals(version)))
+                    .ifPresent(missing -> in.getItems().add(new KometChoice("Komet " + missing + ", not installed",
+                            Optional.of(missing))));
+            in.getSelectionModel().select(in.getItems().stream().filter(choice -> choice.version().equals(pin))
+                    .findFirst().orElse(in.getItems().getFirst()));
+            in.setConverter(new javafx.util.StringConverter<>() {
+                @Override
+                public String toString(KometChoice choice) {
+                    return choice == null ? "" : choice.label();
+                }
+
+                @Override
+                public KometChoice fromString(String text) {
+                    return null;
+                }
+            });
+            in.setOnAction(event -> {
+                KometChoice chosen = in.getValue();
+                if (chosen != null && !chosen.version().equals(pins.of(pinKey))) {
+                    pins.pin(pinKey, chosen.version());
+                    showDetail();
+                }
+            });
+            Tooltip.install(in, new Tooltip("The Komet this knowledge base opens in. Latest follows each new Komet you"
+                    + " install; a version stays until you change it."));
+            Label inLabel = new Label("in");
+            inLabel.setStyle(MUTED);
+            actions.getChildren().addAll(inLabel, in);
+        }
+        actions.getChildren().add(moreMenu(copy));
         actions.setAlignment(Pos.CENTER_LEFT);
         actions.setPadding(new Insets(6, 0, 0, 0));
         detail.getChildren().add(actions);
+        pin.filter(version -> readers.stream().noneMatch(reader -> reader.version().equals(version)))
+                .ifPresent(missing -> {
+                    SelectableText gone = SelectableText.of("This knowledge base is set to open in Komet " + missing
+                            + ", which is not installed. It opens in the latest Komet until you choose another.");
+                    gone.setStyle(PROBLEM);
+                    detail.getChildren().add(gone);
+                });
         if (StoreLock.openInKomet(copy.path())) {
             detail.getChildren().add(muted("Open in a Komet now."));
         }
@@ -1714,8 +1779,6 @@ public final class DashboardView extends BorderPane {
                 row.setAlignment(Pos.CENTER_LEFT);
                 detail.getChildren().add(row);
             });
-        } else if (komet.get() != komets.getFirst()) {
-            detail.getChildren().add(muted("Opens in Komet " + komet.get().version()));
         }
         komet.flatMap(chosen -> heapPlanner.apply(chosen, copy))
                 .ifPresent(plan -> detail.getChildren().add(HeapView.line(plan, komet.get(), copy)));
@@ -2215,6 +2278,10 @@ public final class DashboardView extends BorderPane {
         SelectableText area = SelectableText.of(text);
         area.setStyle(MUTED);
         return area;
+    }
+
+    /** One choice of the Komet a knowledge base opens in: the latest, or a pinned version. */
+    private record KometChoice(String label, Optional<String> version) {
     }
 
     /** A line of the list: the icon, the name, and a mark only when something needs attention. */

@@ -58,7 +58,9 @@ From then on it updates itself (see [Self-update](#self-update)). The links neve
   first, each with one action, and Show for a card about one knowledge base
   (`IKE-Network/ike-issues#1357`). *Komet*, between them, lists every installed Komet with where it is and what it is used for, and
   moves old ones to the Trash, one at a time or all the older ones together; it refuses a running Komet and names
-  any knowledge base no remaining Komet could open (`IKE-Network/ike-issues#1363`).
+  any knowledge base no remaining Komet could open (`IKE-Network/ike-issues#1363`). Each knowledge base opens in the
+  Komet chosen beside its Open button: *Latest Komet*, which follows each new install, or one installed version,
+  pinned until changed and kept in the `kometPins` preferences (`IKE-Network/ike-issues#1365`).
   A dialog names the copy it acts on by its folder (`solor-gudid-kb in ~/Solor`), since a knowledge base can
   have several copies, and the window's and every dialog's words can be selected and copied, read-only, with
   file, folder and path names in bold (`IKE-Network/ike-issues#1358`, `#1359`, `#1361`). A store is open in a

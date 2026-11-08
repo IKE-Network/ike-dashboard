@@ -90,6 +90,25 @@ public final class LauncherChoice {
     }
 
     /**
+     * The Komet a store opens with when it may be pinned (KEC, 2026-11-08): the pinned version when it is
+     * installed and reads the store, otherwise the newest Komet that reads it.
+     *
+     * @param komets        the Komets installed, newest first
+     * @param knowledgeBase the store
+     * @param pin           the Komet version the store is pinned to, or empty for the latest
+     * @return the Komet, or empty when none reads it
+     */
+    public static Optional<KometInstallation> choose(List<KometInstallation> komets, KnowledgeBase knowledgeBase,
+                                                     Optional<String> pin) {
+        if (!knowledgeBase.kind().opensInKomet()) {
+            return Optional.empty();
+        }
+        return pin.flatMap(version -> komets.stream().filter(komet -> komet.version().equals(version)
+                        && reads(komet, knowledgeBase)).findFirst())
+                .or(() -> choose(komets, knowledgeBase));
+    }
+
+    /**
      * Whether a Komet reads a store.
      *
      * @param komet         the Komet
