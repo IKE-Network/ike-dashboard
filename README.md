@@ -51,12 +51,14 @@ From then on it updates itself (see [Self-update](#self-update)). The links neve
   says about itself, asks Nexus whether a newer build is deployed, lists the Komet versions
   installed, and opens a knowledge base in a chosen Komet as an independent process. Also a headless
   `DashboardCommand` (`list`, `check`, `notices`, `komets`, `download <g:a:v> <classifier>`,
-  `dashboard-latest`, `self-update [application]`). The window has two views, one switch across its top:
+  `dashboard-latest`, `self-update [application]`). The window has three views, one switch across its top:
   *Knowledge Bases*, the list and the chosen one's detail, and *Notices*, the first screen, across the
   window: one card per finding of its checks (newer builds, knowledge bases not yet downloaded, a newer
   Komet, a newer dashboard, the sync state of the git repositories inside each store), work at risk
   first, each with one action, and Show for a card about one knowledge base
-  (`IKE-Network/ike-issues#1357`).
+  (`IKE-Network/ike-issues#1357`). *Komet*, between them, lists every installed Komet with where it is and what it is used for, and
+  moves old ones to the Trash, one at a time or all the older ones together; it refuses a running Komet and names
+  any knowledge base no remaining Komet could open (`IKE-Network/ike-issues#1363`).
   A dialog names the copy it acts on by its folder (`solor-gudid-kb in ~/Solor`), since a knowledge base can
   have several copies, and the window's and every dialog's words can be selected and copied, read-only, with
   file, folder and path names in bold (`IKE-Network/ike-issues#1358`, `#1359`, `#1361`). A store is open in a

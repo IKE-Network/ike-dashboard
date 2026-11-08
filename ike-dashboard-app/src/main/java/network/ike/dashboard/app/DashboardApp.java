@@ -164,6 +164,7 @@ public final class DashboardApp extends Application {
         view.browser().setHeapRule(HeapSizing.Rule.read(heapPreferences));
         view.setOnDownload(this::download);
         view.setOnTrash(this::trash);
+        view.setOnTrashKomets(this::trashKomets);
         view.setOnBrowse(this::loadCatalog);
         view.setOnInstallKomet(this::installKomet);
         view.setOnUpgrade(this::upgrade);
@@ -904,6 +905,36 @@ public final class DashboardApp extends Application {
         SelfUpdate.swap(where, staged, ProcessHandle.current().pid(), SelfUpdate.relaunch(where.target()),
                 settings.logFolder().resolve("self-update.log"));
         Platform.runLater(Platform::exit);
+    }
+
+    /**
+     * Moves Komet versions to the Trash (KEC, 2026-11-08). Knowledge bases are not touched, and the Trash can put a
+     * Komet back.
+     */
+    private void trashKomets(List<KometInstallation> removing) {
+        List<Path> bundles = removing.stream().map(KometInstallation::bundle).toList();
+        if (!claim("move to the " + Finder.trashName(), bundles)) {
+            return;
+        }
+        String what = removing.size() == 1 ? "Komet " + removing.getFirst().version() : removing.size() + " Komets";
+        view.setMessage("Moving " + what + " to the " + Finder.trashName() + " …");
+        files.submit(() -> {
+            try {
+                Finder.trash(bundles);
+                Platform.runLater(() -> {
+                    refresh();
+                    view.setMessage("Moved " + what + " to the " + Finder.trashName() + ". You can restore "
+                            + (removing.size() == 1 ? "it" : "them") + " from there if you need to.");
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    view.setMessage("Could not move " + what + " to the " + Finder.trashName() + ": " + e.getMessage());
+                    refresh();
+                });
+            } finally {
+                release(bundles);
+            }
+        });
     }
 
     private void trash(List<KnowledgeBase> copies) {

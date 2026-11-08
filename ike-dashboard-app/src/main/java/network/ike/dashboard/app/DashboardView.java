@@ -170,6 +170,11 @@ public final class DashboardView extends BorderPane {
      */
     private final ToggleButton knowledgeBasesTab = new ToggleButton("Knowledge Bases");
     private final ToggleButton noticesTab = new ToggleButton("Notices");
+    private final ToggleButton kometsTab = new ToggleButton("Komet");
+    private final VBox kometsBox = new VBox(10);
+    private final ScrollPane kometsView = new ScrollPane(kometsBox);
+    private boolean showingKomets;
+    private Consumer<List<KometInstallation>> onTrashKomets = komets -> { };
     private final VBox noticesBox = new VBox(10);
     private final ScrollPane noticesView = new ScrollPane(noticesBox);
     private SplitPane knowledgeBasesView;
@@ -230,9 +235,12 @@ public final class DashboardView extends BorderPane {
         ToggleGroup views = new ToggleGroup();
         knowledgeBasesTab.setToggleGroup(views);
         noticesTab.setToggleGroup(views);
+        kometsTab.setToggleGroup(views);
         knowledgeBasesTab.getStyleClass().add("left-pill");
+        kometsTab.getStyleClass().add("center-pill");
         noticesTab.getStyleClass().add("right-pill");
         knowledgeBasesTab.setMinWidth(Region.USE_PREF_SIZE);
+        kometsTab.setMinWidth(Region.USE_PREF_SIZE);
         noticesTab.setMinWidth(Region.USE_PREF_SIZE);
         noticesTab.setSelected(true);
         views.selectedToggleProperty().addListener((observable, was, now) -> {
@@ -242,11 +250,13 @@ public final class DashboardView extends BorderPane {
             }
             if (now == noticesTab) {
                 showNotices();
+            } else if (now == kometsTab) {
+                showKomets();
             } else {
                 showKnowledgeBases();
             }
         });
-        HBox viewBar = new HBox(knowledgeBasesTab, noticesTab);
+        HBox viewBar = new HBox(knowledgeBasesTab, kometsTab, noticesTab);
         viewBar.setAlignment(Pos.CENTER);
         viewBar.setPadding(new Insets(8, 8, 6, 8));
         setTop(viewBar);
@@ -262,6 +272,7 @@ public final class DashboardView extends BorderPane {
         list.getSelectionModel().selectedItemProperty().addListener((observable, was, now) -> {
             if (now != null) {
                 showingNotices = false;
+                showingKomets = false;
                 knowledgeBasesTab.setSelected(true);
             }
             showDetail();
@@ -276,6 +287,7 @@ public final class DashboardView extends BorderPane {
         unmanagedList.getSelectionModel().selectedItemProperty().addListener((observable, was, now) -> {
             if (now != null) {
                 showingNotices = false;
+                showingKomets = false;
                 knowledgeBasesTab.setSelected(true);
                 list.getSelectionModel().clearSelection();
             }
@@ -309,6 +321,9 @@ public final class DashboardView extends BorderPane {
         noticesBox.setPadding(new Insets(16, 24, 20, 24));
         noticesView.setFitToWidth(true);
         noticesView.setStyle("-fx-background-color: transparent; -fx-background-insets: 0;");
+        kometsBox.setPadding(new Insets(16, 24, 20, 24));
+        kometsView.setFitToWidth(true);
+        kometsView.setStyle("-fx-background-color: transparent; -fx-background-insets: 0;");
         setCenter(noticesView);
 
         message.setMaxWidth(Double.MAX_VALUE);
@@ -520,11 +535,9 @@ public final class DashboardView extends BorderPane {
             install.setOnAction(event -> onInstallKomet.accept(release));
             kometMenu.getItems().add(install);
         });
-        komets.forEach(komet -> {
-            MenuItem item = new MenuItem("Komet " + komet.version() + "  —  " + komet.name());
-            item.setOnAction(event -> onReveal.accept(komet.bundle()));
-            kometMenu.getItems().add(item);
-        });
+        MenuItem versions = new MenuItem("Show Komet versions");
+        versions.setOnAction(event -> showKomets());
+        kometMenu.getItems().add(versions);
         kometMenu.setDisable(kometMenu.getItems().isEmpty());
         list.refresh();
         refreshNotices();
@@ -754,6 +767,7 @@ public final class DashboardView extends BorderPane {
         // Nothing stays selected behind the notices, so a refresh re-selecting it cannot take the person away.
         lastChosen = selected().map(KnowledgeBaseFamily::name).orElse(lastChosen);
         showingNotices = true;
+        showingKomets = false;
         noticesTab.setSelected(true);
         list.getSelectionModel().clearSelection();
         unmanagedList.getSelectionModel().clearSelection();
@@ -765,6 +779,7 @@ public final class DashboardView extends BorderPane {
      */
     public void showKnowledgeBases() {
         showingNotices = false;
+        showingKomets = false;
         knowledgeBasesTab.setSelected(true);
         if (list.getSelectionModel().isEmpty() && unmanagedList.getSelectionModel().isEmpty()) {
             String last = lastChosen;
@@ -777,6 +792,38 @@ public final class DashboardView extends BorderPane {
             }
         }
         showDetail();
+    }
+
+    /**
+     * Shows the Komet versions installed on this machine, across the window, each with what it is used for and
+     * Move to Trash (KEC, 2026-11-08). The knowledge base chosen stays chosen.
+     */
+    public void showKomets() {
+        lastChosen = selected().map(KnowledgeBaseFamily::name).orElse(lastChosen);
+        showingKomets = true;
+        showingNotices = false;
+        kometsTab.setSelected(true);
+        list.getSelectionModel().clearSelection();
+        unmanagedList.getSelectionModel().clearSelection();
+        showDetail();
+    }
+
+    /**
+     * Whether the Komet versions are shown.
+     *
+     * @return {@code true} when they are
+     */
+    public boolean showingKomets() {
+        return showingKomets;
+    }
+
+    /**
+     * What Move to Trash does for Komet versions.
+     *
+     * @param action given the Komets to move
+     */
+    public void setOnTrashKomets(Consumer<List<KometInstallation>> action) {
+        onTrashKomets = action;
     }
 
     /**
@@ -865,6 +912,123 @@ public final class DashboardView extends BorderPane {
                 .map(checked -> checked.current() ? "Nexus checked " + WHEN.format(checked.checkedAt())
                         : "Could not reach Nexus. This is what it listed at " + WHEN.format(checked.checkedAt()) + ".")
                 .orElse("Nexus not checked yet")));
+    }
+
+    private void showKometsPane() {
+        VBox box = kometsBox;
+        box.getChildren().clear();
+        SelectableText title = SelectableText.of("Komet");
+        title.setStyle("-fx-font-size: 20px; -fx-font-weight: bold;");
+        box.getChildren().add(title);
+        newerKomet().ifPresent(release -> {
+            SelectableText about = SelectableText.of("Komet " + release.version() + " is available from "
+                    + release.source().label() + (release.sizeBytes() > 0 ? ", " + DashboardCommand.size(release.sizeBytes()) : "")
+                    + ". It installs next to the Komets you have.");
+            HBox.setHgrow(about, Priority.ALWAYS);
+            Button install = new Button(installing ? "Installing …" : "Install Komet " + release.version());
+            install.setDisable(installing);
+            install.setMinWidth(Region.USE_PREF_SIZE);
+            install.setOnAction(event -> onInstallKomet.accept(release));
+            HBox row = new HBox(10, about, install);
+            row.setAlignment(Pos.CENTER_LEFT);
+            row.setPadding(new Insets(8, 10, 8, 10));
+            row.setStyle("-fx-background-radius: 6; -fx-background-color: #fff3e0;");
+            box.getChildren().add(row);
+        });
+        if (komets.isEmpty()) {
+            box.getChildren().add(muted("No Komet is installed."));
+            return;
+        }
+        List<KnowledgeBase> stores = families.stream().flatMap(family -> family.members().stream()).toList();
+        List<KometInstallation> older = new ArrayList<>();
+        for (KometInstallation komet : komets) {
+            boolean running = KometRemoval.running(komet);
+            boolean newest = komet == komets.getFirst();
+            if (!newest && !running) {
+                older.add(komet);
+            }
+            SelectableText heading = SelectableText.of("Komet " + komet.version());
+            heading.setStyle("-fx-font-weight: bold;");
+            List<String> about = new ArrayList<>();
+            about.add(Names.of(komet.bundle().getFileName()) + " in " + Names.of(shownFolder(komet.bundle().getParent())) + ".");
+            if (newest) {
+                about.add("This is the newest. Knowledge bases open in it unless they need another.");
+            }
+            List<KnowledgeBase> only = KometRemoval.stranded(komets, List.of(komet), stores);
+            if (!only.isEmpty()) {
+                about.add("It is the only Komet that can open " + only.stream().map(store -> Names.of(store.name()))
+                        .collect(Collectors.joining(", ")) + ".");
+            }
+            if (running) {
+                about.add("It is running now.");
+            }
+            VBox text = new VBox(2, heading, muted(String.join(" ", about)));
+            HBox.setHgrow(text, Priority.ALWAYS);
+            text.setMaxWidth(Double.MAX_VALUE);
+            Button reveal = new Button("Show in " + Finder.name());
+            reveal.setMinWidth(Region.USE_PREF_SIZE);
+            reveal.setOnAction(event -> onReveal.accept(komet.bundle()));
+            Button trash = new Button("Move to " + Finder.trashName() + "…");
+            trash.setMinWidth(Region.USE_PREF_SIZE);
+            trash.setDisable(running);
+            trash.setOnAction(event -> confirmTrashKomets(List.of(komet)));
+            HBox row = new HBox(10, text, reveal, trash);
+            row.setAlignment(Pos.CENTER_LEFT);
+            row.setPadding(new Insets(8, 10, 8, 10));
+            row.setStyle("-fx-background-radius: 6; -fx-background-color: " + (newest ? "#eef6ee;" : "#f4f6f8;"));
+            box.getChildren().add(row);
+        }
+        if (older.size() > 1) {
+            Button all = new Button("Move " + older.size() + " older Komets to the " + Finder.trashName() + "…");
+            all.setOnAction(event -> confirmTrashKomets(List.copyOf(older)));
+            HBox bar = new HBox(all);
+            bar.setAlignment(Pos.CENTER_RIGHT);
+            box.getChildren().add(bar);
+        }
+    }
+
+    /** A folder as a person reads it: the home folder as {@code ~}. */
+    private static String shownFolder(java.nio.file.Path folder) {
+        java.nio.file.Path home = java.nio.file.Path.of(System.getProperty("user.home")).toAbsolutePath();
+        java.nio.file.Path absolute = folder.toAbsolutePath();
+        return absolute.startsWith(home) && !absolute.equals(home)
+                ? "~/" + home.relativize(absolute).toString().replace('\\', '/') : absolute.toString();
+    }
+
+    /** Asks before moving Komet versions to the Trash, naming what no Komet could open afterwards. */
+    private void confirmTrashKomets(List<KometInstallation> removing) {
+        List<String> running = removing.stream().filter(KometRemoval::running)
+                .map(komet -> "Komet " + komet.version() + " is running. Quit it, then try again.").toList();
+        if (!running.isEmpty()) {
+            showRefusals("Move to " + Finder.trashName(), running);
+            return;
+        }
+        List<KnowledgeBase> stranded = KometRemoval.stranded(komets,
+                removing, families.stream().flatMap(family -> family.members().stream()).toList());
+        Alert alert = new Alert(stranded.isEmpty() ? Alert.AlertType.CONFIRMATION : Alert.AlertType.WARNING);
+        alert.setTitle("Move to " + Finder.trashName());
+        alert.setHeaderText(removing.size() == 1 ? "Move Komet " + removing.getFirst().version() + " to the "
+                + Finder.trashName() + "?" : "Move " + removing.size() + " older Komets to the " + Finder.trashName() + "?");
+        StringBuilder text = new StringBuilder();
+        if (removing.size() > 1) {
+            removing.forEach(komet -> text.append("Komet ").append(komet.version()).append(", ")
+                    .append(Names.of(komet.bundle().getFileName())).append('\n'));
+            text.append('\n');
+        }
+        text.append("Your knowledge bases are not changed. You can restore a Komet from the ").append(Finder.trashName())
+                .append(" if you need it.");
+        if (!stranded.isEmpty()) {
+            text.append("\n\nAfter this, no installed Komet can open ")
+                    .append(stranded.stream().map(store -> Names.of(store.name())).collect(Collectors.joining(", ")))
+                    .append(". Keep the Komet they need, or install a newer one first.");
+        }
+        alert.setContentText(text.toString());
+        alert.getButtonTypes().setAll(ButtonType.CANCEL, ButtonType.OK);
+        if (getScene() != null) {
+            alert.initOwner(getScene().getWindow());
+        }
+        SelectableText.in(alert);
+        alert.showAndWait().filter(ButtonType.OK::equals).ifPresent(ok -> onTrashKomets.accept(removing));
     }
 
     private Node noticeCard(Notice notice) {
@@ -1343,7 +1507,7 @@ public final class DashboardView extends BorderPane {
         listings.setAll(families.stream().sorted(order).toList());
         updateBanner();
         refreshNotices();
-        if (showingNotices && keep == null) {
+        if ((showingNotices || showingKomets) && keep == null) {
             return;
         }
         Optional<KnowledgeBaseFamily> again = shown.stream().filter(family -> family.name().equals(keep)).findFirst()
@@ -1356,6 +1520,11 @@ public final class DashboardView extends BorderPane {
     }
 
     private void showDetail() {
+        if (showingKomets) {
+            setCenter(kometsView);
+            showKometsPane();
+            return;
+        }
         if (showingNotices) {
             setCenter(noticesView);
             showNoticesPane();
