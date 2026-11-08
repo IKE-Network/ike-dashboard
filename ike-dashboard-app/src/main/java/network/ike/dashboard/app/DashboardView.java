@@ -60,6 +60,7 @@ import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 
@@ -120,9 +121,10 @@ public final class DashboardView extends BorderPane {
     private final TextField search = new TextField();
     private final ToggleButton byName = new ToggleButton("Name");
     private final ToggleButton byRecent = new ToggleButton("Recent");
-    private final Button refresh = new Button("Refresh");
+    private final Button refresh = new Button("↻");
     private final Label updates = new Label();
-    private final Button updateAll = new Button("Upgrade all");
+    /** Opens the notices, where each newer version is offered folder by folder, each with its own confirmation. */
+    private final Hyperlink updateAll = new Hyperlink("Show");
     private final HBox updateBar = new HBox(8);
     private final Button fromNexus = new Button("Get from Nexus…");
     private final NexusBrowser browser = new NexusBrowser();
@@ -211,14 +213,15 @@ public final class DashboardView extends BorderPane {
             rebuild();
             onSortChange.accept(now == byRecent);
         });
-        for (Button button : List.of(refresh, updateAll, fromNexus)) {
+        updateAll.setMinWidth(Region.USE_PREF_SIZE);
+        for (Button button : List.of(refresh, fromNexus)) {
             button.setMinWidth(Region.USE_PREF_SIZE);
         }
         byName.setMinWidth(Region.USE_PREF_SIZE);
         byRecent.setMinWidth(Region.USE_PREF_SIZE);
         HBox sortControl = new HBox(byName, byRecent);
         sortControl.setMinWidth(Region.USE_PREF_SIZE);
-        HBox listBar = new HBox(6, search, sortControl, refresh);
+        HBox listBar = new HBox(6, search, sortControl);
         listBar.setAlignment(Pos.CENTER_LEFT);
         listBar.setPadding(new Insets(8));
 
@@ -231,7 +234,9 @@ public final class DashboardView extends BorderPane {
         updateBar.setStyle("-fx-background-color: #fff3e0;");
         updateBar.managedProperty().bind(updateBar.visibleProperty());
         updateBar.setVisible(false);
-        updateAll.setOnAction(event -> newerBuilds().forEach(this::upgradeOrCopy));
+        // No "Upgrade all" (KEC, 2026-11-08): a knowledge base can have several folders, and each is upgraded on its
+        // own, after a confirmation that names it.
+        updateAll.setOnAction(event -> showNotices());
         ToggleGroup views = new ToggleGroup();
         knowledgeBasesTab.setToggleGroup(views);
         noticesTab.setToggleGroup(views);
@@ -256,9 +261,16 @@ public final class DashboardView extends BorderPane {
                 showKnowledgeBases();
             }
         });
-        HBox viewBar = new HBox(knowledgeBasesTab, kometsTab, noticesTab);
-        viewBar.setAlignment(Pos.CENTER);
-        viewBar.setPadding(new Insets(8, 8, 6, 8));
+        HBox views3 = new HBox(knowledgeBasesTab, kometsTab, noticesTab);
+        views3.setAlignment(Pos.CENTER);
+        views3.setMaxWidth(Region.USE_PREF_SIZE);
+        // Refresh is at the top right on every view, whichever is shown (KEC, 2026-11-08).
+        refresh.setStyle("-fx-font-size: 15px; -fx-padding: 2 9 2 9;");
+        refresh.setTooltip(new Tooltip("Refresh: look again at your knowledge bases, the Komets installed, and Nexus"));
+        refresh.setAccessibleText("Refresh");
+        StackPane viewBar = new StackPane(views3, refresh);
+        StackPane.setAlignment(refresh, Pos.CENTER_RIGHT);
+        viewBar.setPadding(new Insets(8, 12, 6, 12));
         setTop(viewBar);
         VBox masterTop = new VBox(listBar, updateBar);
 
@@ -1484,19 +1496,6 @@ public final class DashboardView extends BorderPane {
         updates.setText(newer == 1 ? "1 newer version on Nexus" : newer + " newer versions on Nexus");
     }
 
-    private void upgradeOrCopy(KnowledgeBaseFamily family) {
-        family.latestIdentified().ifPresent(identified -> identified.coordinate()
-                .filter(coordinate -> !transferring(downloadKey(coordinate, identified.kind().classifier()))
-                        && !transferring(upgradeKey(identified.path())))
-                .ifPresent(coordinate -> {
-                    if (LauncherChoice.chooseForLoad(komets, identified).isPresent()) {
-                        onUpgrade.accept(new NoticeAction.Upgrade(identified, coordinate, identified.kind().classifier()));
-                    } else {
-                        onDownload.accept(coordinate, identified.kind().classifier());
-                    }
-                }));
-    }
-
     private void rebuild() {
         String keep = selected().map(KnowledgeBaseFamily::name).orElse(null);
         Comparator<KnowledgeBaseFamily> byNameOrder = Comparator.comparing(family -> family.name().toLowerCase(Locale.ROOT));
@@ -1615,7 +1614,7 @@ public final class DashboardView extends BorderPane {
             upgrade.setMinWidth(Region.USE_PREF_SIZE);
             upgrade.setOnAction(event -> identified.coordinate().ifPresent(coordinate ->
                     confirmUpgrade(new NoticeAction.Upgrade(identified, coordinate, classifier))));
-            Button copyBeside = new Button(downloading ? "Downloading …" : "Install a copy");
+            Button copyBeside = new Button(downloading ? "Downloading …" : "Install a new copy");
             copyBeside.setDisable(downloading || upgrading);
             copyBeside.setMinWidth(Region.USE_PREF_SIZE);
             copyBeside.setOnAction(event -> identified.coordinate()
@@ -1629,7 +1628,7 @@ public final class DashboardView extends BorderPane {
                     ? "Upgrade keeps your change sets, preferences and repositories. The old version goes to the "
                             + Finder.trashName() + "."
                     : "To upgrade this folder you need Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE + " or later. Until"
-                            + " then, Install a copy puts the new version in a separate folder."));
+                            + " then, Install a new copy puts the new version in a separate folder."));
             box.setPadding(new Insets(8, 10, 8, 10));
             box.setStyle("-fx-background-color: #fff3e0; -fx-background-radius: 6;");
             detail.getChildren().add(box);
@@ -1928,7 +1927,7 @@ public final class DashboardView extends BorderPane {
         String heading = name + " (" + copies.size() + ")  ·  " + DashboardCommand.size(bytes);
         TableView<KnowledgeBase> table = copiesTable(copies);
         if (trashAll) {
-            table.getColumns().add(nexusColumn());
+            table.getColumns().addAll(List.of(nexusColumn(), trashColumn()));
         }
         TitledPane pane = new TitledPane(heading, table);
         pane.setExpanded(expanded);
@@ -1936,13 +1935,10 @@ public final class DashboardView extends BorderPane {
         if (!trashAll) {
             return pane;
         }
-        Button trash = new Button("Move to " + Finder.trashName() + "…");
-        trash.setOnAction(event -> confirmTrash(copies));
-        HBox bar = new HBox(trash);
-        bar.setAlignment(Pos.CENTER_RIGHT);
-        VBox box = new VBox(4, pane, bar);
+        // Each folder is moved to the Trash on its own, from its row (KEC, 2026-11-08), never all at once.
+        VBox box = new VBox(4, pane);
         if (copies.stream().anyMatch(copy -> upgradeOf(copy).isPresent())) {
-            box.getChildren().add(1, muted("Each folder is a separate copy. Upgrade updates only that folder to the"
+            box.getChildren().add(muted("Each folder is a separate copy. Upgrade updates only that folder to the"
                     + " latest version, and keeps its change sets, preferences and repositories."));
         }
         return box;
@@ -1975,6 +1971,31 @@ public final class DashboardView extends BorderPane {
                 } else {
                     setText(standing(copy));
                 }
+            }
+        });
+        return column;
+    }
+
+    /** Move to Trash for one folder, on its own row. */
+    private TableColumn<KnowledgeBase, KnowledgeBase> trashColumn() {
+        TableColumn<KnowledgeBase, KnowledgeBase> column = new TableColumn<>("");
+        column.setCellValueFactory(cell -> new ReadOnlyObjectWrapper<>(cell.getValue()));
+        column.setPrefWidth(130);
+        column.setSortable(false);
+        column.setCellFactory(view -> new javafx.scene.control.TableCell<>() {
+            @Override
+            protected void updateItem(KnowledgeBase copy, boolean empty) {
+                super.updateItem(copy, empty);
+                setText(null);
+                setGraphic(null);
+                if (empty || copy == null) {
+                    return;
+                }
+                Button button = new Button("Move to " + Finder.trashName() + "…");
+                button.setStyle("-fx-font-size: 11px; -fx-padding: 1 8 1 8;");
+                button.setDisable(upgradeBusy(copy));
+                button.setOnAction(event -> confirmTrash(List.of(copy)));
+                setGraphic(button);
             }
         });
         return column;
@@ -2109,11 +2130,10 @@ public final class DashboardView extends BorderPane {
         if (copy.kind().opensInKomet()) {
             items.add(duplicate);
         }
-        if (withOpenAndTrash) {
-            MenuItem trash = new MenuItem("Move to " + Finder.trashName() + "…");
-            trash.setOnAction(event -> confirmTrash(List.of(copy)));
-            items.add(trash);
-        }
+        MenuItem trash = new MenuItem("Move to " + Finder.trashName() + "…");
+        trash.setDisable(transferring(upgradeKey(copy.path())));
+        trash.setOnAction(event -> confirmTrash(List.of(copy)));
+        items.add(trash);
         return items;
     }
 

@@ -79,7 +79,7 @@ From then on it updates itself (see [Self-update](#self-update)). The links neve
   (`IKE-Network/ike-issues#1356`); a change set in a git repository with a remote is never moved out.
   Transfers run three at a time, one check in Komet at a time (`IKE-Network/ike-issues#1354`). Every
   failure leaves the store as it was. *Reinstall*
-  moves the store to the Trash and downloads the newest build under the same name. *Install a copy*
+  moves the store to the Trash and downloads the newest build under the same name. *Install a new copy*
   unpacks the newest build beside the copy there is, with the version appended. Nothing is ever written
   over. Older change sets are loaded by Komet at open, never rewritten: the dashboard no longer offers a
   change-set upgrade.

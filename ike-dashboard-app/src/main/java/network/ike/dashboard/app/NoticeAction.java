@@ -73,7 +73,7 @@ public sealed interface NoticeAction {
     }
 
     /**
-     * Install a copy of the newest build beside the copy the person has, with the version appended
+     * Install a new copy of the newest build beside the copy the person has, with the version appended
      * (decision 20).
      *
      * @param coordinate the knowledge base's coordinate
@@ -82,7 +82,7 @@ public sealed interface NoticeAction {
     record InstallCopy(Coordinate coordinate, String classifier) implements NoticeAction {
         @Override
         public String label() {
-            return "Install a copy";
+            return "Install a new copy";
         }
     }
 

@@ -189,7 +189,7 @@ public final class Notices {
                             ? "Upgrade updates your folder " + identified.whereShown() + " and keeps its change sets,"
                                     + " preferences and repositories. The old version goes to the "
                                     + Finder.trashName() + "."
-                            : "Install a copy puts it in a new folder and leaves yours as it is. To upgrade your folder"
+                            : "Install a new copy puts it in a new folder and leaves yours as it is. To upgrade your folder"
                                     + " you need Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE + " or later."),
                     Optional.of(family.name()),
                     Optional.of(upgradable ? new NoticeAction.Upgrade(identified, coordinate, identified.kind().classifier())

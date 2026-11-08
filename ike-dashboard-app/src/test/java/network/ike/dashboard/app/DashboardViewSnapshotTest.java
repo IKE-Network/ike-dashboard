@@ -279,9 +279,9 @@ class DashboardViewSnapshotTest {
         assertThat(families.getFirst().members()).extracting(KnowledgeBase::name)
                 .containsExactly("pizza-kb", "pizza-card-leak-demo");
         assertThat(offeredButtons.get(30, TimeUnit.SECONDS)).as("the newest folder's upgrade, and the other folder's")
-                .contains("Upgrade", "Install a copy", "Upgrade…").doesNotContain("Download", "Restore");
+                .contains("Upgrade", "Install a new copy", "Upgrade…").doesNotContain("Download", "Restore");
         assertThat(oldKometButtons.get(30, TimeUnit.SECONDS)).as("without a Komet that checks the new build, only a copy")
-                .contains("Install a copy").doesNotContain("Upgrade");
+                .contains("Install a new copy").doesNotContain("Upgrade");
         assertThat(oldKometTexts.get(30, TimeUnit.SECONDS))
                 .anyMatch(text -> text.startsWith("To upgrade this folder you need Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE))
                 .anyMatch(text -> text.startsWith("Each folder is a separate copy"))
