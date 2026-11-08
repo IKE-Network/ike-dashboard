@@ -73,7 +73,7 @@ class SelectableTextTest {
     @Test
     void aCopyOutsideTheHomeFolderIsNamedByItsWholePath() {
         assertThat(Names.plain(copy(Path.of("/Volumes/Data/Solor/solor-gudid-kb")).whereShown()))
-                .isEqualTo("solor-gudid-kb in /Volumes/Data/Solor");
+                .isEqualTo("solor-gudid-kb in " + Path.of("/Volumes/Data/Solor").toAbsolutePath());
         assertThat(Names.plain("plain")).isEqualTo("plain");
     }
 

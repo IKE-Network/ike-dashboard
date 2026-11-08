@@ -67,7 +67,8 @@ class NoticesTest {
 
         assertThat(withChecker).singleElement().satisfies(notice -> {
             assertThat(notice.action()).contains(new NoticeAction.Upgrade(latest, PIZZA, "rkb"));
-            assertThat(Names.plain(notice.detail())).contains("Upgrade updates your folder pizza-kb in /Solor and keeps its change sets, preferences and repositories");
+            assertThat(Names.plain(notice.detail())).contains("Upgrade updates your folder pizza-kb in " + Path.of("/Solor").toAbsolutePath()
+                    + " and keeps its change sets, preferences and repositories");
         });
         assertThat(without).singleElement().satisfies(notice -> {
             assertThat(notice.action()).contains(new NoticeAction.InstallCopy(PIZZA, "rkb"));
