@@ -186,8 +186,9 @@ public final class Notices {
             notices.add(new Notice("newer:" + family.name() + ":" + status.newest().map(SnapshotMetadata.Deploy::value)
                     .orElse(""), Notice.Urgency.ACTION, "A newer build of " + family.displayName() + " is on Nexus",
                     deployed + (upgradable
-                            ? "Upgrade keeps your change sets, preferences and repositories; the build you have stays"
-                                    + " beside it until you remove it."
+                            ? "Upgrade brings your copy, " + identified.whereShown() + ", to it and keeps its change"
+                                    + " sets, preferences and repositories; the build it has now stays beside it until you"
+                                    + " remove it."
                             : "It installs a copy beside the one you have, which stays as it is. Upgrading in place"
                                     + " needs Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE + " or later."),
                     Optional.of(family.name()),

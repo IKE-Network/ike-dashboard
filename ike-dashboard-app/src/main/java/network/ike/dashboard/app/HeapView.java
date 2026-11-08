@@ -192,6 +192,7 @@ final class HeapView {
         }
         alert.setContentText(content.toString());
         alert.getDialogPane().setMinWidth(520);
+        SelectableText.in(alert);
         Optional<ButtonType> answer = alert.showAndWait();
         if (answer.isEmpty() || answer.get() == ButtonType.CANCEL) {
             return Optional.empty();

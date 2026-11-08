@@ -611,6 +611,7 @@ public final class DashboardView extends BorderPane {
         if (getScene() != null) {
             alert.initOwner(getScene().getWindow());
         }
+        SelectableText.in(alert);
         alert.show();
     }
 
@@ -632,9 +633,7 @@ public final class DashboardView extends BorderPane {
         Alert alert = new Alert(Alert.AlertType.WARNING);
         alert.setTitle("Upgrade " + store.displayName());
         alert.setHeaderText(refusedHeader(summaries.size()));
-        Label text = new Label(refusedText(summaries, whyNoAside));
-        text.setWrapText(true);
-        text.setMaxWidth(620);
+        TextArea text = SelectableText.of(refusedText(summaries, whyNoAside), 600);
         ScrollPane content = new ScrollPane(text);
         content.setFitToWidth(true);
         content.setPrefViewportHeight(Math.min(360, 90 + 80 * summaries.size()));
@@ -644,6 +643,7 @@ public final class DashboardView extends BorderPane {
         if (getScene() != null) {
             alert.initOwner(getScene().getWindow());
         }
+        SelectableText.in(alert);
         return alert.showAndWait().filter(aside::equals).isPresent();
     }
 
@@ -1634,17 +1634,43 @@ public final class DashboardView extends BorderPane {
         }
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
         alert.setTitle("Upgrade");
-        alert.setHeaderText("Upgrade " + store.displayName() + " to the newest build?");
-        alert.setContentText("The new build downloads beside " + store.name() + "; your change sets, preferences and"
-                + " repositories are carried into it; Komet " + validator.get().version() + " checks, with no window, that it"
-                + " opens and loads every change set; then it takes the store's place. The build you have stays beside it"
-                + " as " + StoreUpgrade.previousFolder(store.path()).getFileName() + " until you remove it, and Restore puts"
-                + " it back. Quit any Komet that has this store open first.");
+        alert.setHeaderText(upgradeHeader(store));
+        alert.setContentText(upgradeText(store, validator.get().version()));
         alert.getButtonTypes().setAll(ButtonType.CANCEL, ButtonType.OK);
         if (getScene() != null) {
             alert.initOwner(getScene().getWindow());
         }
+        SelectableText.in(alert);
         alert.showAndWait().filter(ButtonType.OK::equals).ifPresent(ok -> onUpgrade.accept(action));
+    }
+
+    /**
+     * The question an upgrade asks.
+     *
+     * @param store the copy to upgrade
+     * @return the question
+     */
+    static String upgradeHeader(KnowledgeBase store) {
+        return "Upgrade " + store.displayName() + " to the newest build?";
+    }
+
+    /**
+     * What an upgrade does, naming the copy it upgrades by its folder: a knowledge base can have several copies,
+     * each under a name of its own, so the knowledge base's name alone does not say which.
+     *
+     * @param store     the copy to upgrade
+     * @param validator the Komet that checks the new build
+     * @return the text
+     */
+    static String upgradeText(KnowledgeBase store, String validator) {
+        String assembled = store.assembledAt().map(at -> ", assembled " + WHEN.format(at)).orElse("");
+        return "Your copy of " + store.displayName() + " is the folder " + store.whereShown() + assembled + ".\n\n"
+                + "The newest build downloads into " + StoreUpgrade.workFolder(store.path()).getFileName()
+                + " beside it, and your change sets, preferences and repositories are carried into it. Komet " + validator
+                + " then checks, with no window, that it opens and loads every change set. If it does, the new build"
+                + " takes the name " + store.name() + ", and the build you have now is kept as "
+                + StoreUpgrade.previousFolder(store.path()).getFileName() + " until you remove it; Restore puts it"
+                + " back.\n\nQuit any Komet that has this copy open first.";
     }
 
     private void confirmReinstall(NoticeAction.Reinstall action) {
@@ -1652,7 +1678,7 @@ public final class DashboardView extends BorderPane {
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
         alert.setTitle("Reinstall");
         alert.setHeaderText("Reinstall " + store.displayName() + " from scratch?");
-        alert.setContentText(store.name() + " (" + DashboardCommand.size(store.sizeBytes()) + ") moves to the "
+        alert.setContentText("The folder " + store.whereShown() + " (" + DashboardCommand.size(store.sizeBytes()) + ") moves to the "
                 + Finder.trashName() + " with everything in it: change sets, preferences and repositories. The newest build"
                 + " then downloads under the same name. The " + Finder.trashName() + " is the way back. Quit any Komet that"
                 + " has this store open first.");
@@ -1660,6 +1686,7 @@ public final class DashboardView extends BorderPane {
         if (getScene() != null) {
             alert.initOwner(getScene().getWindow());
         }
+        SelectableText.in(alert);
         alert.showAndWait().filter(ButtonType.OK::equals).ifPresent(ok -> onReinstall.accept(action));
     }
 
@@ -1674,6 +1701,7 @@ public final class DashboardView extends BorderPane {
         if (getScene() != null) {
             alert.initOwner(getScene().getWindow());
         }
+        SelectableText.in(alert);
         alert.showAndWait().filter(ButtonType.OK::equals).ifPresent(ok -> onRestore.accept(store));
     }
 
@@ -1803,6 +1831,7 @@ public final class DashboardView extends BorderPane {
         if (getScene() != null) {
             alert.initOwner(getScene().getWindow());
         }
+        SelectableText.in(alert);
         alert.showAndWait().filter(ButtonType.OK::equals).ifPresent(ok -> onTrash.accept(copies));
     }
 
