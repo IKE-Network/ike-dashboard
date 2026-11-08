@@ -31,15 +31,21 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.prefs.Preferences;
 
 /**
@@ -60,16 +66,30 @@ public final class DashboardApp extends Application {
     /** How often what needs the network is checked again while the dashboard runs. */
     static final Duration NETWORK_CHECK_INTERVAL = Duration.ofHours(1);
 
-    private final ExecutorService work = Executors.newSingleThreadExecutor(runnable -> {
-        Thread thread = new Thread(runnable, "ike-dashboard-work");
-        thread.setDaemon(true);
-        return thread;
-    });
-    private final ScheduledExecutorService clock = Executors.newSingleThreadScheduledExecutor(runnable -> {
-        Thread thread = new Thread(runnable, "ike-dashboard-clock");
-        thread.setDaemon(true);
-        return thread;
-    });
+    /** Transfers under way at once; the next waits its turn, saying so. */
+    static final int TRANSFERS_AT_ONCE = 3;
+
+    /**
+     * Reading {@code ~/Solor} and the installed Komets, and every check that needs the network, in order.
+     * Its own thread, so Refresh and the hourly check never wait behind a transfer.
+     */
+    private final ExecutorService checks = Executors.newSingleThreadExecutor(daemon("ike-dashboard-checks"));
+    /** Downloads, upgrades, reinstalls and installs, {@value #TRANSFERS_AT_ONCE} at a time. */
+    private final ExecutorService transfers = Executors.newFixedThreadPool(TRANSFERS_AT_ONCE, daemon("ike-dashboard-transfer"));
+    /** Quick changes to stores and to the dashboard itself: restore, move to the Trash, clean up, move. */
+    private final ExecutorService files = Executors.newSingleThreadExecutor(daemon("ike-dashboard-files"));
+    private final ScheduledExecutorService clock = Executors.newSingleThreadScheduledExecutor(daemon("ike-dashboard-clock"));
+    /**
+     * One upgrade's check in Komet at a time: each runs a Komet with the store's heap, and two side by side
+     * could take more memory than the machine has.
+     */
+    private final Semaphore kometCheck = new Semaphore(1);
+    /** Stores an upgrade, reinstall, restore, move to the Trash or download is changing; a second is refused. */
+    private final Set<Path> busy = ConcurrentHashMap.newKeySet();
+    /** Stores still being written into the knowledge-base folder, which a scan leaves out. */
+    private final Set<Path> arriving = ConcurrentHashMap.newKeySet();
+    /** Transfers submitted and not yet ended, waiting or running. */
+    private final AtomicInteger pendingTransfers = new AtomicInteger();
     private final Optional<RepositorySync.Git> git = RepositorySync.Git.find();
     private final Map<Path, Notice.Freshness> remoteChecked = new ConcurrentHashMap<>();
     private volatile List<KnowledgeBaseFamily> current = List.of();
@@ -115,6 +135,16 @@ public final class DashboardApp extends Application {
         return icons;
     }
 
+    private static ThreadFactory daemon(String name) {
+        AtomicInteger made = new AtomicInteger();
+        return runnable -> {
+            int number = made.incrementAndGet();
+            Thread thread = new Thread(runnable, number == 1 ? name : name + "-" + number);
+            thread.setDaemon(true);
+            return thread;
+        };
+    }
+
     @Override
     public void start(Stage stage) {
         settings = DashboardSettings.current();
@@ -151,7 +181,7 @@ public final class DashboardApp extends Application {
         stage.show();
         placement = SelfUpdate.running().map(running -> SelfUpdate.place(running, Path.of(System.getProperty("user.home"))));
         view.setDashboard(placement.map(where -> new SelfUpdate.State(where, Optional.empty())));
-        placement.ifPresent(where -> work.submit(() -> {
+        placement.ifPresent(where -> files.submit(() -> {
             try {
                 SelfUpdate.cleanUp(where);
             } catch (IOException e) {
@@ -161,22 +191,75 @@ public final class DashboardApp extends Application {
         }));
         refresh();
         long interval = NETWORK_CHECK_INTERVAL.toMinutes();
-        clock.scheduleAtFixedRate(() -> work.submit(() -> checkNetwork(current)), interval, interval, TimeUnit.MINUTES);
+        clock.scheduleAtFixedRate(() -> checks.submit(() -> checkNetwork(current)), interval, interval, TimeUnit.MINUTES);
     }
 
     @Override
     public void stop() {
         clock.shutdownNow();
-        work.shutdownNow();
+        checks.shutdownNow();
+        transfers.shutdownNow();
+        files.shutdownNow();
+    }
+
+    /** Runs a transfer on the transfer threads, counted from now until it ends. */
+    private void submitTransfer(Runnable task) {
+        pendingTransfers.incrementAndGet();
+        transfers.submit(() -> {
+            try {
+                task.run();
+            } finally {
+                pendingTransfers.decrementAndGet();
+            }
+        });
+    }
+
+    /**
+     * Claims stores for one operation, so no other changes them meanwhile.
+     *
+     * @return whether they were all free; when not, the person is told and nothing is claimed
+     */
+    private boolean claim(String action, Collection<Path> stores) {
+        synchronized (busy) {
+            Optional<Path> taken = stores.stream().filter(busy::contains).findFirst();
+            if (taken.isPresent()) {
+                view.setMessage("Cannot " + action + " " + taken.get().getFileName()
+                        + " now: something else is changing it. Try again once it has finished.");
+                return false;
+            }
+            busy.addAll(stores);
+            return true;
+        }
+    }
+
+    /** Claims where a download lands, as it is named; refuses it when something else is changing it. */
+    private void claimArriving(Path destination) throws IOException {
+        synchronized (busy) {
+            if (busy.contains(destination)) {
+                throw new IOException(destination.getFileName() + " is being changed by another transfer");
+            }
+            busy.add(destination);
+            arriving.add(destination);
+        }
+    }
+
+    private void release(Collection<Path> stores) {
+        synchronized (busy) {
+            busy.removeAll(stores);
+            arriving.removeAll(stores);
+        }
     }
 
     /** Reads {@code ~/Solor} and the installed Komets, then asks Nexus, in the background. */
     private void refresh() {
         view.setMessage("Reading " + settings.solor() + " …");
-        work.submit(() -> {
+        checks.submit(() -> {
             List<KnowledgeBaseFamily> families;
             try {
-                List<KnowledgeBase> knowledgeBases = KnowledgeBaseScanner.scan(settings.solor());
+                // A store a transfer is still writing is not one yet; its transfer refreshes when it ends.
+                List<KnowledgeBase> knowledgeBases = KnowledgeBaseScanner.scan(settings.solor()).stream()
+                        .filter(knowledgeBase -> !arriving.contains(knowledgeBase.path()))
+                        .toList();
                 List<KometInstallation> komets = KometInstallations.find(KometInstallations.defaultRoots(
                         Path.of(System.getProperty("user.home")), settings.installLocation()));
                 families = KnowledgeBaseFamily.managed(knowledgeBases);
@@ -205,7 +288,7 @@ public final class DashboardApp extends Application {
     }
 
     /**
-     * Runs on the work thread: everything that needs the network. Nexus first, for newer builds, a newer
+     * Runs on the checks thread: everything that needs the network. Nexus first, for newer builds, a newer
      * Komet and what is not yet downloaded; then each store's repositories against their remotes.
      */
     private void checkNetwork(List<KnowledgeBaseFamily> families) {
@@ -214,7 +297,7 @@ public final class DashboardApp extends Application {
         checkSync(families);
     }
 
-    /** Runs on the work thread: what Nexus offers, for the notices of knowledge bases not yet downloaded. */
+    /** Runs on the checks thread: what Nexus offers, for the notices of knowledge bases not yet downloaded. */
     private void checkCatalog() {
         try {
             NexusCatalog.Catalog catalog = NexusCatalog.catalog(RepositoryHttpClients.newClient(),
@@ -226,7 +309,7 @@ public final class DashboardApp extends Application {
     }
 
     /**
-     * Runs on the work thread: the sync state of every git repository inside each store, first from its
+     * Runs on the checks thread: the sync state of every git repository inside each store, first from its
      * files, then against its remote.
      */
     private void checkSync(List<KnowledgeBaseFamily> families) {
@@ -265,7 +348,7 @@ public final class DashboardApp extends Application {
     }
 
     /**
-     * Runs on the work thread: the newer-build check for each knowledge base, and the newest Komet. A
+     * Runs on the checks thread: the newer-build check for each knowledge base, and the newest Komet. A
      * knowledge base whose check fails keeps the status the last check found, and Nexus counts as
      * reached only when some check was answered, so offline the notices show the last findings as of
      * then rather than errors.
@@ -334,7 +417,7 @@ public final class DashboardApp extends Application {
 
 
     private void loadCatalog() {
-        work.submit(() -> {
+        checks.submit(() -> {
             try {
                 NexusCatalog.Catalog catalog = NexusCatalog.catalog(RepositoryHttpClients.newClient(),
                         DashboardCommand.access(settings));
@@ -346,21 +429,27 @@ public final class DashboardApp extends Application {
     }
 
     /**
-     * Downloads a store or a protobuf on the work thread, one at a time, each shown as a transfer the person can watch
-     * and cancel: a download waiting its turn says so, and one cancelled before its turn never starts.
+     * Downloads a store or a protobuf on a transfer thread, beside other transfers, shown as a transfer the person can
+     * watch and cancel: a download waiting its turn says so, and one cancelled before its turn never starts.
      */
     private void download(Coordinate coordinate, String classifier) {
         String layout = NexusCatalog.label(classifier);
         Optional<NexusCatalog.Described> described = view.described(coordinate);
         Transfer transfer = new Transfer(view.nameOf(coordinate) + " (" + layout + ")");
         view.showTransfer(transfer, Optional.of(DashboardView.downloadKey(coordinate, classifier)));
-        work.submit(() -> {
+        submitTransfer(() -> {
             if (!transfer.started()) {
                 return;
             }
+            AtomicReference<Path> placed = new AtomicReference<>();
             try {
                 Path store = StoreDownload.download(RepositoryHttpClients.newClient(), DashboardCommand.access(settings),
-                        coordinate, classifier, described, settings.solor(), settings.localRepository(), transfer);
+                        coordinate, classifier, described, settings.solor(), settings.localRepository(), transfer,
+                        destination -> {
+                            claimArriving(destination);
+                            placed.set(destination);
+                        });
+                release(List.of(store));
                 transfer.finished(Transfer.State.DONE, "Downloaded " + store.getFileName());
                 Platform.runLater(() -> {
                     selectAfterRefresh = coordinate.artifactId();
@@ -372,12 +461,14 @@ public final class DashboardApp extends Application {
                         + " again picks up where this one stopped.");
             } catch (Exception e) {
                 transfer.finished(Transfer.State.FAILED, "Could not download: " + e.getMessage());
+            } finally {
+                Optional.ofNullable(placed.get()).ifPresent(destination -> release(List.of(destination)));
             }
         });
     }
 
     /**
-     * Upgrades a store in place on the work thread (decision 20 of the design): the newest build downloads
+     * Upgrades a store in place on a transfer thread (decision 20 of the design): the newest build downloads
      * into a working folder beside it, the person's work is carried in, Komet with no window checks that
      * the new build opens and holds every change set, and the folders swap by rename, the old store kept
      * as {@code <store>.previous}. Every failure leaves the store as it was, carrying the work back; a
@@ -401,13 +492,17 @@ public final class DashboardApp extends Application {
             view.showRefusals("Upgrade " + store.displayName(), refusals);
             return;
         }
+        if (!claim("upgrade", List.of(store.path()))) {
+            return;
+        }
         KometInstallation komet = validator.get();
         Path work = StoreUpgrade.workFolder(store.path());
         Path previous = StoreUpgrade.previousFolder(store.path());
         Transfer transfer = new Transfer("Upgrade " + view.nameOf(action.coordinate()));
         view.showTransfer(transfer, Optional.of(DashboardView.upgradeKey(store.path())));
-        this.work.submit(() -> {
+        submitTransfer(() -> {
             if (!transfer.started()) {
+                release(List.of(store.path()));
                 return;
             }
             boolean carried = false;
@@ -427,10 +522,28 @@ public final class DashboardApp extends Application {
                             + ". Your store is as it was.");
                     return;
                 }
-                transfer.phase("Checking the new build in Komet " + komet.version());
-                KnowledgeBase staged = KnowledgeBaseScanner.inspect(work);
-                KometLauncher.HeadlessRun run = KometLauncher.loadChangeSets(komet, staged, heapPlan(komet, staged).environment(),
-                        settings.logFolder());
+                if (!kometCheck.tryAcquire()) {
+                    transfer.phase("Waiting for another upgrade's check in Komet");
+                    while (!kometCheck.tryAcquire(1, TimeUnit.SECONDS)) {
+                        if (transfer.cancelled()) {
+                            StoreUpgrade.carry(work, store.path());
+                            carried = false;
+                            StoreUpgrade.deleteTree(work);
+                            transfer.finished(Transfer.State.CANCELLED, "Cancelled before anything changed. The new build"
+                                    + " stays in your local repository, so upgrading again starts from it.");
+                            return;
+                        }
+                    }
+                }
+                KometLauncher.HeadlessRun run;
+                try {
+                    transfer.phase("Checking the new build in Komet " + komet.version());
+                    KnowledgeBase staged = KnowledgeBaseScanner.inspect(work);
+                    run = KometLauncher.loadChangeSets(komet, staged, heapPlan(komet, staged).environment(),
+                            settings.logFolder());
+                } finally {
+                    kometCheck.release();
+                }
                 if (!run.clean()) {
                     StoreUpgrade.carry(work, store.path());
                     transfer.finished(Transfer.State.FAILED, "Not upgraded: Komet could not load every change set into the new"
@@ -448,6 +561,7 @@ public final class DashboardApp extends Application {
                     Finder.trash(List.of(previous));
                 }
                 StoreUpgrade.swap(store.path(), work);
+                release(List.of(store.path()));
                 transfer.finished(Transfer.State.DONE, "Upgraded " + store.name() + ": " + carry.summary() + ". The build you"
                         + " had is beside it as " + previous.getFileName() + "; Restore puts it back.");
                 Platform.runLater(() -> {
@@ -467,16 +581,19 @@ public final class DashboardApp extends Application {
                         kept = " Your change sets and preferences may be in " + work.getFileName() + ": " + back.getMessage();
                     }
                 }
+                release(List.of(store.path()));
                 transfer.finished(Transfer.State.FAILED, "Could not upgrade: " + e.getMessage() + "."
                         + (kept.isEmpty() ? " Your store is as it was" + (Files.exists(work) ? "; " + work.getFileName()
                         + " is kept beside it for inspection." : ".") : kept));
                 Platform.runLater(this::refresh);
+            } finally {
+                release(List.of(store.path()));
             }
         });
     }
 
     /**
-     * Reinstalls a store on the work thread (decision 20): the store goes to the Trash, with everything in
+     * Reinstalls a store on a transfer thread (decision 20): the store goes to the Trash, with everything in
      * it, and the newest build downloads under the same name. The dashboard never writes over a store; the
      * Trash is the way back.
      */
@@ -493,19 +610,26 @@ public final class DashboardApp extends Application {
             view.showRefusals("Reinstall " + store.displayName(), refusals);
             return;
         }
+        if (!claim("reinstall", List.of(store.path()))) {
+            return;
+        }
         Transfer transfer = new Transfer("Reinstall " + view.nameOf(action.coordinate()));
         view.showTransfer(transfer, Optional.of(DashboardView.upgradeKey(store.path())));
-        work.submit(() -> {
+        submitTransfer(() -> {
             if (!transfer.started()) {
+                release(List.of(store.path()));
                 return;
             }
             try {
                 transfer.phase("Moving " + store.name() + " to the " + Finder.trashName());
+                // From here until the download ends, a scan leaves the half-written store out.
+                arriving.add(store.path());
                 Finder.trash(List.of(store.path()));
                 Platform.runLater(this::refresh);
                 transfer.phase("Downloading the newest build");
                 StoreDownload.downloadTo(RepositoryHttpClients.newClient(), DashboardCommand.access(settings), action.coordinate(),
                         action.classifier(), store.path(), settings.localRepository(), transfer);
+                release(List.of(store.path()));
                 transfer.finished(Transfer.State.DONE, "Reinstalled " + store.name() + ". The store you had is in the "
                         + Finder.trashName() + ".");
                 Platform.runLater(() -> {
@@ -513,17 +637,21 @@ public final class DashboardApp extends Application {
                     refresh();
                 });
             } catch (CancellationException e) {
+                release(List.of(store.path()));
                 transfer.finished(Transfer.State.CANCELLED, "Cancelled. The store you had is in the " + Finder.trashName()
                         + "; what had downloaded is kept, so downloading again picks up where this one stopped.");
                 Platform.runLater(this::refresh);
             } catch (Exception e) {
+                release(List.of(store.path()));
                 transfer.finished(Transfer.State.FAILED, "Could not reinstall: " + e.getMessage());
                 Platform.runLater(this::refresh);
+            } finally {
+                release(List.of(store.path()));
             }
         });
     }
 
-    /** Puts a store's previous build back on the work thread, carrying the work done since (decision 20). */
+    /** Puts a store's previous build back, carrying the work done since (decision 20). */
     private void restore(KnowledgeBase store) {
         List<String> refusals;
         try {
@@ -536,10 +664,14 @@ public final class DashboardApp extends Application {
             view.showRefusals("Restore " + store.displayName(), refusals);
             return;
         }
+        if (!claim("restore", List.of(store.path()))) {
+            return;
+        }
         view.setMessage("Restoring the previous build of " + store.name() + " …");
-        work.submit(() -> {
+        files.submit(() -> {
             try {
                 StoreUpgrade.Carried carried = StoreUpgrade.restore(store.path());
+                release(List.of(store.path()));
                 Platform.runLater(() -> {
                     selectAfterRefresh = KnowledgeBaseFamily.familyName(store);
                     refresh();
@@ -551,6 +683,8 @@ public final class DashboardApp extends Application {
                     view.setMessage("Could not restore " + store.name() + ": " + e.getMessage());
                     refresh();
                 });
+            } finally {
+                release(List.of(store.path()));
             }
         });
     }
@@ -559,7 +693,7 @@ public final class DashboardApp extends Application {
         view.setInstalling(true);
         Transfer transfer = new Transfer("Komet " + release.version() + " from " + release.source().label());
         view.showTransfer(transfer, Optional.empty());
-        work.submit(() -> {
+        submitTransfer(() -> {
             if (!transfer.started()) {
                 Platform.runLater(() -> view.setInstalling(false));
                 return;
@@ -585,15 +719,16 @@ public final class DashboardApp extends Application {
     }
 
     /**
-     * Downloads and checks a newer dashboard on the work thread, as a transfer the person can watch and
-     * cancel, then starts the helper that swaps it in once this one has quit, and quits.
+     * Downloads and checks a newer dashboard on a transfer thread, as a transfer the person can watch and
+     * cancel, waits for every other transfer to end, then starts the helper that swaps it in once this one
+     * has quit, and quits.
      */
     private void updateDashboard(KometRelease release) {
         SelfUpdate.Placement where = placement.orElseThrow();
         view.setUpdatingDashboard(true);
         Transfer transfer = new Transfer("IKE Dashboard " + release.version());
         view.showTransfer(transfer, Optional.empty());
-        work.submit(() -> {
+        submitTransfer(() -> {
             if (!transfer.started()) {
                 Platform.runLater(() -> view.setUpdatingDashboard(false));
                 return;
@@ -601,6 +736,16 @@ public final class DashboardApp extends Application {
             try {
                 Path staged = SelfUpdate.stage(RepositoryHttpClients.newClient(), release, where,
                         settings.localRepository(), transfer);
+                // Quitting stops every transfer where it stands, an upgrade midway through its swap included.
+                if (othersUnderWay(1)) {
+                    transfer.phase("Waiting for the other transfers to finish");
+                    while (othersUnderWay(1)) {
+                        if (transfer.cancelled()) {
+                            throw new CancellationException();
+                        }
+                        Thread.sleep(1000);
+                    }
+                }
                 restartAs(where, staged);
                 transfer.finished(Transfer.State.DONE, "Restarting as the IKE Dashboard " + release.version());
             } catch (CancellationException e) {
@@ -620,9 +765,13 @@ public final class DashboardApp extends Application {
      */
     private void moveDashboard() {
         SelfUpdate.Placement where = placement.orElseThrow();
+        if (othersUnderWay(0)) {
+            view.setMessage("The dashboard restarts when it moves; move it once the transfers have finished");
+            return;
+        }
         view.setUpdatingDashboard(true);
         view.setMessage("Moving the IKE Dashboard into " + where.target().getParent() + " …");
-        work.submit(() -> {
+        files.submit(() -> {
             try {
                 Optional<SelfUpdate.Running> there = SelfUpdate.read(where.target());
                 if (there.isPresent()
@@ -641,6 +790,16 @@ public final class DashboardApp extends Application {
         });
     }
 
+    /**
+     * Whether anything besides the caller's own transfers is under way: transfers waiting or running, or a
+     * store being changed.
+     *
+     * @param own how many of the pending transfers are the caller's
+     */
+    private boolean othersUnderWay(int own) {
+        return pendingTransfers.get() > own || !busy.isEmpty();
+    }
+
     /** Starts the helper that swaps a staged dashboard in once this one has quit and opens it, then quits. */
     private void restartAs(SelfUpdate.Placement where, Path staged) throws IOException {
         SelfUpdate.swap(where, staged, ProcessHandle.current().pid(), SelfUpdate.relaunch(where.target()),
@@ -649,13 +808,20 @@ public final class DashboardApp extends Application {
     }
 
     private void trash(List<KnowledgeBase> copies) {
+        List<Path> paths = copies.stream().map(KnowledgeBase::path).toList();
+        if (!claim("move to the " + Finder.trashName(), paths)) {
+            return;
+        }
         view.setMessage("Moving " + copies.size() + (copies.size() == 1 ? " copy" : " copies") + " to the " + Finder.trashName() + " …");
-        work.submit(() -> {
+        files.submit(() -> {
             try {
-                Finder.trash(copies.stream().map(KnowledgeBase::path).toList());
+                Finder.trash(paths);
+                release(paths);
                 Platform.runLater(this::refresh);
             } catch (Exception e) {
                 Platform.runLater(() -> view.setMessage(e.getMessage()));
+            } finally {
+                release(paths);
             }
         });
     }

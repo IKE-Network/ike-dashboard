@@ -140,6 +140,56 @@ public final class StoreDownload {
     }
 
     /**
+     * Downloads as the other {@code download} does, first telling the caller where the store or protobuf
+     * will land, once the deploy is resolved and before anything is written there, so that a scan of the
+     * knowledge-base folder running beside the download can leave the half-written store out.
+     *
+     * @param http            the client to download with
+     * @param repository      the repository and its login
+     * @param coordinate      the knowledge base's coordinate
+     * @param classifier      the store's or protobuf's classifier
+     * @param described       the knowledge base's descriptor and icon, as Nexus deploys them
+     * @param solor           the knowledge-base folder
+     * @param localRepository the local Maven repository the zip is cached in
+     * @param transfer        shows the progress, and cancels the download when asked
+     * @param placing         told the destination; it may refuse it by throwing
+     * @return the unpacked store, or the protobuf's zip
+     * @throws CancellationException if the person cancelled it
+     * @throws Exception if that deploy is already here, Nexus has no such deploy, the destination is refused,
+     *                   or the download fails
+     */
+    public static Path download(HttpClient http, RepositoryAccess repository, Coordinate coordinate, String classifier,
+                                Optional<NexusCatalog.Described> described, Path solor, Path localRepository,
+                                Transfer transfer, Placing placing) throws Exception {
+        return download(http, repository, coordinate, classifier, described, solor, localRepository, transfer,
+                transfer::cancelWith, new Destination() {
+                    @Override
+                    public Path of(String fileVersion) throws IOException {
+                        Path destination = destination(solor, coordinate.artifactId(), fileVersion);
+                        placing.at(destination);
+                        return destination;
+                    }
+
+                    @Override
+                    public void protobuf(Path file) throws IOException {
+                        placing.at(file);
+                    }
+                });
+    }
+
+    /** Told where a download will land, before anything is written there. */
+    @FunctionalInterface
+    public interface Placing {
+        /**
+         * Accepts or refuses the destination.
+         *
+         * @param destination where the store or protobuf will land
+         * @throws IOException to refuse it
+         */
+        void at(Path destination) throws IOException;
+    }
+
+    /**
      * Downloads the newest deploy of a store into a folder named by the caller, for an upgrade's working
      * folder or a reinstall under the store's own name ({@link StoreUpgrade}). The folder must not exist:
      * the dashboard never writes over a store.
@@ -173,6 +223,10 @@ public final class StoreDownload {
     @FunctionalInterface
     private interface Destination {
         Path of(String fileVersion) throws IOException;
+
+        /** Told where a protobuf will be placed, before it is written. */
+        default void protobuf(Path file) throws IOException {
+        }
     }
 
     private static Path download(HttpClient http, RepositoryAccess repository, Coordinate coordinate, String classifier,
@@ -198,9 +252,9 @@ public final class StoreDownload {
         Path cached = MavenDataStoreDownloadTask.localRepositoryPath(localRepository, artifact, coordinate.version(),
                 fileVersion, classifier);
         if (NexusCatalog.PROTOBUF_CLASSIFIERS.contains(classifier)) {
-            Path zip = placeProtobuf(http, repository, uri, cached,
-                    protobufFile(solor, coordinate.artifactId(), fileVersion, classifier), localRepository, listener,
-                    cancelWith);
+            Path file = protobufFile(solor, coordinate.artifactId(), fileVersion, classifier);
+            where.protobuf(file);
+            Path zip = placeProtobuf(http, repository, uri, cached, file, localRepository, listener, cancelWith);
             if (described.isPresent()) {
                 Map<String, String> attributes = new TreeMap<>();
                 attributes.put(KnowledgeBase.RESOLVED_VERSION, fileVersion);
