@@ -29,7 +29,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** The file work of an upgrade (decision 20 of {@code dev-ike-dashboard}): carry, swap, restore, and the refusals. */
+/** The file work of an upgrade (decision 20 of {@code dev-ike-dashboard}): carry, swap, and the refusals. */
 class StoreUpgradeTest {
 
     @TempDir
@@ -101,7 +101,7 @@ class StoreUpgradeTest {
     }
 
     @Test
-    void theSwapRenamesBothAndRestoreSwapsBackCarryingTheWorkSince() throws IOException {
+    void theSwapPutsTheNewBuildInPlaceAndTheOldOneAside() throws IOException {
         Path store = store("pizza-kb");
         write(store.resolve("preferences/preferences.xml"), "old session");
         Path work = StoreUpgrade.workFolder(store);
@@ -112,20 +112,10 @@ class StoreUpgradeTest {
 
         Path previous = StoreUpgrade.previousFolder(store);
         assertThat(store.resolve("rocks/CURRENT")).hasContent("new data");
-        assertThat(previous.resolve("rocks/CURRENT")).hasContent("old data");
+        assertThat(store.resolve("preferences/preferences.xml")).hasContent("old session");
+        assertThat(previous.resolve("rocks/CURRENT")).as("aside, for the Trash").hasContent("old data");
         assertThat(work).doesNotExist();
         assertThat(previous.resolve("preferences")).as("carried into the new build, not left behind").doesNotExist();
-
-        write(store.resolve("changeSets/src/main/resources/since.zip"), "written in the new build");
-        write(store.resolve("preferences/preferences.xml"), "new session");
-        StoreUpgrade.Carried back = StoreUpgrade.restore(store);
-
-        assertThat(store.resolve("rocks/CURRENT")).as("the previous build is back").hasContent("old data");
-        assertThat(store.resolve("changeSets/src/main/resources/since.zip")).hasContent("written in the new build");
-        assertThat(store.resolve("preferences/preferences.xml")).as("the latest session wins").hasContent("new session");
-        assertThat(previous.resolve("rocks/CURRENT")).as("the new build is now the previous one").hasContent("new data");
-        assertThat(work).doesNotExist();
-        assertThat(back.moved()).as("the change-set folder and the preferences, moved whole").hasSize(2);
     }
 
     @Test
@@ -169,32 +159,15 @@ class StoreUpgradeTest {
     }
 
     @Test
-    void thePreviousBuildIsTheMemberNamedAfterTheStoreAndNeverTheLatest() {
-        KnowledgeBase current = new KnowledgeBase("pizza-kb", solor.resolve("pizza-kb"), StoreKind.ROCKS, 10,
-                Optional.of(new Coordinate("network.ike.data", "pizza-kb", "1-SNAPSHOT")),
-                Map.of(KnowledgeBase.RESOLVED_VERSION, "1-20261101.000000-5"), Instant.parse("2026-11-01T00:00:00Z"));
-        KnowledgeBase previous = new KnowledgeBase("pizza-kb.previous", solor.resolve("pizza-kb.previous"), StoreKind.ROCKS, 10,
-                Optional.of(new Coordinate("network.ike.data", "pizza-kb", "1-SNAPSHOT")),
-                Map.of(KnowledgeBase.RESOLVED_VERSION, "1-20261106.000000-6"), Instant.parse("2026-11-06T00:00:00Z"));
-
-        KnowledgeBaseFamily family = KnowledgeBaseFamily.group(List.of(current, previous)).getFirst();
-
-        assertThat(family.members()).as("a restore can leave the newer build as the previous one").startsWith(previous);
-        assertThat(family.latest()).contains(current);
-        assertThat(family.latestIdentified()).contains(current);
-        assertThat(StoreUpgrade.previous(family)).contains(previous);
-        assertThat(StoreUpgrade.isWork("pizza-kb.upgrade")).isTrue();
-        assertThat(StoreUpgrade.isPrevious("pizza-kb")).isFalse();
-    }
-
-    @Test
     void theScannerDoesNotListAWorkingFolder() throws IOException {
         store("pizza-kb");
         Files.createDirectories(StoreUpgrade.workFolder(solor.resolve("pizza-kb")).resolve("rocks"));
+        Files.createDirectories(solor.resolve("pizza-copy" + StoreCopy.PARTIAL_SUFFIX).resolve("rocks"));
         Files.createDirectories(StoreUpgrade.previousFolder(solor.resolve("pizza-kb")).resolve("rocks"));
 
-        assertThat(KnowledgeBaseScanner.scan(solor)).extracting(KnowledgeBase::name)
-                .containsExactly("pizza-kb", "pizza-kb.previous");
+        assertThat(KnowledgeBaseScanner.scan(solor)).as("a build left aside is a folder like any other")
+                .extracting(KnowledgeBase::name).containsExactly("pizza-kb", "pizza-kb.previous");
+        assertThat(StoreUpgrade.isWork("pizza-kb.upgrade")).isTrue();
     }
 
     private Path store(String name) throws IOException {

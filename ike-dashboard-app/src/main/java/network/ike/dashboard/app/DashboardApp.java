@@ -168,7 +168,7 @@ public final class DashboardApp extends Application {
         view.setOnInstallKomet(this::installKomet);
         view.setOnUpgrade(this::upgrade);
         view.setOnReinstall(this::reinstall);
-        view.setOnRestore(this::restore);
+        view.setOnCopy(this::copyStore);
         view.setOnUpdateDashboard(this::updateDashboard);
         view.setOnMoveDashboard(this::moveDashboard);
         view.setOnReveal(path -> run(() -> Finder.reveal(path), "Could not show " + path));
@@ -471,9 +471,9 @@ public final class DashboardApp extends Application {
     /**
      * Upgrades a store in place on a transfer thread (decision 20 of the design): the newest build downloads
      * into a working folder beside it, the person's work is carried in, Komet with no window checks that
-     * the new build opens and loads every change set, and the folders swap by rename, the old store kept
-     * as {@code <store>.previous}. Every failure leaves the store as it was, carrying the work back; a
-     * build that failed its check is kept beside the store for inspection.
+     * the new build opens and loads every change set, and the folders swap by rename; the old build, confirmed
+     * replaced, goes to the Trash (KEC, 2026-11-08). Every failure leaves the store as it was, carrying the work
+     * back; a build that failed its check is kept beside the store for inspection.
      */
     private void upgrade(NoticeAction.Upgrade action) {
         KnowledgeBase store = action.store();
@@ -594,11 +594,19 @@ public final class DashboardApp extends Application {
                     Finder.trash(List.of(previous));
                 }
                 StoreUpgrade.swap(store.path(), work);
+                // The new build passed Komet's check and is in place: the old one goes to the Trash, the way back.
+                String old;
+                try {
+                    Finder.trash(List.of(previous));
+                    old = "The build you had is in the " + Finder.trashName() + ".";
+                } catch (IOException | InterruptedException e) {
+                    old = "The build you had is beside it as " + previous.getFileName() + "; it could not be moved to the "
+                            + Finder.trashName() + " (" + e.getMessage() + ").";
+                }
                 release(List.of(store.path()));
                 transfer.finished(Transfer.State.DONE, "Upgraded " + store.name() + ": " + carry.summary()
                         + (setAside.isEmpty() ? "" : "; " + setAside.size() + (setAside.size() == 1 ? " change set" : " change sets")
-                        + " set aside in " + RefusedChangeSets.UNPROCESSED_FOLDER) + ". The build you had is beside it as "
-                        + previous.getFileName() + "; Restore puts it back.");
+                        + " set aside in " + RefusedChangeSets.UNPROCESSED_FOLDER) + ". " + old);
                 KometLauncher.HeadlessRun done = run;
                 Platform.runLater(() -> {
                     selectAfterRefresh = KnowledgeBaseFamily.familyName(store);
@@ -742,40 +750,43 @@ public final class DashboardApp extends Application {
         });
     }
 
-    /** Puts a store's previous build back, carrying the work done since (decision 20). */
-    private void restore(KnowledgeBase store) {
+    /**
+     * Copies a store into a new folder beside it, everything in it included (KEC, 2026-11-08): each folder is a
+     * copy of its own, with its own change sets, upgraded on its own.
+     */
+    private void copyStore(KnowledgeBase store, String name) {
         List<String> refusals;
         try {
-            refusals = StoreUpgrade.refusals(store, List.of(), HeapSizing.Machine.current(komets).running());
+            refusals = StoreCopy.refusals(store, HeapSizing.Machine.current(komets).running());
         } catch (IOException e) {
             view.setMessage("Could not read " + store.name() + ": " + e.getMessage());
             return;
         }
         if (!refusals.isEmpty()) {
-            view.showRefusals("Restore " + store.displayName(), refusals);
+            view.showRefusals("Copy " + store.name(), refusals);
             return;
         }
-        if (!claim("restore", List.of(store.path()))) {
+        Path target = store.path().resolveSibling(name.strip());
+        if (!claim("copy", List.of(store.path(), target))) {
             return;
         }
-        view.setMessage("Restoring the previous build of " + store.name() + " …");
+        view.setMessage("Copying " + store.name() + " to " + target.getFileName() + " …");
         files.submit(() -> {
             try {
-                StoreUpgrade.Carried carried = StoreUpgrade.restore(store.path());
-                release(List.of(store.path()));
+                StoreCopy.copy(store.path(), name);
                 Platform.runLater(() -> {
                     selectAfterRefresh = KnowledgeBaseFamily.familyName(store);
                     refresh();
-                    view.setMessage("Restored the previous build of " + store.name() + "; " + carried.summary()
-                            + ". The build it replaced is now the previous one.");
+                    view.setMessage("Copied " + store.name() + " to " + target.getFileName() + ", with its change sets,"
+                            + " preferences and repositories.");
                 });
             } catch (Exception e) {
                 Platform.runLater(() -> {
-                    view.setMessage("Could not restore " + store.name() + ": " + e.getMessage());
+                    view.setMessage("Could not copy " + store.name() + ": " + e.getMessage());
                     refresh();
                 });
             } finally {
-                release(List.of(store.path()));
+                release(List.of(store.path(), target));
             }
         });
     }

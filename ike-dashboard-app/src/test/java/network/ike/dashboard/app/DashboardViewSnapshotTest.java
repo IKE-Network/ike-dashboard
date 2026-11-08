@@ -206,11 +206,11 @@ class DashboardViewSnapshotTest {
     }
 
     @Test
-    void aStoreWithANewerBuildOffersUpgradeAndACopyAndKeepsThePreviousBuild(@TempDir Path solor) throws Exception {
+    void aStoreWithANewerBuildOffersUpgradeAndACopyAndEachOtherFolderItsOwnUpgrade(@TempDir Path solor) throws Exception {
         store(solor, "pizza-kb", "20250627.1-20261023.232318-6");
         describe(solor.resolve("pizza-kb"), "pizza-kb", "Pizza Knowledge Base", "rocks", new java.awt.Color(0xe65100), true);
-        store(solor, "pizza-kb.previous", "20250627.1-20261020.120000-5");
-        describe(solor.resolve("pizza-kb.previous"), "pizza-kb", "Pizza Knowledge Base", "rocks", new java.awt.Color(0xe65100), true);
+        store(solor, "pizza-card-leak-demo", "20250627.1-20261020.120000-5");
+        describe(solor.resolve("pizza-card-leak-demo"), "pizza-kb", "Pizza Knowledge Base", "rocks", new java.awt.Color(0xe65100), true);
         List<KnowledgeBaseFamily> families = KnowledgeBaseFamily.managed(KnowledgeBaseScanner.scan(solor));
         KnowledgeBase store = families.getFirst().latest().orElseThrow();
         KometInstallation checks = new KometInstallation("Komet 26.1108.1200", "26.1108.1200",
@@ -276,14 +276,16 @@ class DashboardViewSnapshotTest {
         });
 
         assertThat(store.name()).isEqualTo("pizza-kb");
-        assertThat(StoreUpgrade.previous(families.getFirst())).map(KnowledgeBase::name).contains("pizza-kb.previous");
-        assertThat(offeredButtons.get(30, TimeUnit.SECONDS)).contains("Upgrade", "Install a copy", "Restore")
-                .doesNotContain("Download");
+        assertThat(families.getFirst().members()).extracting(KnowledgeBase::name)
+                .containsExactly("pizza-kb", "pizza-card-leak-demo");
+        assertThat(offeredButtons.get(30, TimeUnit.SECONDS)).as("the newest folder's upgrade, and the other folder's")
+                .contains("Upgrade", "Install a copy", "Upgrade…").doesNotContain("Download", "Restore");
         assertThat(oldKometButtons.get(30, TimeUnit.SECONDS)).as("without a Komet that checks the new build, only a copy")
                 .contains("Install a copy").doesNotContain("Upgrade");
         assertThat(oldKometTexts.get(30, TimeUnit.SECONDS))
                 .anyMatch(text -> text.startsWith("Upgrading in place needs Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE))
-                .anyMatch(text -> text.startsWith("The build before the upgrade is kept beside this one as pizza-kb.previous"));
+                .anyMatch(text -> text.startsWith("Each copy is a folder of its own, upgraded on its own"))
+                .noneMatch(text -> text.contains(".previous"));
         write(offered.get(30, TimeUnit.SECONDS), Path.of("target", "dashboard-upgrade.png"));
         write(report.get(30, TimeUnit.SECONDS), Path.of("target", "change-set-load-report.png"));
         assertThat(Path.of("target", "dashboard-upgrade.png")).isNotEmptyFile();

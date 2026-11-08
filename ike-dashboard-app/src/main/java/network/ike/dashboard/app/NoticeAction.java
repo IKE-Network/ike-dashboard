@@ -87,18 +87,6 @@ public sealed interface NoticeAction {
     }
 
     /**
-     * Put a store's previous build back, carrying the work done since (decision 20).
-     *
-     * @param store the store
-     */
-    record Restore(KnowledgeBase store) implements NoticeAction {
-        @Override
-        public String label() {
-            return "Restore";
-        }
-    }
-
-    /**
      * Install a Komet build beside the ones installed.
      *
      * @param release the build

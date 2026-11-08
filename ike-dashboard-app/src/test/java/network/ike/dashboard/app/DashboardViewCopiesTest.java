@@ -49,7 +49,7 @@ class DashboardViewCopiesTest {
     void eachFolderOfAKnowledgeBaseIsUpgradedOnItsOwn() throws Exception {
         KnowledgeBase current = copy("pizza-kb", NEWEST);
         KnowledgeBase demo = copy("pizza-card-leak-demo", "20250627.1-20261001.101010-1");
-        KnowledgeBase kept = copy("pizza-card-leak-demo.previous", "20250627.1-20260901.101010-1");
+        KnowledgeBase teaching = copy("pizza-teaching", "20250627.1-20260901.101010-1");
         CompletableFuture<List<String>> words = new CompletableFuture<>();
         CompletableFuture<List<String>> enabledButtons = new CompletableFuture<>();
         CompletableFuture<List<Optional<NoticeAction.Upgrade>>> upgrades = new CompletableFuture<>();
@@ -59,14 +59,14 @@ class DashboardViewCopiesTest {
                 DashboardView view = new DashboardView();
                 view.setKomets(List.of(new KometInstallation("Komet Desktop 26.1108.1917", "26.1108.1917",
                         Path.of("/Applications/Komet.app"), Path.of("/Applications/Komet.app/Contents/MacOS/Komet"))));
-                view.setFamilies(List.of(new KnowledgeBaseFamily("pizza-kb", List.of(current, demo, kept))));
+                view.setFamilies(List.of(new KnowledgeBaseFamily("pizza-kb", List.of(current, demo, teaching))));
                 view.setStatus("pizza-kb", new BuildStatus(BuildStatus.State.CURRENT, "the newest deploy", Optional.of(
                         new SnapshotMetadata.Deploy(NEWEST, Instant.parse("2026-10-24T00:20:14Z")))));
                 view.select("pizza-kb");
                 Scene scene = new Scene(view, 1080, 640);
                 view.applyCss();
                 view.layout();
-                upgrades.complete(List.of(view.upgradeOf(current), view.upgradeOf(demo), view.upgradeOf(kept)));
+                upgrades.complete(List.of(view.upgradeOf(current), view.upgradeOf(demo), view.upgradeOf(teaching)));
                 List<String> seen = new java.util.ArrayList<>(Words.of(view));
                 view.lookupAll(".titled-pane").stream().map(javafx.scene.control.TitledPane.class::cast)
                         .map(javafx.scene.control.TitledPane::getText).forEach(seen::add);
@@ -88,13 +88,14 @@ class DashboardViewCopiesTest {
         assertThat(offered.get(0)).as("the copy the detail shows is current").isEmpty();
         assertThat(offered.get(1)).as("the folder behind the newest build upgrades on its own")
                 .contains(new NoticeAction.Upgrade(demo, PIZZA, "rkb"));
-        assertThat(offered.get(2)).as("a build kept by an upgrade is not upgraded").isEmpty();
+        assertThat(offered.get(2)).as("every folder behind the newest build, each its own")
+                .contains(new NoticeAction.Upgrade(teaching, PIZZA, "rkb"));
         assertThat(words.get(30, TimeUnit.SECONDS))
                 .anyMatch(text -> text.startsWith(DashboardView.OTHER_COPIES + " (2)"))
                 .anyMatch(text -> text.startsWith("Each copy is a folder of its own, upgraded on its own"))
-                .contains("pizza-card-leak-demo", "kept by an upgrade")
+                .contains("pizza-card-leak-demo", "pizza-teaching")
                 .noneMatch(text -> text.startsWith("A newer build is on Nexus"));
-        assertThat(enabledButtons.get(30, TimeUnit.SECONDS)).contains("Upgrade…");
+        assertThat(enabledButtons.get(30, TimeUnit.SECONDS)).filteredOn("Upgrade…"::equals).hasSize(2);
         write(drawn.get(30, TimeUnit.SECONDS), Path.of("target", "dashboard-other-copies.png"));
     }
 

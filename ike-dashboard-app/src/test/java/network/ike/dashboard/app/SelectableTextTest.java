@@ -59,7 +59,9 @@ class SelectableTextTest {
                         + " in ~/Solor, assembled ")
                 .contains("downloads into solor-gudid-card-leak-demo.upgrade beside it")
                 .contains("takes the name solor-gudid-card-leak-demo")
-                .contains("kept as solor-gudid-card-leak-demo.previous")
+                .contains("the build you have now goes to the " + Finder.trashName())
+                .contains("Other folders of SOLOR + GUDID Knowledge Base are not changed")
+                .doesNotContain(".previous")
                 .contains("Komet 26.1108.1917");
     }
 

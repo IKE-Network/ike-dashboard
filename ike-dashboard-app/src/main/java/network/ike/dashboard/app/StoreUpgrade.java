@@ -45,7 +45,10 @@ public final class StoreUpgrade {
     /** The suffix of the folder a new build is downloaded into, beside the store, until the swap. */
     public static final String WORK_SUFFIX = ".upgrade";
 
-    /** The suffix of the folder the old store is kept in after the swap, until the person removes it. */
+    /**
+     * The suffix the old store takes at the swap, for the moment before it goes to the Trash: a confirmed upgrade
+     * keeps no previous build (KEC, 2026-11-08), and the Trash is the way back.
+     */
     public static final String PREVIOUS_SUFFIX = ".previous";
 
     /**
@@ -75,7 +78,8 @@ public final class StoreUpgrade {
     }
 
     /**
-     * Where a store's old build is kept after the swap: {@code <store>.previous} beside it.
+     * Where a store's old build steps aside at the swap, {@code <store>.previous} beside it, until it goes to
+     * the Trash.
      *
      * @param store the store
      * @return the previous folder
@@ -85,23 +89,14 @@ public final class StoreUpgrade {
     }
 
     /**
-     * Whether a folder name is an upgrade's working folder, which the dashboard does not list.
+     * Whether a folder name is a working folder, which the dashboard does not list: an upgrade's new build, or a
+     * copy still being made ({@link StoreCopy#PARTIAL_SUFFIX}).
      *
      * @param name the folder name
-     * @return {@code true} for {@code <store>.upgrade}
+     * @return {@code true} for {@code <store>.upgrade} and {@code <copy>.copying}
      */
     public static boolean isWork(String name) {
-        return name.endsWith(WORK_SUFFIX);
-    }
-
-    /**
-     * Whether a folder name is a store's previous build.
-     *
-     * @param name the folder name
-     * @return {@code true} for {@code <store>.previous}
-     */
-    public static boolean isPrevious(String name) {
-        return name.endsWith(PREVIOUS_SUFFIX);
+        return name.endsWith(WORK_SUFFIX) || name.endsWith(StoreCopy.PARTIAL_SUFFIX);
     }
 
     /**
@@ -281,47 +276,6 @@ public final class StoreUpgrade {
             Files.move(previous, store, StandardCopyOption.ATOMIC_MOVE);
             throw e;
         }
-    }
-
-    /**
-     * Puts the previous build back: the store steps aside, the previous takes its name, the work done
-     * since is carried into it, and the build that stepped aside becomes the previous. So a restore can
-     * itself be restored, and nothing is lost either way.
-     *
-     * @param store the store
-     * @return what was carried back
-     * @throws IOException if there is no previous build, the working folder is taken, or a rename fails
-     */
-    public static Carried restore(Path store) throws IOException {
-        Path previous = previousFolder(store);
-        if (!Files.isDirectory(previous)) {
-            throw new IOException("No previous build at " + previous);
-        }
-        Path aside = workFolder(store);
-        if (Files.exists(aside)) {
-            throw new IOException(aside + " already exists; move it away before restoring");
-        }
-        Files.move(store, aside, StandardCopyOption.ATOMIC_MOVE);
-        try {
-            Files.move(previous, store, StandardCopyOption.ATOMIC_MOVE);
-        } catch (IOException e) {
-            Files.move(aside, store, StandardCopyOption.ATOMIC_MOVE);
-            throw e;
-        }
-        Carried carried = carry(aside, store);
-        Files.move(aside, previous, StandardCopyOption.ATOMIC_MOVE);
-        return carried;
-    }
-
-    /**
-     * The previous build of a family's current store, when one is kept.
-     *
-     * @param family the knowledge base
-     * @return the member named {@code <store>.previous}
-     */
-    public static Optional<KnowledgeBase> previous(KnowledgeBaseFamily family) {
-        return family.latest().flatMap(latest -> family.members().stream()
-                .filter(member -> member.name().equals(latest.name() + PREVIOUS_SUFFIX)).findFirst());
     }
 
     static void deleteTree(Path root) throws IOException {

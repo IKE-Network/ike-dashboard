@@ -59,16 +59,17 @@ From then on it updates itself (see [Self-update](#self-update)). The links neve
   (`IKE-Network/ike-issues#1357`).
   A dialog names the copy it acts on by its folder (`solor-gudid-kb in ~/Solor`), since a knowledge base can
   have several copies, and the window's and every dialog's words can be selected and copied, read-only
-  (`IKE-Network/ike-issues#1358`, `#1359`). Each copy is upgraded on its own: the detail shows the newest, and
-  its *Other copies* table offers *Upgrade…* for any folder behind the newest build, and *Restore previous
-  build…* in a copy's menu when it has one.
+  (`IKE-Network/ike-issues#1358`, `#1359`). The same knowledge base may be in several folders, each with its own
+  change sets and its own reason for being, and each is upgraded on its own: the detail shows the newest, and
+  its *Other copies* table offers *Upgrade…* for every folder behind the newest build. *Copy to a new folder…*,
+  on any folder's menu, copies the whole folder beside it under a name you give, cloned on macOS
+  (`IKE-Network/ike-issues#1360`).
 
   A store has three operations (decision 20 of `dev-ike-dashboard`). *Upgrade* brings it to the newest
   build in place: the build downloads into `<store>.upgrade` beside it, the change-set folders, the
   preferences and every git repository in the store are carried into it, a Komet from 26.1107.1831 on
   checks with no window (`--load-change-sets`) that it opens and loads every change set, and the two
-  folders swap by rename, the old store kept as `<store>.previous` until it is removed; *Restore* swaps
-  them back, carrying along the work done since. When some change sets do not load, the dashboard says
+  folders swap by rename; the old build, confirmed replaced, goes to the Trash, which is the way back. When some change sets do not load, the dashboard says
   what each contains, who packaged it and why it was refused, and the person cancels the upgrade or
   sets them aside in `unprocessedChangeSets/`, which Komet never reads and later upgrades carry along
   (`IKE-Network/ike-issues#1356`); a change set in a git repository with a remote is never moved out.

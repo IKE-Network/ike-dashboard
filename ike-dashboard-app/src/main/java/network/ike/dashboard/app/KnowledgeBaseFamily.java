@@ -69,8 +69,7 @@ public record KnowledgeBaseFamily(String name, List<KnowledgeBase> members) {
      *         no provider lists
      */
     public Optional<KnowledgeBase> latest() {
-        return members.stream().filter(member -> member.kind().opensInKomet() && !StoreUpgrade.isPrevious(member.name()))
-                .findFirst();
+        return members.stream().filter(member -> member.kind().opensInKomet()).findFirst();
     }
 
     /**
@@ -79,8 +78,7 @@ public record KnowledgeBaseFamily(String name, List<KnowledgeBase> members) {
      * @return the newest identified openable copy
      */
     public Optional<KnowledgeBase> latestIdentified() {
-        return members.stream().filter(member -> member.kind().opensInKomet() && member.identified()
-                && !StoreUpgrade.isPrevious(member.name())).findFirst();
+        return members.stream().filter(member -> member.kind().opensInKomet() && member.identified()).findFirst();
     }
 
     /**

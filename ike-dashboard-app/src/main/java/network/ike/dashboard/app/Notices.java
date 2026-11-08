@@ -187,8 +187,8 @@ public final class Notices {
                     .orElse(""), Notice.Urgency.ACTION, "A newer build of " + family.displayName() + " is on Nexus",
                     deployed + (upgradable
                             ? "Upgrade brings your copy, " + identified.whereShown() + ", to it and keeps its change"
-                                    + " sets, preferences and repositories; the build it has now stays beside it until you"
-                                    + " remove it."
+                                    + " sets, preferences and repositories; the build it has now goes to the "
+                                    + Finder.trashName() + "."
                             : "It installs a copy beside the one you have, which stays as it is. Upgrading in place"
                                     + " needs Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE + " or later."),
                     Optional.of(family.name()),

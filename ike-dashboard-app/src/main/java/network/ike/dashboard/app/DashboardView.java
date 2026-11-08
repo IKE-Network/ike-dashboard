@@ -161,7 +161,7 @@ public final class DashboardView extends BorderPane {
     private boolean updatingDashboard;
     private Consumer<NoticeAction.Upgrade> onUpgrade = action -> { };
     private Consumer<NoticeAction.Reinstall> onReinstall = action -> { };
-    private Consumer<KnowledgeBase> onRestore = store -> { };
+    private java.util.function.BiConsumer<KnowledgeBase, String> onCopy = (store, name) -> { };
     /**
      * The window's two views, one segmented control (KEC, 2026-11-08): the knowledge bases, a list and the
      * chosen one's detail, and the notices, across the whole window. Notices is the landing page.
@@ -573,12 +573,12 @@ public final class DashboardView extends BorderPane {
     }
 
     /**
-     * What Restore does, once confirmed, given the store whose previous build goes back.
+     * What Copy to a new folder does, once the person names the folder.
      *
-     * @param action the action
+     * @param action given the store and the new folder's name
      */
-    public void setOnRestore(Consumer<KnowledgeBase> action) {
-        onRestore = action;
+    public void setOnCopy(java.util.function.BiConsumer<KnowledgeBase, String> action) {
+        onCopy = action;
     }
 
     /**
@@ -928,7 +928,6 @@ public final class DashboardView extends BorderPane {
             case NoticeAction.InstallCopy(Coordinate coordinate, String classifier) -> onDownload.accept(coordinate, classifier);
             case NoticeAction.Upgrade upgrade -> confirmUpgrade(upgrade);
             case NoticeAction.Reinstall reinstall -> confirmReinstall(reinstall);
-            case NoticeAction.Restore(KnowledgeBase store) -> confirmRestore(store);
             case NoticeAction.InstallKomet(KometRelease release) -> onInstallKomet.accept(release);
             case NoticeAction.UpdateDashboard(KometRelease release) -> onUpdateDashboard.accept(release);
             case NoticeAction.MoveDashboard() -> onMoveDashboard.run();
@@ -1455,15 +1454,14 @@ public final class DashboardView extends BorderPane {
             HBox row = new HBox(10, newer, gap, upgrade, copyBeside);
             row.setAlignment(Pos.CENTER_LEFT);
             VBox box = new VBox(4, row, muted(validator.isPresent()
-                    ? "Upgrade keeps your change sets, preferences and repositories, and keeps the build you have beside it."
+                    ? "Upgrade keeps your change sets, preferences and repositories; the build you have goes to the "
+                            + Finder.trashName() + "."
                     : "Upgrading in place needs Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE + " or later, which checks the"
                             + " new build with no window; a copy can be installed beside."));
             box.setPadding(new Insets(8, 10, 8, 10));
             box.setStyle("-fx-background-color: #fff3e0; -fx-background-radius: 6;");
             detail.getChildren().add(box);
         }
-
-        StoreUpgrade.previous(family).ifPresent(previous -> detail.getChildren().add(previousBox(copy, previous)));
 
         Optional<KometInstallation> komet = launcher(copy);
         Button open = new Button("Open");
@@ -1603,29 +1601,6 @@ public final class DashboardView extends BorderPane {
         return label;
     }
 
-    /** The row for a store's previous build, kept beside it since the upgrade (decision 20). */
-    private Node previousBox(KnowledgeBase copy, KnowledgeBase previous) {
-        TextArea text = SelectableText.of("The build before the upgrade is kept beside this one as " + previous.name() + " ("
-                + DashboardCommand.size(previous.sizeBytes()) + ", " + previous.resolvedVersion().orElse("version unknown") + ").");
-        text.setWrapText(true);
-        HBox.setHgrow(text, Priority.ALWAYS);
-        boolean busy = transferring(upgradeKey(copy.path()));
-        Button restore = new Button("Restore");
-        restore.setDisable(busy);
-        restore.setMinWidth(Region.USE_PREF_SIZE);
-        restore.setOnAction(event -> confirmRestore(copy));
-        Button trash = new Button("Move to " + Finder.trashName() + "…");
-        trash.setDisable(busy);
-        trash.setMinWidth(Region.USE_PREF_SIZE);
-        trash.setOnAction(event -> confirmTrash(List.of(previous)));
-        Region gap = new Region();
-        HBox.setHgrow(gap, Priority.ALWAYS);
-        HBox row = new HBox(10, text, gap, restore, trash);
-        row.setAlignment(Pos.CENTER_LEFT);
-        row.setPadding(new Insets(8, 10, 8, 10));
-        row.setStyle("-fx-background-color: #eef3f8; -fx-background-radius: 6;");
-        return row;
-    }
 
     private void confirmUpgrade(NoticeAction.Upgrade action) {
         KnowledgeBase store = action.store();
@@ -1670,9 +1645,53 @@ public final class DashboardView extends BorderPane {
                 + "The newest build downloads into " + StoreUpgrade.workFolder(store.path()).getFileName()
                 + " beside it, and your change sets, preferences and repositories are carried into it. Komet " + validator
                 + " then checks, with no window, that it opens and loads every change set. If it does, the new build"
-                + " takes the name " + store.name() + ", and the build you have now is kept as "
-                + StoreUpgrade.previousFolder(store.path()).getFileName() + " until you remove it; Restore puts it"
-                + " back.\n\nQuit any Komet that has this copy open first.";
+                + " takes the name " + store.name() + " and the build you have now goes to the " + Finder.trashName()
+                + ", which is the way back. If it does not, " + store.name() + " stays as it is.\n\nOther folders of "
+                + store.displayName() + " are not changed: each is upgraded on its own.\n\nQuit any Komet that has"
+                + " this copy open first.";
+    }
+
+    /** Asks for the new folder's name, then copies the store into it. */
+    private void askCopy(KnowledgeBase store) {
+        javafx.scene.control.TextInputDialog dialog = new javafx.scene.control.TextInputDialog(
+                StoreCopy.suggestedName(store.path()));
+        dialog.setTitle("Copy to a new folder");
+        dialog.setHeaderText("Copy " + store.name() + " to a new folder?");
+        dialog.setContentText("Name");
+        TextArea about = SelectableText.of(copyText(store), SelectableText.DIALOG_WIDTH);
+        TextArea problem = SelectableText.of("", SelectableText.DIALOG_WIDTH);
+        problem.setStyle(PROBLEM);
+        javafx.scene.control.TextField name = dialog.getEditor();
+        Node ok = dialog.getDialogPane().lookupButton(ButtonType.OK);
+        Runnable check = () -> {
+            Optional<String> wrong = StoreCopy.nameProblem(store.path(), name.getText());
+            problem.setText(wrong.orElse(""));
+            ok.setDisable(wrong.isPresent());
+        };
+        name.textProperty().addListener((observable, was, now) -> check.run());
+        check.run();
+        HBox field = new HBox(8, new Label("Name"), name);
+        field.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(name, Priority.ALWAYS);
+        dialog.getDialogPane().setContent(new VBox(10, about, field, problem));
+        if (getScene() != null) {
+            dialog.initOwner(getScene().getWindow());
+        }
+        SelectableText.in(dialog);
+        dialog.showAndWait().map(String::strip).filter(text -> StoreCopy.nameProblem(store.path(), text).isEmpty())
+                .ifPresent(text -> onCopy.accept(store, text));
+    }
+
+    /**
+     * What Copy to a new folder does.
+     *
+     * @param store the copy to copy
+     * @return the text
+     */
+    static String copyText(KnowledgeBase store) {
+        return "The folder " + store.whereShown() + " is copied whole into a new folder beside it: its build, change sets,"
+                + " preferences and repositories. The two are then separate copies of " + store.displayName()
+                + ", each with its own change sets, opened and upgraded on its own.";
     }
 
     private void confirmReinstall(NoticeAction.Reinstall action) {
@@ -1692,22 +1711,6 @@ public final class DashboardView extends BorderPane {
         alert.showAndWait().filter(ButtonType.OK::equals).ifPresent(ok -> onReinstall.accept(action));
     }
 
-    private void confirmRestore(KnowledgeBase store) {
-        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-        alert.setTitle("Restore");
-        alert.setHeaderText("Put back the previous build of " + store.displayName() + "?");
-        alert.setContentText("Your copy is the folder " + store.whereShown() + ", and its previous build is "
-                + StoreUpgrade.previousFolder(store.path()).getFileName() + ".\n\n");
-        alert.setContentText(alert.getContentText() + "The build you have now steps aside and becomes the previous one, and the previous build takes"
-                + " its place. The change sets and preferences written since are carried into it, so nothing is lost, and"
-                + " Restore again swaps them back. Quit any Komet that has this store open first.");
-        alert.getButtonTypes().setAll(ButtonType.CANCEL, ButtonType.OK);
-        if (getScene() != null) {
-            alert.initOwner(getScene().getWindow());
-        }
-        SelectableText.in(alert);
-        alert.showAndWait().filter(ButtonType.OK::equals).ifPresent(ok -> onRestore.accept(store));
-    }
 
     private static String nexusNote(BuildStatus status) {
         return switch (status.state()) {
@@ -1777,9 +1780,6 @@ public final class DashboardView extends BorderPane {
 
     /** What a copy that is not behind says in the Nexus column. */
     private String standing(KnowledgeBase copy) {
-        if (StoreUpgrade.isPrevious(copy.name())) {
-            return "kept by an upgrade";
-        }
         return newestFor(copy).map(newest -> NewerBuildCheck.compare(copy, newest).state())
                 .map(state -> switch (state) {
                     case CURRENT -> "newest build";
@@ -1795,15 +1795,13 @@ public final class DashboardView extends BorderPane {
     }
 
     /**
-     * The upgrade of one copy, when that folder is behind the newest build on Nexus and says which build it is. A
-     * copy kept by an upgrade ({@code .previous}) is not offered one.
+     * The upgrade of one copy, when that folder is behind the newest build on Nexus and says which build it is.
      *
      * @param copy the copy
      * @return its upgrade
      */
     Optional<NoticeAction.Upgrade> upgradeOf(KnowledgeBase copy) {
-        if (!copy.kind().opensInKomet() || !copy.identified() || StoreUpgrade.isPrevious(copy.name())
-                || copy.coordinate().isEmpty()) {
+        if (!copy.kind().opensInKomet() || !copy.identified() || copy.coordinate().isEmpty()) {
             return Optional.empty();
         }
         return newestFor(copy).filter(newest -> NewerBuildCheck.compare(copy, newest).state() == BuildStatus.State.NEWER)
@@ -1885,15 +1883,8 @@ public final class DashboardView extends BorderPane {
                     item.setOnAction(event -> confirmUpgrade(upgrade));
                     items.add(item);
                 });
-                if (families.stream().flatMap(family -> family.members().stream())
-                        .anyMatch(member -> member.path().equals(StoreUpgrade.previousFolder(copy.path())))) {
-                    MenuItem restore = new MenuItem("Restore previous build…");
-                    restore.setDisable(transferring(upgradeKey(copy.path())));
-                    restore.setOnAction(event -> confirmRestore(copy));
-                    items.add(restore);
-                }
             }
-            copy.coordinate().filter(coordinate -> copy.identified() && !StoreUpgrade.isPrevious(copy.name())).ifPresent(coordinate -> {
+            copy.coordinate().filter(coordinate -> copy.identified()).ifPresent(coordinate -> {
                 MenuItem reinstall = new MenuItem("Reinstall…");
                 reinstall.setDisable(transferring(upgradeKey(copy.path())) || transferring(downloadKey(coordinate, copy.kind().classifier())));
                 reinstall.setOnAction(event -> confirmReinstall(new NoticeAction.Reinstall(copy, coordinate, copy.kind().classifier())));
@@ -1908,8 +1899,14 @@ public final class DashboardView extends BorderPane {
             content.putString(copy.path().toString());
             Clipboard.getSystemClipboard().setContent(content);
         });
+        MenuItem duplicate = new MenuItem("Copy to a new folder…");
+        duplicate.setDisable(transferring(upgradeKey(copy.path())));
+        duplicate.setOnAction(event -> askCopy(copy));
         items.add(reveal);
         items.add(copyPath);
+        if (copy.kind().opensInKomet()) {
+            items.add(duplicate);
+        }
         if (withOpenAndTrash) {
             MenuItem trash = new MenuItem("Move to " + Finder.trashName() + "…");
             trash.setOnAction(event -> confirmTrash(List.of(copy)));
