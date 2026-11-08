@@ -24,6 +24,8 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.collections.transformation.FilteredList;
 import javafx.geometry.Insets;
+import javafx.geometry.VPos;
+import javafx.geometry.HPos;
 import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
@@ -57,6 +59,8 @@ import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.MouseButton;
 import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.GridPane;
+import javafx.scene.layout.ColumnConstraints;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -919,7 +923,9 @@ public final class DashboardView extends BorderPane {
             box.getChildren().add(muted(families.isEmpty()
                     ? "No knowledge bases downloaded. Get one from Nexus to begin." : "Nothing needs your attention."));
         }
-        notices.forEach(notice -> box.getChildren().add(noticeCard(notice)));
+        if (!notices.isEmpty()) {
+            box.getChildren().add(noticeGrid(notices));
+        }
         box.getChildren().add(muted(nexusChecked
                 .map(checked -> checked.current() ? "Nexus checked " + WHEN.format(checked.checkedAt())
                         : "Could not reach Nexus. This is what it listed at " + WHEN.format(checked.checkedAt()) + ".")
@@ -1043,10 +1049,51 @@ public final class DashboardView extends BorderPane {
         alert.showAndWait().filter(ButtonType.OK::equals).ifPresent(ok -> onTrashKomets.accept(removing));
     }
 
-    private Node noticeCard(Notice notice) {
+    /**
+     * The notices as one grid, so every card's actions line up (KEC, 2026-11-08: "make it smoother and pixel
+     * perfect"): the words take the free width; then one column for the action button, every button as wide as the
+     * widest; one for Show; one for Dismiss. A card's background spans its row, behind its cells. Nothing in the
+     * action columns is ever narrower than its words, so no label shrinks to an ellipsis.
+     */
+    private GridPane noticeGrid(List<Notice> shown) {
+        GridPane grid = new GridPane();
+        grid.setVgap(10);
+        ColumnConstraints words = new ColumnConstraints();
+        words.setHgrow(Priority.ALWAYS);
+        words.setFillWidth(true);
+        words.setMinWidth(160);
+        ColumnConstraints act = new ColumnConstraints();
+        act.setMinWidth(Region.USE_PREF_SIZE);
+        act.setFillWidth(true);
+        ColumnConstraints link = new ColumnConstraints();
+        link.setMinWidth(Region.USE_PREF_SIZE);
+        link.setHalignment(HPos.CENTER);
+        ColumnConstraints dismissColumn = new ColumnConstraints();
+        dismissColumn.setMinWidth(Region.USE_PREF_SIZE);
+        dismissColumn.setHalignment(HPos.CENTER);
+        grid.getColumnConstraints().setAll(words, act, link, dismissColumn);
+        int row = 0;
+        for (Notice notice : shown) {
+            noticeRow(grid, row++, notice);
+        }
+        return grid;
+    }
+
+    /** One notice as a row of the grid: its card, its words, and its actions in their columns. */
+    private void noticeRow(GridPane grid, int row, Notice notice) {
+        Region card = new Region();
+        card.setStyle("-fx-background-radius: 6; -fx-background-color: " + switch (notice.urgency()) {
+            case AT_RISK -> "#fdecea;";
+            case ACTION -> "#fff3e0;";
+            case NEWS -> "#eef3f8;";
+        });
+        card.setMaxWidth(Double.MAX_VALUE);
+        card.setMaxHeight(Double.MAX_VALUE);
+        grid.add(card, 0, row, 4, 1);
+
         SelectableText heading = SelectableText.of(notice.title());
         heading.setStyle("-fx-font-weight: bold;");
-        VBox text = new VBox(2, heading);
+        VBox text = new VBox(3, heading);
         if (!notice.detail().isBlank()) {
             text.getChildren().add(muted(notice.detail()));
         }
@@ -1056,10 +1103,11 @@ public final class DashboardView extends BorderPane {
             checked.setStyle("-fx-font-size: 11px;" + MUTED);
             text.getChildren().add(checked);
         });
-        HBox.setHgrow(text, Priority.ALWAYS);
         text.setMaxWidth(Double.MAX_VALUE);
-        HBox row = new HBox(10, text);
-        row.setAlignment(Pos.CENTER_LEFT);
+        GridPane.setValignment(text, VPos.CENTER);
+        GridPane.setMargin(text, new Insets(10, 16, 10, 14));
+        grid.add(text, 0, row);
+
         notice.action().ifPresent(action -> {
             boolean updating = updatingDashboard
                     && (action instanceof NoticeAction.UpdateDashboard || action instanceof NoticeAction.MoveDashboard);
@@ -1070,20 +1118,25 @@ public final class DashboardView extends BorderPane {
             };
             boolean upgrading = action instanceof NoticeAction.Upgrade(KnowledgeBase store, Coordinate c, String k)
                     && transferring(upgradeKey(store.path()));
-            boolean running = updating || downloading || upgrading;
             Button button = new Button(updating ? "Updating …" : upgrading ? "Upgrading …" : downloading ? "Downloading …"
                     : action.label());
-            button.setDisable(running);
+            button.setDisable(updating || downloading || upgrading);
             button.setMinWidth(Region.USE_PREF_SIZE);
+            button.setMaxWidth(Double.MAX_VALUE);
             button.setOnAction(event -> act(action));
-            row.getChildren().add(button);
+            GridPane.setValignment(button, VPos.CENTER);
+            GridPane.setMargin(button, new Insets(10, 6, 10, 0));
+            grid.add(button, 1, row);
         });
         // A notice about one knowledge base opens it, beside whatever it offers to do (KEC, 2026-11-08).
         boolean showsAlready = notice.action().filter(NoticeAction.Show.class::isInstance).isPresent();
         notice.family().filter(family -> !showsAlready).ifPresent(family -> {
             Hyperlink show = new Hyperlink("Show");
+            show.setMinWidth(Region.USE_PREF_SIZE);
             show.setOnAction(event -> select(family));
-            row.getChildren().add(show);
+            GridPane.setValignment(show, VPos.CENTER);
+            GridPane.setMargin(show, new Insets(10, 2, 10, 2));
+            grid.add(show, 2, row);
         });
         Hyperlink dismiss = new Hyperlink("Dismiss");
         dismiss.setMinWidth(Region.USE_PREF_SIZE);
@@ -1091,14 +1144,9 @@ public final class DashboardView extends BorderPane {
             onDismiss.accept(notice.id());
             refreshNotices();
         });
-        row.getChildren().add(dismiss);
-        row.setPadding(new Insets(8, 10, 8, 10));
-        row.setStyle("-fx-background-radius: 6; -fx-background-color: " + switch (notice.urgency()) {
-            case AT_RISK -> "#fdecea;";
-            case ACTION -> "#fff3e0;";
-            case NEWS -> "#eef3f8;";
-        });
-        return row;
+        GridPane.setValignment(dismiss, VPos.CENTER);
+        GridPane.setMargin(dismiss, new Insets(10, 10, 10, 2));
+        grid.add(dismiss, 3, row);
     }
 
     private void act(NoticeAction action) {

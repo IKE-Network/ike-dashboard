@@ -114,7 +114,7 @@ class DashboardViewSnapshotTest {
                         java.net.URI.create("https://nexus.tinkar.org/x.zip"), 234_000_000, Optional.empty(), Optional.empty(),
                         Optional.empty(), "osx-aarch64")));
                 view.select("pizza-kb");
-                view.setMessage(families.size() + " knowledge bases · 1 with a newer build");
+                view.setMessage(families.size() + " knowledge bases · 1 with a newer version");
                 Scene scene = new Scene(view, 1080, 480);
                 view.applyCss();
                 view.layout();
