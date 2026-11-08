@@ -15,138 +15,155 @@
  */
 package network.ike.dashboard.app;
 
-import javafx.beans.binding.Bindings;
+import javafx.geometry.Orientation;
+import javafx.geometry.Point2D;
+import javafx.scene.Cursor;
 import javafx.scene.Node;
-import javafx.scene.Parent;
+import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.DialogPane;
-import javafx.scene.control.TextArea;
-import javafx.scene.input.ScrollEvent;
+import javafx.scene.control.MenuItem;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyCodeCombination;
+import javafx.scene.input.KeyCombination;
+import javafx.scene.input.MouseButton;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
+import javafx.scene.paint.Color;
+import javafx.scene.shape.Path;
 import javafx.scene.text.Text;
+import javafx.scene.text.TextFlow;
 
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
+import java.lang.ref.WeakReference;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * Text a person can select and copy but not change, which reads as a label: the dashboard's dialogs say what
- * they say this way, so a folder name, a reason or a version can be copied out of them. A JavaFX label cannot be
- * selected, so this is a read-only text area without a border, background or scroll bars, as tall as its text.
- * The main window's words are made the same way (KEC, 2026-11-08: text is copyable by default, even read-only).
+ * Text a person can select and copy but not change, which reads as a label (KEC, 2026-11-08: text is copyable by
+ * default, even read-only), with the names of files, folders and paths in bold ({@link Names}). A JavaFX label
+ * cannot be selected and a text area cannot mix bold with plain, so this is a {@link TextFlow} of runs with a
+ * selection of its own: drag to select, double-click for a word or a whole path, triple-click for all, and
+ * Copy with the shortcut or the context menu. It wraps at its width and is as tall as its text.
+ *
+ * <p>A style set on it with {@link #setStyle} is given to its runs, with {@code -fx-text-fill} read as the runs'
+ * {@code -fx-fill}, so it takes the same styles as a label.
  */
-final class SelectableText {
+final class SelectableText extends Region {
 
     /** How wide a dialog's text is, unless a dialog says otherwise. */
     static final double DIALOG_WIDTH = 480;
 
-    private static final String CSS = """
-            .selectable-text, .selectable-text:focused {
-                -fx-background-color: transparent;
-                -fx-background-insets: 0;
-                -fx-background-radius: 0;
-                -fx-padding: 0;
-                -fx-focus-color: transparent;
-                -fx-faint-focus-color: transparent;
-                -fx-text-fill: -fx-text-background-color;
-                -fx-highlight-fill: #b3d7ff;
-                -fx-highlight-text-fill: -fx-text-background-color;
-                -fx-display-caret: false;
+    private static final Color SELECTION = Color.web("#b3d7ff");
+    private static final String NAME_STYLE = "-fx-font-weight: bold;";
+    private static final KeyCombination COPY = new KeyCodeCombination(KeyCode.C, KeyCombination.SHORTCUT_DOWN);
+    private static final KeyCombination SELECT_ALL = new KeyCodeCombination(KeyCode.A, KeyCombination.SHORTCUT_DOWN);
+
+    /** The one text with a selection: choosing in another clears it, as in a document. */
+    private static WeakReference<SelectableText> selecting = new WeakReference<>(null);
+
+    private final TextFlow flow = new TextFlow();
+    private final Path highlight = new Path();
+    private final double fixedWidth;
+    private String marked = "";
+    private String plain = "";
+    private List<Boolean> runIsName = List.of();
+    private int anchor;
+    private int start;
+    private int end;
+
+    private SelectableText(String text, double fixedWidth) {
+        this.fixedWidth = fixedWidth;
+        getStyleClass().add("selectable-text");
+        highlight.setFill(SELECTION);
+        highlight.setStroke(null);
+        highlight.setManaged(false);
+        highlight.setMouseTransparent(true);
+        flow.setMouseTransparent(true);
+        getChildren().addAll(highlight, flow);
+        setCursor(Cursor.TEXT);
+        setFocusTraversable(false);
+        styleProperty().addListener((observable, was, now) -> styleRuns());
+        setOnMousePressed(event -> {
+            if (event.getButton() != MouseButton.PRIMARY) {
+                return;
             }
-            .selectable-text .content {
-                -fx-background-color: transparent;
-                -fx-padding: 0;
-            }
-            .selectable-text .scroll-pane {
-                -fx-background-color: transparent;
-                -fx-hbar-policy: never;
-                -fx-vbar-policy: never;
-            }
-            .selectable-text .scroll-pane .viewport {
-                -fx-background-color: transparent;
-            }
-            .selectable-text.heading {
-                -fx-font-weight: bold;
-                -fx-font-size: 1.15em;
-            }
-            """;
-
-    /** The style sheet a scene or dialog takes so its selectable text reads as a label. */
-    static final String STYLESHEET = "data:text/css;base64,"
-            + Base64.getEncoder().encodeToString(CSS.getBytes(StandardCharsets.UTF_8));
-
-    /** Leaves room so the measure never wraps later than the text area does. */
-    private static final double WRAP_SLACK = 4;
-
-    private SelectableText() {
-    }
-
-    /**
-     * Text that can be selected and copied, wrapped at the given width and as tall as it needs. Its scene, or its
-     * dialog, takes {@link #STYLESHEET}.
-     *
-     * @param text  the text
-     * @param width the width it wraps at, unless laid out wider or narrower
-     * @return the text
-     */
-    static TextArea of(String text, double width) {
-        TextArea area = area(text);
-        area.setPrefWidth(width);
-        area.prefHeightProperty().bind(Bindings.createDoubleBinding(
-                () -> height(area.getText(), area.getWidth() > 0 ? area.getWidth() : width, area),
-                area.textProperty(), area.widthProperty(), area.fontProperty()));
-        return area;
-    }
-
-    /**
-     * Text that can be selected and copied, as wide as its longest line unless laid out narrower, when it wraps,
-     * and as tall as it needs: what a wrapping label is in a window. Its scene takes {@link #STYLESHEET}.
-     *
-     * @param text the text
-     * @return the text
-     */
-    static TextArea of(String text) {
-        TextArea area = area(text);
-        area.setMinWidth(20);
-        area.setMaxWidth(Double.MAX_VALUE);
-        area.prefWidthProperty().bind(Bindings.createDoubleBinding(() -> natural(area.getText(), area),
-                area.textProperty(), area.fontProperty()));
-        area.prefHeightProperty().bind(Bindings.createDoubleBinding(
-                () -> height(area.getText(), area.getWidth() > 0 ? area.getWidth() : area.getPrefWidth(), area),
-                area.textProperty(), area.widthProperty(), area.prefWidthProperty(), area.fontProperty()));
-        return area;
-    }
-
-    private static TextArea area(String text) {
-        TextArea area = new TextArea(text);
-        area.getStyleClass().add("selectable-text");
-        area.setEditable(false);
-        area.setWrapText(true);
-        // Clicking still selects; the keyboard goes past it to the buttons.
-        area.setFocusTraversable(false);
-        area.setMinHeight(Region.USE_PREF_SIZE);
-        // It is as tall as its text and never scrolls, so the wheel scrolls what contains it.
-        area.addEventFilter(ScrollEvent.ANY, event -> {
-            Parent parent = area.getParent();
-            if (parent != null) {
-                event.consume();
-                parent.fireEvent(event.copyFor(parent, parent));
+            requestFocus();
+            claimSelection();
+            int at = indexAt(event.getX(), event.getY());
+            switch (event.getClickCount()) {
+                case 1 -> {
+                    anchor = at;
+                    select(at, at);
+                }
+                case 2 -> selectWordAt(at);
+                default -> selectAll();
             }
         });
-        return area;
+        setOnMouseDragged(event -> {
+            if (event.getButton() == MouseButton.PRIMARY) {
+                int at = indexAt(event.getX(), event.getY());
+                select(Math.min(anchor, at), Math.max(anchor, at));
+            }
+        });
+        setOnKeyPressed(event -> {
+            if (COPY.match(event)) {
+                copy();
+                event.consume();
+            } else if (SELECT_ALL.match(event)) {
+                selectAll();
+                event.consume();
+            }
+        });
+        setOnContextMenuRequested(event -> {
+            MenuItem copy = new MenuItem("Copy");
+            copy.setDisable(start == end);
+            copy.setOnAction(action -> copy());
+            MenuItem all = new MenuItem("Select All");
+            all.setOnAction(action -> {
+                claimSelection();
+                selectAll();
+            });
+            new ContextMenu(copy, all).show(this, event.getScreenX(), event.getScreenY());
+            event.consume();
+        });
+        setText(text);
     }
 
     /**
-     * Like {@link #of}, set as a heading.
+     * Text as wide as its longest line unless laid out narrower, when it wraps: what a wrapping label is.
+     *
+     * @param text the text, names marked with {@link Names#of}
+     * @return the text
+     */
+    static SelectableText of(String text) {
+        return new SelectableText(text, -1);
+    }
+
+    /**
+     * Text that wraps at the given width unless laid out otherwise.
+     *
+     * @param text  the text, names marked with {@link Names#of}
+     * @param width the width it wraps at
+     * @return the text
+     */
+    static SelectableText of(String text, double width) {
+        return new SelectableText(text, width);
+    }
+
+    /**
+     * Like {@link #of(String, double)}, set as a dialog's heading.
      *
      * @param text  the heading
      * @param width the width it wraps at
      * @return the heading
      */
-    static TextArea heading(String text, double width) {
-        TextArea area = of(text, width);
-        area.getStyleClass().add("heading");
-        return area;
+    static SelectableText heading(String text, double width) {
+        SelectableText heading = of(text, width);
+        heading.getStyleClass().add("heading");
+        heading.setStyle("-fx-font-weight: bold; -fx-font-size: 15px;");
+        return heading;
     }
 
     /**
@@ -163,7 +180,7 @@ final class SelectableText {
         String header = pane.getHeaderText();
         String content = pane.getContentText();
         Node own = pane.getContent();
-        if (pane.getHeader() != null || (blank(header) && blank(content))) {
+        if (pane.getHeader() != null || (blank(header) && blank(content) && own == null)) {
             return dialog;
         }
         VBox words = new VBox(10);
@@ -178,26 +195,177 @@ final class SelectableText {
         pane.setHeaderText(null);
         pane.setContentText(null);
         pane.setContent(words);
-        pane.getStylesheets().add(STYLESHEET);
         return dialog;
+    }
+
+    /**
+     * The text, without the marks of its names.
+     *
+     * @return the text
+     */
+    String getText() {
+        return plain;
+    }
+
+    /**
+     * Sets the text, clearing the selection.
+     *
+     * @param text the text, names marked with {@link Names#of}
+     */
+    void setText(String text) {
+        String now = text == null ? "" : text;
+        if (now.equals(marked)) {
+            return;
+        }
+        marked = now;
+        plain = Names.plain(now);
+        List<Text> runs = new ArrayList<>();
+        List<Boolean> names = new ArrayList<>();
+        StringBuilder run = new StringBuilder();
+        boolean inName = false;
+        for (int i = 0; i < now.length(); i++) {
+            char c = now.charAt(i);
+            if (c == Names.START || c == Names.END) {
+                if (!run.isEmpty()) {
+                    runs.add(new Text(run.toString()));
+                    names.add(inName);
+                    run.setLength(0);
+                }
+                inName = c == Names.START;
+            } else {
+                run.append(c);
+            }
+        }
+        if (!run.isEmpty() || runs.isEmpty()) {
+            runs.add(new Text(run.toString()));
+            names.add(inName);
+        }
+        runIsName = List.copyOf(names);
+        flow.getChildren().setAll(runs);
+        styleRuns();
+        anchor = 0;
+        select(0, 0);
+        requestLayout();
+    }
+
+    /**
+     * Selects a range of the text.
+     *
+     * @param from the first character
+     * @param to   one past the last
+     */
+    void select(int from, int to) {
+        start = Math.clamp(Math.min(from, to), 0, plain.length());
+        end = Math.clamp(Math.max(from, to), 0, plain.length());
+        drawSelection();
+    }
+
+    /** Selects the whole text. */
+    void selectAll() {
+        anchor = 0;
+        select(0, plain.length());
+    }
+
+    /**
+     * The selected text.
+     *
+     * @return what is selected, empty when nothing is
+     */
+    String selectedText() {
+        return plain.substring(start, end);
+    }
+
+    /** Copies the selection, or the whole text when nothing is selected. */
+    void copy() {
+        ClipboardContent content = new ClipboardContent();
+        content.putString(start == end ? plain : selectedText());
+        Clipboard.getSystemClipboard().setContent(content);
+    }
+
+    /** A word, or a whole path or folder name: the run of characters around the index that are not spaces. */
+    void selectWordAt(int at) {
+        int from = Math.min(at, plain.length());
+        int to = from;
+        while (from > 0 && !Character.isWhitespace(plain.charAt(from - 1))) {
+            from--;
+        }
+        while (to < plain.length() && !Character.isWhitespace(plain.charAt(to))) {
+            to++;
+        }
+        // A sentence's closing punctuation is not part of the name before it.
+        while (to > from && ",.;:)".indexOf(plain.charAt(to - 1)) >= 0) {
+            to--;
+        }
+        anchor = from;
+        select(from, to);
+    }
+
+    private void claimSelection() {
+        SelectableText before = selecting.get();
+        if (before != null && before != this) {
+            before.select(0, 0);
+        }
+        selecting = new WeakReference<>(this);
+    }
+
+    private int indexAt(double x, double y) {
+        Point2D inFlow = new Point2D(x - flow.getLayoutX(), y - flow.getLayoutY());
+        return Math.clamp(flow.hitTest(inFlow).getInsertionIndex(), 0, plain.length());
+    }
+
+    private void drawSelection() {
+        highlight.getElements().setAll(start == end ? List.of() : List.of(flow.getRangeShape(start, end, true)));
+    }
+
+    /** Gives the runs the style set on this text, names in bold. */
+    private void styleRuns() {
+        String own = getStyle() == null ? "" : getStyle().replace("-fx-text-fill", "-fx-fill");
+        String base = "-fx-fill: -fx-text-background-color;" + own;
+        for (int i = 0; i < flow.getChildren().size(); i++) {
+            flow.getChildren().get(i).setStyle(base + (runIsName.get(i) ? NAME_STYLE : ""));
+        }
     }
 
     private static boolean blank(String text) {
         return text == null || text.isBlank();
     }
 
-    /** How wide the text's longest line is, in the area's font, with room so it does not wrap. */
-    private static double natural(String text, TextArea area) {
-        Text measure = new Text(text.isEmpty() ? " " : text);
-        measure.setFont(area.getFont());
-        return Math.ceil(measure.getLayoutBounds().getWidth()) + WRAP_SLACK + 4;
+    @Override
+    public Orientation getContentBias() {
+        return Orientation.HORIZONTAL;
     }
 
-    /** How tall the text is when wrapped at the width, in the area's font. */
-    private static double height(String text, double width, TextArea area) {
-        Text measure = new Text(text.isEmpty() ? " " : text);
-        measure.setFont(area.getFont());
-        measure.setWrappingWidth(Math.max(1, width - WRAP_SLACK));
-        return Math.ceil(measure.getLayoutBounds().getHeight()) + 2;
+    @Override
+    protected double computePrefWidth(double height) {
+        double insets = snappedLeftInset() + snappedRightInset();
+        return insets + (fixedWidth > 0 ? fixedWidth : Math.ceil(flow.prefWidth(-1)) + 2);
+    }
+
+    @Override
+    protected double computeMinWidth(double height) {
+        return Math.min(20, computePrefWidth(height));
+    }
+
+    @Override
+    protected double computePrefHeight(double width) {
+        double inner = (width < 0 ? computePrefWidth(-1) : width) - snappedLeftInset() - snappedRightInset();
+        return snappedTopInset() + snappedBottomInset() + Math.ceil(flow.prefHeight(Math.max(1, inner)));
+    }
+
+    @Override
+    protected double computeMinHeight(double width) {
+        return computePrefHeight(width);
+    }
+
+    @Override
+    protected void layoutChildren() {
+        double left = snappedLeftInset();
+        double top = snappedTopInset();
+        double width = getWidth() - left - snappedRightInset();
+        flow.resizeRelocate(left, top, width, flow.prefHeight(width));
+        highlight.relocate(left, top);
+        highlight.setLayoutX(left);
+        highlight.setLayoutY(top);
+        drawSelection();
     }
 }

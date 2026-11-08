@@ -58,8 +58,10 @@ From then on it updates itself (see [Self-update](#self-update)). The links neve
   first, each with one action, and Show for a card about one knowledge base
   (`IKE-Network/ike-issues#1357`).
   A dialog names the copy it acts on by its folder (`solor-gudid-kb in ~/Solor`), since a knowledge base can
-  have several copies, and the window's and every dialog's words can be selected and copied, read-only
-  (`IKE-Network/ike-issues#1358`, `#1359`). The same knowledge base may be in several folders, each with its own
+  have several copies, and the window's and every dialog's words can be selected and copied, read-only, with
+  file, folder and path names in bold (`IKE-Network/ike-issues#1358`, `#1359`, `#1361`). A store is open in a
+  Komet while a process holds its `lucene/write.lock` (the file itself stays after Komet closes); Upgrade,
+  Reinstall, Copy and Move to Trash refuse such a store up front. The same knowledge base may be in several folders, each with its own
   change sets and its own reason for being, and each is upgraded on its own: the detail shows the newest, and
   its *Other copies* table offers *Upgrade…* for every folder behind the newest build. *Copy to a new folder…*,
   on any folder's menu, copies the whole folder beside it under a name you give, cloned on macOS

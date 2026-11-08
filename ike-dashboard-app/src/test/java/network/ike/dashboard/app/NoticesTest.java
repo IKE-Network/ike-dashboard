@@ -67,7 +67,7 @@ class NoticesTest {
 
         assertThat(withChecker).singleElement().satisfies(notice -> {
             assertThat(notice.action()).contains(new NoticeAction.Upgrade(latest, PIZZA, "rkb"));
-            assertThat(notice.detail()).contains("Upgrade brings your copy, pizza-kb in /Solor, to it and keeps its change sets, preferences and repositories");
+            assertThat(Names.plain(notice.detail())).contains("Upgrade brings your copy, pizza-kb in /Solor, to it and keeps its change sets, preferences and repositories");
         });
         assertThat(without).singleElement().satisfies(notice -> {
             assertThat(notice.action()).contains(new NoticeAction.InstallCopy(PIZZA, "rkb"));

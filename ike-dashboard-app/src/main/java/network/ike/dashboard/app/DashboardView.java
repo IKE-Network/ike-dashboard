@@ -126,7 +126,7 @@ public final class DashboardView extends BorderPane {
     private final NexusBrowser browser = new NexusBrowser();
     private Stage browserWindow;
     private final VBox detail = new VBox(10);
-    private final TextArea message = SelectableText.of("");
+    private final SelectableText message = SelectableText.of("");
     private final MenuButton kometMenu = new MenuButton();
     private final Hyperlink showLog = new Hyperlink("Show last log");
 
@@ -188,7 +188,6 @@ public final class DashboardView extends BorderPane {
 
     /** Builds the view, empty until data is set. */
     public DashboardView() {
-        getStylesheets().add(SelectableText.STYLESHEET);
         search.setPromptText("Search");
         HBox.setHgrow(search, Priority.ALWAYS);
         ToggleGroup sort = new ToggleGroup();
@@ -637,7 +636,7 @@ public final class DashboardView extends BorderPane {
         Alert alert = new Alert(Alert.AlertType.WARNING);
         alert.setTitle("Upgrade " + store.displayName());
         alert.setHeaderText(refusedHeader(summaries.size()));
-        TextArea text = SelectableText.of(refusedText(summaries, whyNoAside), 600);
+        SelectableText text = SelectableText.of(refusedText(summaries, whyNoAside), 600);
         ScrollPane content = new ScrollPane(text);
         content.setFitToWidth(true);
         content.setPrefViewportHeight(Math.min(360, 90 + 80 * summaries.size()));
@@ -671,7 +670,7 @@ public final class DashboardView extends BorderPane {
     static String refusedText(List<RefusedChangeSets.Summary> summaries, Optional<String> whyNoAside) {
         StringBuilder out = new StringBuilder();
         for (RefusedChangeSets.Summary summary : summaries) {
-            out.append(summary.fileName()).append('\n');
+            out.append(Names.of(summary.fileName())).append('\n');
             List<String> what = new ArrayList<>();
             if (!summary.contents().isEmpty()) {
                 what.add(summary.contents());
@@ -687,7 +686,7 @@ public final class DashboardView extends BorderPane {
             out.append("    ").append(summary.reason()).append("\n\n");
         }
         out.append(whyNoAside.orElse("Set aside moves " + (summaries.size() == 1 ? "it" : "them") + " to "
-                + RefusedChangeSets.UNPROCESSED_FOLDER + " in the store, which Komet does not read, and goes on with the"
+                + Names.of(RefusedChangeSets.UNPROCESSED_FOLDER) + " in the store, which Komet does not read, and goes on with the"
                 + " upgrade; " + (summaries.size() == 1 ? "it stays" : "they stay") + " with the store through later"
                 + " upgrades. Cancel leaves your store as it was."));
         return out.toString();
@@ -733,7 +732,7 @@ public final class DashboardView extends BorderPane {
         text.setEditable(false);
         text.setWrapText(true);
         text.setStyle("-fx-font-family: 'Menlo', monospace;");
-        TextArea log = muted("Log  " + run.log());
+        SelectableText log = muted("Log  " + Names.of(run.log()));
         BorderPane pane = new BorderPane(text);
         pane.setTop(outcome);
         pane.setBottom(log);
@@ -850,7 +849,7 @@ public final class DashboardView extends BorderPane {
     private void showNoticesPane() {
         VBox box = noticesBox;                           // the notices fill the window, not the detail pane
         box.getChildren().clear();
-        TextArea title = SelectableText.of("Notices");
+        SelectableText title = SelectableText.of("Notices");
         title.setStyle("-fx-font-size: 20px; -fx-font-weight: bold;");
         box.getChildren().add(title);
         if (notices.isEmpty()) {
@@ -865,14 +864,14 @@ public final class DashboardView extends BorderPane {
     }
 
     private Node noticeCard(Notice notice) {
-        TextArea heading = SelectableText.of(notice.title());
+        SelectableText heading = SelectableText.of(notice.title());
         heading.setStyle("-fx-font-weight: bold;");
         VBox text = new VBox(2, heading);
         if (!notice.detail().isBlank()) {
             text.getChildren().add(muted(notice.detail()));
         }
         notice.freshness().ifPresent(freshness -> {
-            TextArea checked = muted(freshness.current() ? "checked " + WHEN.format(freshness.checkedAt())
+            SelectableText checked = muted(freshness.current() ? "checked " + WHEN.format(freshness.checkedAt())
                     : "as of " + WHEN.format(freshness.checkedAt()) + "; the last check failed");
             checked.setStyle("-fx-font-size: 11px;" + MUTED);
             text.getChildren().add(checked);
@@ -1064,7 +1063,7 @@ public final class DashboardView extends BorderPane {
         private final Label title = new Label();
         private final Label clock = new Label();
         private final ProgressBar bar = new ProgressBar(0);
-        private final Label status = new Label();
+        private final SelectableText status = SelectableText.of("");
         private final Button cancel = new Button("Cancel");
         private final Hyperlink close = new Hyperlink("Close");
 
@@ -1073,7 +1072,6 @@ public final class DashboardView extends BorderPane {
             title.setStyle("-fx-font-weight: bold;");
             clock.setStyle("-fx-font-size: 11px;" + MUTED);
             status.setStyle(MUTED);
-            status.setWrapText(true);
             bar.setMaxWidth(Double.MAX_VALUE);
             bar.setStyle("-fx-accent: #2e7d32;");
             cancel.setOnAction(event -> transfer.cancel());
@@ -1368,13 +1366,13 @@ public final class DashboardView extends BorderPane {
         }
         Optional<KnowledgeBaseFamily> chosen = selected();
         if (chosen.isEmpty()) {
-            TextArea none = SelectableText.of(families.isEmpty()
+            SelectableText none = SelectableText.of(families.isEmpty()
                     ? "No knowledge bases downloaded. Get one from Nexus to begin." : "Choose a knowledge base");
             none.setStyle(MUTED);
             detail.getChildren().add(none);
             return;
         }
-        TextArea title = SelectableText.of(chosen.get().displayName());
+        SelectableText title = SelectableText.of(chosen.get().displayName());
         title.setStyle("-fx-font-size: 20px; -fx-font-weight: bold;");
         HBox heading = new HBox(12, icon(chosen.get(), 48), title);
         heading.setAlignment(Pos.CENTER_LEFT);
@@ -1383,13 +1381,13 @@ public final class DashboardView extends BorderPane {
     }
 
     private void showUnmanaged(KnowledgeBase entry) {
-        TextArea title = SelectableText.of(entry.name());
+        SelectableText title = SelectableText.of(entry.name());
         title.setStyle("-fx-font-size: 20px; -fx-font-weight: bold;");
         detail.getChildren().add(title);
         detail.getChildren().add(muted(entry.kind().label() + "  ·  " + DashboardCommand.size(entry.sizeBytes())
                 + "  ·  " + WHEN.format(entry.recency())));
         entry.coordinate().ifPresent(coordinate -> detail.getChildren().add(muted(coordinate.toString())));
-        TextArea why = SelectableText.of("Not managed: " + String.join("; ", entry.descriptor().problems()) + ".");
+        SelectableText why = SelectableText.of("Not managed: " + String.join("; ", entry.descriptor().problems()) + ".");
         why.setStyle(ATTENTION);
         detail.getChildren().add(why);
         detail.getChildren().add(muted("The dashboard manages a store that carries a complete knowledge-base descriptor"
@@ -1419,19 +1417,19 @@ public final class DashboardView extends BorderPane {
                 + "  ·  " + WHEN.format(copy.recency())));
         copy.coordinate().ifPresent(coordinate -> {
             BuildStatus status = status(family.name());
-            TextArea build = muted(coordinate.artifactId() + " " + copy.resolvedVersion().orElse(coordinate.version())
+            SelectableText build = muted(coordinate.artifactId() + " " + copy.resolvedVersion().orElse(coordinate.version())
                     + nexusNote(status));
             if (status.state() == BuildStatus.State.CURRENT) {
                 build.setStyle("-fx-text-fill: #2e7d32;");
             }
-            build.setTooltip(new Tooltip(coordinate.toString() + (status.detail().isEmpty() ? "" : "\n" + status.detail())));
+            Tooltip.install(build, new Tooltip(coordinate.toString() + (status.detail().isEmpty() ? "" : "\n" + status.detail())));
             detail.getChildren().add(build);
         });
 
         BuildStatus status = status(family.name());
         if (status.state() == BuildStatus.State.NEWER && status.newest().isPresent()) {
             KnowledgeBase identified = family.latestIdentified().orElse(copy);
-            TextArea newer = SelectableText.of("A newer build is on Nexus, deployed "
+            SelectableText newer = SelectableText.of("A newer build is on Nexus, deployed "
                     + WHEN.format(status.newest().get().updated()) + ", for your copy " + identified.whereShown() + ".");
             String classifier = identified.kind().classifier();
             boolean downloading = identified.coordinate()
@@ -1473,9 +1471,12 @@ public final class DashboardView extends BorderPane {
         actions.setAlignment(Pos.CENTER_LEFT);
         actions.setPadding(new Insets(6, 0, 0, 0));
         detail.getChildren().add(actions);
+        if (StoreLock.openInKomet(copy.path())) {
+            detail.getChildren().add(muted("Open in a Komet now."));
+        }
         if (komet.isEmpty()) {
             Optional<KometRelease> fix = kometRelease.filter(release -> LauncherChoice.reads(release.version(), copy));
-            TextArea need = SelectableText.of(LauncherChoice.requirement(copy).map(requirement -> "Needs " + requirement
+            SelectableText need = SelectableText.of(LauncherChoice.requirement(copy).map(requirement -> "Needs " + requirement
                     + (fix.isPresent() ? "." : "; none installed reads it, and no newer build was found."))
                     .orElse(fix.isPresent() ? "No Komet installed." : "No Komet installed, and none was found to install."));
             need.setStyle(PROBLEM);
@@ -1485,7 +1486,7 @@ public final class DashboardView extends BorderPane {
                         : "Install Komet " + release.version());
                 install.setDisable(installing);
                 install.setOnAction(event -> onInstallKomet.accept(release));
-                TextArea from = muted("from " + release.source().label()
+                SelectableText from = muted("from " + release.source().label()
                         + (release.sizeBytes() > 0 ? ", " + DashboardCommand.size(release.sizeBytes()) : "")
                         + "; installed beside the Komets you have");
                 HBox row = new HBox(10, install, from);
@@ -1497,8 +1498,8 @@ public final class DashboardView extends BorderPane {
         }
         komet.flatMap(chosen -> heapPlanner.apply(chosen, copy))
                 .ifPresent(plan -> detail.getChildren().add(HeapView.line(plan, komet.get(), copy)));
-        TextArea folder = muted("Folder  " + copy.path().getFileName());
-        folder.setTooltip(new Tooltip(copy.path().toString()));
+        SelectableText folder = muted("Folder  " + Names.of(copy.path().getFileName()));
+        Tooltip.install(folder, new Tooltip(copy.path().toString()));
         detail.getChildren().add(folder);
 
         List<KnowledgeBase> older = family.members().stream()
@@ -1574,7 +1575,7 @@ public final class DashboardView extends BorderPane {
         if (here.isPresent()) {
             Hyperlink link = new Hyperlink(name);
             link.setOnAction(event -> select(here.get().name()));
-            link.setTooltip(new Tooltip("In ~/Solor: show it"));
+            Tooltip.install(link, new Tooltip("In ~/Solor: show it"));
             label = link;
         } else if (onNexus.isPresent()) {
             Hyperlink link = new Hyperlink(name);
@@ -1582,7 +1583,7 @@ public final class DashboardView extends BorderPane {
                 openBrowser();
                 browser.select(onNexus.get());
             });
-            link.setTooltip(new Tooltip("Not in ~/Solor: show it in the Nexus window"));
+            Tooltip.install(link, new Tooltip("Not in ~/Solor: show it in the Nexus window"));
             label = link;
         } else {
             label = SelectableText.of(name);
@@ -1595,8 +1596,8 @@ public final class DashboardView extends BorderPane {
         return row;
     }
 
-    private static TextArea heading(String text) {
-        TextArea label = SelectableText.of(text);
+    private static SelectableText heading(String text) {
+        SelectableText label = SelectableText.of(text);
         label.setStyle("-fx-font-weight: bold;");
         return label;
     }
@@ -1604,6 +1605,9 @@ public final class DashboardView extends BorderPane {
 
     private void confirmUpgrade(NoticeAction.Upgrade action) {
         KnowledgeBase store = action.store();
+        if (refusedWhileOpen("Upgrade " + store.displayName(), List.of(store))) {
+            return;
+        }
         Optional<KometInstallation> validator = LauncherChoice.chooseForLoad(komets, store);
         if (validator.isEmpty()) {
             setMessage("Upgrading needs Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE + " or later");
@@ -1642,24 +1646,41 @@ public final class DashboardView extends BorderPane {
     static String upgradeText(KnowledgeBase store, String validator) {
         String assembled = store.assembledAt().map(at -> ", assembled " + WHEN.format(at)).orElse("");
         return "Your copy of " + store.displayName() + " is the folder " + store.whereShown() + assembled + ".\n\n"
-                + "The newest build downloads into " + StoreUpgrade.workFolder(store.path()).getFileName()
+                + "The newest build downloads into " + Names.of(StoreUpgrade.workFolder(store.path()).getFileName())
                 + " beside it, and your change sets, preferences and repositories are carried into it. Komet " + validator
                 + " then checks, with no window, that it opens and loads every change set. If it does, the new build"
-                + " takes the name " + store.name() + " and the build you have now goes to the " + Finder.trashName()
-                + ", which is the way back. If it does not, " + store.name() + " stays as it is.\n\nOther folders of "
-                + store.displayName() + " are not changed: each is upgraded on its own.\n\nQuit any Komet that has"
-                + " this copy open first.";
+                + " takes the name " + Names.of(store.name()) + " and the build you have now goes to the "
+                + Finder.trashName() + ", which is the way back. If it does not, " + Names.of(store.name())
+                + " stays as it is.\n\nOther folders of " + store.displayName() + " are not changed: each is upgraded on"
+                + " its own.";
+    }
+
+    /**
+     * Says so, before a dialog asks anything, when a Komet has one of the stores open: its search index's lock is
+     * held ({@link StoreLock}), so the person need not be asked to quit Komets that may not be running.
+     */
+    private boolean refusedWhileOpen(String title, List<KnowledgeBase> stores) {
+        List<String> open = stores.stream().filter(store -> StoreLock.openInKomet(store.path()))
+                .map(StoreLock::refusal).toList();
+        if (open.isEmpty()) {
+            return false;
+        }
+        showRefusals(title, open);
+        return true;
     }
 
     /** Asks for the new folder's name, then copies the store into it. */
     private void askCopy(KnowledgeBase store) {
+        if (refusedWhileOpen("Copy " + store.name(), List.of(store))) {
+            return;
+        }
         javafx.scene.control.TextInputDialog dialog = new javafx.scene.control.TextInputDialog(
                 StoreCopy.suggestedName(store.path()));
         dialog.setTitle("Copy to a new folder");
-        dialog.setHeaderText("Copy " + store.name() + " to a new folder?");
+        dialog.setHeaderText("Copy " + Names.of(store.name()) + " to a new folder?");
         dialog.setContentText("Name");
-        TextArea about = SelectableText.of(copyText(store), SelectableText.DIALOG_WIDTH);
-        TextArea problem = SelectableText.of("", SelectableText.DIALOG_WIDTH);
+        SelectableText about = SelectableText.of(copyText(store), SelectableText.DIALOG_WIDTH);
+        SelectableText problem = SelectableText.of("", SelectableText.DIALOG_WIDTH);
         problem.setStyle(PROBLEM);
         javafx.scene.control.TextField name = dialog.getEditor();
         Node ok = dialog.getDialogPane().lookupButton(ButtonType.OK);
@@ -1696,13 +1717,15 @@ public final class DashboardView extends BorderPane {
 
     private void confirmReinstall(NoticeAction.Reinstall action) {
         KnowledgeBase store = action.store();
+        if (refusedWhileOpen("Reinstall " + store.displayName(), List.of(store))) {
+            return;
+        }
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
         alert.setTitle("Reinstall");
         alert.setHeaderText("Reinstall " + store.displayName() + " from scratch?");
         alert.setContentText("The folder " + store.whereShown() + " (" + DashboardCommand.size(store.sizeBytes()) + ") moves to the "
                 + Finder.trashName() + " with everything in it: change sets, preferences and repositories. The newest build"
-                + " then downloads under the same name. The " + Finder.trashName() + " is the way back. Quit any Komet that"
-                + " has this store open first.");
+                + " then downloads under the same name. The " + Finder.trashName() + " is the way back.");
         alert.getButtonTypes().setAll(ButtonType.CANCEL, ButtonType.OK);
         if (getScene() != null) {
             alert.initOwner(getScene().getWindow());
@@ -1916,14 +1939,17 @@ public final class DashboardView extends BorderPane {
     }
 
     private void confirmTrash(List<KnowledgeBase> copies) {
+        if (refusedWhileOpen("Move to " + Finder.trashName(), copies)) {
+            return;
+        }
         long bytes = copies.stream().mapToLong(KnowledgeBase::sizeBytes).sum();
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
         alert.setTitle("Move to " + Finder.trashName());
-        alert.setHeaderText("Move " + (copies.size() == 1 ? copies.getFirst().name() : copies.size() + " copies")
+        alert.setHeaderText("Move " + (copies.size() == 1 ? Names.of(copies.getFirst().name()) : copies.size() + " copies")
                 + " (" + DashboardCommand.size(bytes) + ") to the " + Finder.trashName() + "?");
-        alert.setContentText((copies.size() == 1 ? "" : copies.stream().map(KnowledgeBase::name)
+        alert.setContentText((copies.size() == 1 ? "" : copies.stream().map(copy -> Names.of(copy.name()))
                 .collect(Collectors.joining("\n", "", "\n\n")))
-                + "A copy you edited may contain work that no build contains. Quit any Komet that has one open first. "
+                + "A copy you edited may contain work that no build contains. "
                 + "The space comes back when the " + Finder.trashName() + " is emptied.");
         alert.getButtonTypes().setAll(ButtonType.CANCEL, ButtonType.OK);
         if (getScene() != null) {
@@ -1938,8 +1964,8 @@ public final class DashboardView extends BorderPane {
         return KnowledgeBaseIcon.of(family.icon().map(file -> icons.computeIfAbsent(file, KnowledgeBaseIcon::load)), size);
     }
 
-    private static TextArea muted(String text) {
-        TextArea area = SelectableText.of(text);
+    private static SelectableText muted(String text) {
+        SelectableText area = SelectableText.of(text);
         area.setStyle(MUTED);
         return area;
     }

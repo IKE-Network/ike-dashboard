@@ -116,14 +116,17 @@ public final class StoreUpgrade {
         List<String> refusals = new ArrayList<>();
         Path path = store.path().toAbsolutePath().normalize();
         running.stream().filter(komet -> komet.store().map(open -> open.toAbsolutePath().normalize()).filter(path::equals).isPresent())
-                .findFirst().ifPresent(komet -> refusals.add(store.name() + " is open in a Komet (process " + komet.pid()
-                        + "); quit it first."));
+                .findFirst().ifPresent(komet -> refusals.add(Names.of(store.name()) + " is open in a Komet (process "
+                        + komet.pid() + "); quit it first."));
+        if (refusals.isEmpty() && StoreLock.openInKomet(store.path())) {
+            refusals.add(StoreLock.refusal(store));
+        }
         for (String folder : CHANGE_SET_FOLDERS) {
             Path changeSets = store.path().resolve(folder);
             if (Files.isDirectory(changeSets)) {
                 try (Stream<Path> files = Files.walk(changeSets, 4)) {
                     files.filter(file -> file.getFileName().toString().endsWith(".spool")).findFirst()
-                            .ifPresent(spool -> refusals.add("Komet is still writing " + store.path().relativize(spool)
+                            .ifPresent(spool -> refusals.add("Komet is still writing " + Names.of(store.path().relativize(spool))
                                     + "; quit it first."));
                 }
             }
@@ -141,7 +144,7 @@ public final class StoreUpgrade {
         }
         Path work = workFolder(store.path());
         if (Files.exists(work)) {
-            refusals.add("An earlier upgrade left " + work.getFileName() + " beside the store, kept for inspection; move it to"
+            refusals.add("An earlier upgrade left " + Names.of(work.getFileName()) + " beside the store, kept for inspection; move it to"
                     + " the " + Finder.trashName() + " to upgrade again.");
         }
         return List.copyOf(refusals);

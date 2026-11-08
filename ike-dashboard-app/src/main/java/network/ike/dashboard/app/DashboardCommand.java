@@ -248,7 +248,7 @@ public final class DashboardCommand {
         for (Notice notice : notices) {
             out.printf("%-8s %s%n", notice.urgency(), notice.title());
             if (!notice.detail().isBlank()) {
-                out.printf("         %s%n", notice.detail());
+                out.printf("         %s%n", Names.plain(notice.detail()));
             }
             notice.action().ifPresent(action -> out.printf("         [%s]%n", action.label()));
         }

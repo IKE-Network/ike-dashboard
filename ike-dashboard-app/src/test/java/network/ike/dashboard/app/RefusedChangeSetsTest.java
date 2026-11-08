@@ -129,7 +129,7 @@ class RefusedChangeSetsTest {
         RefusedChangeSets.Summary summary = RefusedChangeSets.analyze(store,
                 new RefusedChangeSets.Refusal(Path.of(KNOWLEDGE + NARRATION), MISSING));
 
-        String text = DashboardView.refusedText(List.of(summary), Optional.empty());
+        String text = Names.plain(DashboardView.refusedText(List.of(summary), Optional.empty()));
 
         assertThat(DashboardView.refusedHeader(1)).isEqualTo("A change set does not load into the new build");
         assertThat(DashboardView.refusedHeader(2)).isEqualTo("2 change sets do not load into the new build");

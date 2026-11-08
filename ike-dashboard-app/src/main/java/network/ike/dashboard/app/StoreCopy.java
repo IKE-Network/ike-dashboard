@@ -78,14 +78,15 @@ public final class StoreCopy {
                     + StoreUpgrade.PREVIOUS_SUFFIX + " are the dashboard's own.");
         }
         if (Files.exists(store.resolveSibling(trimmed)) || Files.exists(store.resolveSibling(trimmed + PARTIAL_SUFFIX))) {
-            return Optional.of(trimmed + " is already in " + store.getParent() + ".");
+            return Optional.of(Names.of(trimmed) + " is already in " + Names.of(store.getParent()) + ".");
         }
         return Optional.empty();
     }
 
     /**
      * Why a copy must not start now, each with what to do; empty when it may. A store open in a Komet, or still
-     * being written, would be copied half-way.
+     * being written, would be copied half-way. A Komet is seen by the process the dashboard started, or by the
+     * search index's lock ({@link StoreLock}) whoever started it.
      *
      * @param store   the store
      * @param running the Komets running on this machine
@@ -96,14 +97,17 @@ public final class StoreCopy {
         List<String> refusals = new ArrayList<>();
         Path path = store.path().toAbsolutePath().normalize();
         running.stream().filter(komet -> komet.store().map(open -> open.toAbsolutePath().normalize()).filter(path::equals).isPresent())
-                .findFirst().ifPresent(komet -> refusals.add(store.name() + " is open in a Komet (process " + komet.pid()
-                        + "); quit it first."));
+                .findFirst().ifPresent(komet -> refusals.add(Names.of(store.name()) + " is open in a Komet (process "
+                        + komet.pid() + "); quit it first."));
+        if (refusals.isEmpty() && StoreLock.openInKomet(store.path())) {
+            refusals.add(StoreLock.refusal(store));
+        }
         for (String folder : StoreUpgrade.CHANGE_SET_FOLDERS) {
             Path changeSets = store.path().resolve(folder);
             if (Files.isDirectory(changeSets)) {
                 try (Stream<Path> files = Files.walk(changeSets, 4)) {
                     files.filter(file -> file.getFileName().toString().endsWith(".spool")).findFirst()
-                            .ifPresent(spool -> refusals.add("Komet is still writing " + store.path().relativize(spool)
+                            .ifPresent(spool -> refusals.add("Komet is still writing " + Names.of(store.path().relativize(spool))
                                     + "; quit it first."));
                 }
             }

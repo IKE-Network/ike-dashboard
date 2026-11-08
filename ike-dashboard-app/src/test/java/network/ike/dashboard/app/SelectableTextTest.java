@@ -5,7 +5,7 @@ import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.DialogPane;
-import javafx.scene.control.TextArea;
+import javafx.scene.text.Text;
 import javafx.scene.image.PixelReader;
 import javafx.scene.image.WritableImage;
 import javafx.scene.layout.VBox;
@@ -49,34 +49,39 @@ class SelectableTextTest {
     }
 
     @Test
-    void theUpgradeDialogNamesTheCopyByItsFolder() {
+    void theUpgradeDialogNamesTheCopyByItsFolderInBold() {
         KnowledgeBase copy = copy(Path.of(System.getProperty("user.home"), "Solor", "solor-gudid-card-leak-demo"));
 
         String text = DashboardView.upgradeText(copy, "26.1108.1917");
 
         assertThat(DashboardView.upgradeHeader(copy)).isEqualTo("Upgrade SOLOR + GUDID Knowledge Base to the newest build?");
-        assertThat(text).startsWith("Your copy of SOLOR + GUDID Knowledge Base is the folder solor-gudid-card-leak-demo"
-                        + " in ~/Solor, assembled ")
+        assertThat(Names.plain(text)).startsWith("Your copy of SOLOR + GUDID Knowledge Base is the folder"
+                        + " solor-gudid-card-leak-demo in ~/Solor, assembled ")
                 .contains("downloads into solor-gudid-card-leak-demo.upgrade beside it")
                 .contains("takes the name solor-gudid-card-leak-demo")
                 .contains("the build you have now goes to the " + Finder.trashName())
                 .contains("Other folders of SOLOR + GUDID Knowledge Base are not changed")
-                .doesNotContain(".previous")
+                .doesNotContain(".previous", "Quit any Komet")
                 .contains("Komet 26.1108.1917");
+        assertThat(text).as("file and folder names are marked for bold")
+                .contains(Names.of("solor-gudid-card-leak-demo"), Names.of("~/Solor"),
+                        Names.of("solor-gudid-card-leak-demo.upgrade"));
     }
 
     @Test
     void aCopyOutsideTheHomeFolderIsNamedByItsWholePath() {
-        assertThat(copy(Path.of("/Volumes/Data/Solor/solor-gudid-kb")).whereShown())
+        assertThat(Names.plain(copy(Path.of("/Volumes/Data/Solor/solor-gudid-kb")).whereShown()))
                 .isEqualTo("solor-gudid-kb in /Volumes/Data/Solor");
+        assertThat(Names.plain("plain")).isEqualTo("plain");
     }
 
     @Test
-    void aDialogsHeaderAndTextCanBeSelectedButNotChanged() throws Exception {
+    void aDialogsWordsCanBeSelectedAndItsNamesAreBold() throws Exception {
         KnowledgeBase copy = copy(Path.of(System.getProperty("user.home"), "Solor", "solor-gudid-card-leak-demo"));
-        CompletableFuture<List<TextArea>> words = new CompletableFuture<>();
+        CompletableFuture<List<SelectableText>> words = new CompletableFuture<>();
         CompletableFuture<WritableImage> drawn = new CompletableFuture<>();
-        CompletableFuture<String> selected = new CompletableFuture<>();
+        CompletableFuture<List<String>> selected = new CompletableFuture<>();
+        CompletableFuture<List<String>> bold = new CompletableFuture<>();
         Platform.runLater(() -> {
             try {
                 Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
@@ -87,35 +92,62 @@ class SelectableTextTest {
                 SelectableText.in(alert);
                 DialogPane pane = alert.getDialogPane();
                 assertThat(pane.getHeaderText()).isNull();
-                List<TextArea> areas = ((VBox) pane.getContent()).getChildren().stream()
-                        .map(TextArea.class::cast).toList();
+                List<SelectableText> areas = ((VBox) pane.getContent()).getChildren().stream()
+                        .map(SelectableText.class::cast).toList();
                 // The dialog's own scene, never shown: a snapshot draws it.
                 Scene scene = pane.getScene();
                 pane.applyCss();
                 pane.layout();
                 words.complete(areas);
-                TextArea body = areas.get(1);
-                body.selectRange(0, "Your copy of".length());
-                selected.complete(body.getSelectedText());
+                SelectableText body = areas.get(1);
+                List<String> picked = new java.util.ArrayList<>();
+                body.select(0, "Your copy of".length());
+                picked.add(body.selectedText());
+                int path = body.getText().indexOf("~/Solor");
+                body.selectWordAt(path + 3);
+                picked.add(body.selectedText());
+                selected.complete(picked);
+                bold.complete(body.lookupAll("Text").stream().map(Text.class::cast)
+                        .filter(run -> run.getFont().getStyle().toLowerCase(java.util.Locale.ROOT).contains("bold"))
+                        .map(Text::getText).toList());
+                body.select(0, "Your copy of".length());
                 drawn.complete(scene.snapshot(null));
             } catch (RuntimeException | AssertionError e) {
                 words.completeExceptionally(e);
                 drawn.completeExceptionally(e);
                 selected.completeExceptionally(e);
+                bold.completeExceptionally(e);
             }
         });
 
-        List<TextArea> areas = words.get(30, TimeUnit.SECONDS);
+        List<SelectableText> areas = words.get(30, TimeUnit.SECONDS);
         assertThat(areas).hasSize(2).allSatisfy(area -> {
-            assertThat(area.isEditable()).isFalse();
             assertThat(area.isFocusTraversable()).as("the keyboard goes to the buttons").isFalse();
-            assertThat(area.getPrefHeight()).as("as tall as its text").isGreaterThan(10);
+            assertThat(area.getHeight()).as("as tall as its text").isGreaterThan(10);
         });
         assertThat(areas.get(0).getText()).isEqualTo("Upgrade SOLOR + GUDID Knowledge Base to the newest build?");
-        assertThat(areas.get(0).getStyleClass()).contains("heading");
-        assertThat(areas.get(1).getPrefHeight()).as("several wrapped lines").isGreaterThan(3 * areas.get(0).getPrefHeight());
-        assertThat(selected.get(30, TimeUnit.SECONDS)).isEqualTo("Your copy of");
+        assertThat(areas.get(1).getHeight()).as("several wrapped lines").isGreaterThan(3 * areas.get(0).getHeight());
+        assertThat(selected.get(30, TimeUnit.SECONDS)).as("a drag's range, and a double-click's whole path")
+                .containsExactly("Your copy of", "~/Solor");
+        assertThat(bold.get(30, TimeUnit.SECONDS)).contains("solor-gudid-card-leak-demo", "~/Solor",
+                "solor-gudid-card-leak-demo.upgrade").doesNotContain("Your copy of SOLOR + GUDID Knowledge Base is the folder ");
         write(drawn.get(30, TimeUnit.SECONDS), Path.of("target", "dashboard-upgrade-dialog.png"));
+    }
+
+    @Test
+    void aStoreIsOpenInKometWhileItsSearchIndexLockIsHeld(@org.junit.jupiter.api.io.TempDir Path solor) throws Exception {
+        Path store = solor.resolve("pizza-kb");
+        assertThat(StoreLock.openInKomet(store)).as("no index").isFalse();
+        Path lock = store.resolve(StoreLock.LUCENE_LOCK);
+        Files.createDirectories(lock.getParent());
+        Files.writeString(lock, "");
+        assertThat(StoreLock.openInKomet(store)).as("the file stays after Komet closes; it is the lock that counts").isFalse();
+        try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(lock,
+                java.nio.file.StandardOpenOption.WRITE); java.nio.channels.FileLock held = channel.lock()) {
+            assertThat(held.isValid()).isTrue();
+            assertThat(StoreLock.openInKomet(store)).isTrue();
+        }
+        assertThat(StoreLock.openInKomet(store)).as("the lock let go").isFalse();
     }
 
     private static KnowledgeBase copy(Path path) {

@@ -133,20 +133,21 @@ public record KnowledgeBase(String name, Path path, StoreKind kind, long sizeByt
     /**
      * Where the copy is, as a person finds it: its folder or file name, then the folder it is in, with the home
      * folder as {@code ~}, such as {@code solor-gudid-kb in ~/Solor}. A knowledge base can have several copies,
-     * each under a name of its own, so a dialog about one copy names it this way.
+     * each under a name of its own, so a dialog about one copy names it this way. Both names are marked
+     * ({@link Names}), so the window shows them in bold.
      *
      * @return where it is
      */
     public String whereShown() {
         Path folder = path.toAbsolutePath().getParent();
         if (folder == null) {
-            return name;
+            return Names.of(name);
         }
         Path home = Path.of(System.getProperty("user.home")).toAbsolutePath();
         String shown = folder.startsWith(home)
                 ? (folder.equals(home) ? "~" : "~/" + home.relativize(folder).toString().replace('\\', '/'))
                 : folder.toString();
-        return name + " in " + shown;
+        return Names.of(name) + " in " + Names.of(shown);
     }
 
     /**

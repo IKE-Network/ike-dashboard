@@ -171,8 +171,8 @@ public final class DashboardApp extends Application {
         view.setOnCopy(this::copyStore);
         view.setOnUpdateDashboard(this::updateDashboard);
         view.setOnMoveDashboard(this::moveDashboard);
-        view.setOnReveal(path -> run(() -> Finder.reveal(path), "Could not show " + path));
-        view.setOnOpenFile(path -> run(() -> Finder.open(path), "Could not open " + path));
+        view.setOnReveal(path -> run(() -> Finder.reveal(path), "Could not show " + Names.of(path)));
+        view.setOnOpenFile(path -> run(() -> Finder.open(path), "Could not open " + Names.of(path)));
         NoticeDismissals dismissals = NoticeDismissals.current();
         view.setDismissed(dismissals::dismissed);
         view.setOnDismiss(dismissals::dismiss);
@@ -451,11 +451,11 @@ public final class DashboardApp extends Application {
                             placed.set(destination);
                         });
                 release(List.of(store));
-                transfer.finished(Transfer.State.DONE, "Downloaded " + store.getFileName());
+                transfer.finished(Transfer.State.DONE, "Downloaded " + Names.of(store.getFileName()));
                 Platform.runLater(() -> {
                     selectAfterRefresh = coordinate.artifactId();
                     refresh();
-                    view.setMessage("Downloaded " + store.getFileName());
+                    view.setMessage("Downloaded " + Names.of(store.getFileName()));
                 });
             } catch (CancellationException e) {
                 transfer.finished(Transfer.State.CANCELLED, "Cancelled. What had downloaded is kept, so downloading it"
@@ -486,7 +486,7 @@ public final class DashboardApp extends Application {
         try {
             refusals = StoreUpgrade.refusals(store, view.sync(store.path()), HeapSizing.Machine.current(komets).running());
         } catch (IOException e) {
-            view.setMessage("Could not read " + store.name() + ": " + e.getMessage());
+            view.setMessage("Could not read " + Names.of(store.name()) + ": " + e.getMessage());
             return;
         }
         if (!refusals.isEmpty()) {
@@ -521,7 +521,7 @@ public final class DashboardApp extends Application {
                     StoreUpgrade.deleteTree(work);
                     transfer.finished(Transfer.State.FAILED, "Not upgraded: the new build contains " + carry.conflicts().size()
                             + (carry.conflicts().size() == 1 ? " file" : " files") + " of the same name as yours with other"
-                            + " contents, the first " + store.path().relativize(carry.conflicts().getFirst())
+                            + " contents, the first " + Names.of(store.path().relativize(carry.conflicts().getFirst()))
                             + ". Your store is as it was.");
                     return;
                 }
@@ -580,7 +580,7 @@ public final class DashboardApp extends Application {
                     carried = false;
                     transfer.finished(Transfer.State.FAILED, "Not upgraded: Komet could not load every change set into the new"
                             + " build (status " + run.exitStatus() + "). Your store is as it was; the new build is kept beside"
-                            + " it as " + work.getFileName() + " for inspection. Move it to the " + Finder.trashName()
+                            + " it as " + Names.of(work.getFileName()) + " for inspection. Move it to the " + Finder.trashName()
                             + " to upgrade again.");
                     KometLauncher.HeadlessRun failed = run;
                     Platform.runLater(() -> {
@@ -600,13 +600,13 @@ public final class DashboardApp extends Application {
                     Finder.trash(List.of(previous));
                     old = "The build you had is in the " + Finder.trashName() + ".";
                 } catch (IOException | InterruptedException e) {
-                    old = "The build you had is beside it as " + previous.getFileName() + "; it could not be moved to the "
+                    old = "The build you had is beside it as " + Names.of(previous.getFileName()) + "; it could not be moved to the "
                             + Finder.trashName() + " (" + e.getMessage() + ").";
                 }
                 release(List.of(store.path()));
-                transfer.finished(Transfer.State.DONE, "Upgraded " + store.name() + ": " + carry.summary()
+                transfer.finished(Transfer.State.DONE, "Upgraded " + Names.of(store.name()) + ": " + carry.summary()
                         + (setAside.isEmpty() ? "" : "; " + setAside.size() + (setAside.size() == 1 ? " change set" : " change sets")
-                        + " set aside in " + RefusedChangeSets.UNPROCESSED_FOLDER) + ". " + old);
+                        + " set aside in " + Names.of(RefusedChangeSets.UNPROCESSED_FOLDER)) + ". " + old);
                 KometLauncher.HeadlessRun done = run;
                 Platform.runLater(() -> {
                     selectAfterRefresh = KnowledgeBaseFamily.familyName(store);
@@ -624,11 +624,11 @@ public final class DashboardApp extends Application {
                         StoreUpgrade.carry(work, store.path());
                     }
                 } catch (IOException back) {
-                    kept = " Your change sets and preferences may be in " + work.getFileName() + ": " + back.getMessage();
+                    kept = " Your change sets and preferences may be in " + Names.of(work.getFileName()) + ": " + back.getMessage();
                 }
                 release(List.of(store.path()));
                 transfer.finished(Transfer.State.FAILED, "Could not upgrade: " + e.getMessage() + "."
-                        + (kept.isEmpty() ? " Your store is as it was" + (Files.exists(work) ? "; " + work.getFileName()
+                        + (kept.isEmpty() ? " Your store is as it was" + (Files.exists(work) ? "; " + Names.of(work.getFileName())
                         + " is kept beside it for inspection." : ".") : kept));
                 Platform.runLater(this::refresh);
             } finally {
@@ -681,7 +681,7 @@ public final class DashboardApp extends Application {
             for (RepositorySync.Status status : sync) {
                 if (status.remote() != RepositorySync.Remote.NONE
                         && file.startsWith(status.repository().folder().toAbsolutePath().normalize())) {
-                    return Optional.of(refusal.file().getFileName() + " is in the git repository "
+                    return Optional.of(Names.of(refusal.file().getFileName()) + " is in the git repository "
                             + status.repository().label() + ", which has a remote: moving it out would reach everyone"
                             + " else as a deletion, and Komet cannot yet leave a change set in place unread. This upgrade"
                             + " can only be cancelled.");
@@ -702,7 +702,7 @@ public final class DashboardApp extends Application {
         try {
             refusals = StoreUpgrade.refusals(store, view.sync(store.path()), HeapSizing.Machine.current(komets).running());
         } catch (IOException e) {
-            view.setMessage("Could not read " + store.name() + ": " + e.getMessage());
+            view.setMessage("Could not read " + Names.of(store.name()) + ": " + e.getMessage());
             return;
         }
         if (!refusals.isEmpty()) {
@@ -720,7 +720,7 @@ public final class DashboardApp extends Application {
                 return;
             }
             try {
-                transfer.phase("Moving " + store.name() + " to the " + Finder.trashName());
+                transfer.phase("Moving " + Names.of(store.name()) + " to the " + Finder.trashName());
                 // From here until the download ends, a scan leaves the half-written store out.
                 arriving.add(store.path());
                 Finder.trash(List.of(store.path()));
@@ -729,7 +729,7 @@ public final class DashboardApp extends Application {
                 StoreDownload.downloadTo(RepositoryHttpClients.newClient(), DashboardCommand.access(settings), action.coordinate(),
                         action.classifier(), store.path(), settings.localRepository(), transfer);
                 release(List.of(store.path()));
-                transfer.finished(Transfer.State.DONE, "Reinstalled " + store.name() + ". The store you had is in the "
+                transfer.finished(Transfer.State.DONE, "Reinstalled " + Names.of(store.name()) + ". The store you had is in the "
                         + Finder.trashName() + ".");
                 Platform.runLater(() -> {
                     selectAfterRefresh = KnowledgeBaseFamily.familyName(store);
@@ -759,7 +759,7 @@ public final class DashboardApp extends Application {
         try {
             refusals = StoreCopy.refusals(store, HeapSizing.Machine.current(komets).running());
         } catch (IOException e) {
-            view.setMessage("Could not read " + store.name() + ": " + e.getMessage());
+            view.setMessage("Could not read " + Names.of(store.name()) + ": " + e.getMessage());
             return;
         }
         if (!refusals.isEmpty()) {
@@ -770,19 +770,19 @@ public final class DashboardApp extends Application {
         if (!claim("copy", List.of(store.path(), target))) {
             return;
         }
-        view.setMessage("Copying " + store.name() + " to " + target.getFileName() + " …");
+        view.setMessage("Copying " + Names.of(store.name()) + " to " + Names.of(target.getFileName()) + " …");
         files.submit(() -> {
             try {
                 StoreCopy.copy(store.path(), name);
                 Platform.runLater(() -> {
                     selectAfterRefresh = KnowledgeBaseFamily.familyName(store);
                     refresh();
-                    view.setMessage("Copied " + store.name() + " to " + target.getFileName() + ", with its change sets,"
+                    view.setMessage("Copied " + Names.of(store.name()) + " to " + Names.of(target.getFileName()) + ", with its change sets,"
                             + " preferences and repositories.");
                 });
             } catch (Exception e) {
                 Platform.runLater(() -> {
-                    view.setMessage("Could not copy " + store.name() + ": " + e.getMessage());
+                    view.setMessage("Could not copy " + Names.of(store.name()) + ": " + e.getMessage());
                     refresh();
                 });
             } finally {
@@ -910,6 +910,11 @@ public final class DashboardApp extends Application {
     }
 
     private void trash(List<KnowledgeBase> copies) {
+        List<String> open = copies.stream().filter(copy -> StoreLock.openInKomet(copy.path())).map(StoreLock::refusal).toList();
+        if (!open.isEmpty()) {
+            view.showRefusals("Move to " + Finder.trashName(), open);
+            return;
+        }
         List<Path> paths = copies.stream().map(KnowledgeBase::path).toList();
         if (!claim("move to the " + Finder.trashName(), paths)) {
             return;
@@ -932,7 +937,7 @@ public final class DashboardApp extends Application {
         HeapSizing.Plan plan = heapPlan(komet, knowledgeBase);
         Optional<HeapSizing.Need> need = HeapView.confirm(view.getScene().getWindow(), knowledgeBase, komet, plan);
         if (need.isEmpty()) {
-            view.setMessage("Did not open " + knowledgeBase.name());
+            view.setMessage("Did not open " + Names.of(knowledgeBase.name()));
             return;
         }
         HeapSizing.Plan launched = need.get().equals(plan.need()) ? plan : plan.with(need.get());
@@ -941,7 +946,7 @@ public final class DashboardApp extends Application {
             history.opened(KnowledgeBaseFamily.familyName(knowledgeBase));
             view.setLastOpened(history::lastOpened);
             view.setLastLog(log);
-            view.setMessage("Opening " + knowledgeBase.name() + " in Komet " + komet.version() + " with "
+            view.setMessage("Opening " + Names.of(knowledgeBase.name()) + " in Komet " + komet.version() + " with "
                     + launched.need().text());
             view.heapChanged();
         } catch (Exception e) {
@@ -978,8 +983,8 @@ public final class DashboardApp extends Application {
             view.browser().setHeapRule(edit.rule());
             HeapSizing.setOverride(stores, knowledgeBase, edit.override());
             view.heapChanged();
-            view.setMessage(edit.override().map(need -> knowledgeBase.name() + " opens with " + need.text())
-                    .orElse(knowledgeBase.name() + " opens with the rule's heap"));
+            view.setMessage(edit.override().map(need -> Names.of(knowledgeBase.name()) + " opens with " + need.text())
+                    .orElse(Names.of(knowledgeBase.name()) + " opens with the rule's heap"));
         });
     }
 
