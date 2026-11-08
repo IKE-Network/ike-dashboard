@@ -138,8 +138,7 @@ class DashboardViewRelationsTest {
     /** Each label's text, and each link's as {@code link <text>}. */
     private static List<String> texts(DashboardView view) {
         List<String> texts = new java.util.ArrayList<>();
-        view.lookupAll(".label").stream().filter(Label.class::isInstance).map(Label.class::cast).map(Labeled::getText)
-                .forEach(texts::add);
+        texts.addAll(Words.of(view));
         view.lookupAll(".hyperlink").stream().map(Hyperlink.class::cast).map(link -> "link " + link.getText())
                 .forEach(texts::add);
         return texts;

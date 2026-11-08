@@ -17,9 +17,11 @@ package network.ike.dashboard.app;
 
 import javafx.beans.binding.Bindings;
 import javafx.scene.Node;
+import javafx.scene.Parent;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.DialogPane;
 import javafx.scene.control.TextArea;
+import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.scene.text.Text;
@@ -31,6 +33,7 @@ import java.util.Base64;
  * Text a person can select and copy but not change, which reads as a label: the dashboard's dialogs say what
  * they say this way, so a folder name, a reason or a version can be copied out of them. A JavaFX label cannot be
  * selected, so this is a read-only text area without a border, background or scroll bars, as tall as its text.
+ * The main window's words are made the same way (KEC, 2026-11-08: text is copyable by default, even read-only).
  */
 final class SelectableText {
 
@@ -87,17 +90,49 @@ final class SelectableText {
      * @return the text
      */
     static TextArea of(String text, double width) {
+        TextArea area = area(text);
+        area.setPrefWidth(width);
+        area.prefHeightProperty().bind(Bindings.createDoubleBinding(
+                () -> height(area.getText(), area.getWidth() > 0 ? area.getWidth() : width, area),
+                area.textProperty(), area.widthProperty(), area.fontProperty()));
+        return area;
+    }
+
+    /**
+     * Text that can be selected and copied, as wide as its longest line unless laid out narrower, when it wraps,
+     * and as tall as it needs: what a wrapping label is in a window. Its scene takes {@link #STYLESHEET}.
+     *
+     * @param text the text
+     * @return the text
+     */
+    static TextArea of(String text) {
+        TextArea area = area(text);
+        area.setMinWidth(20);
+        area.setMaxWidth(Double.MAX_VALUE);
+        area.prefWidthProperty().bind(Bindings.createDoubleBinding(() -> natural(area.getText(), area),
+                area.textProperty(), area.fontProperty()));
+        area.prefHeightProperty().bind(Bindings.createDoubleBinding(
+                () -> height(area.getText(), area.getWidth() > 0 ? area.getWidth() : area.getPrefWidth(), area),
+                area.textProperty(), area.widthProperty(), area.prefWidthProperty(), area.fontProperty()));
+        return area;
+    }
+
+    private static TextArea area(String text) {
         TextArea area = new TextArea(text);
         area.getStyleClass().add("selectable-text");
         area.setEditable(false);
         area.setWrapText(true);
         // Clicking still selects; the keyboard goes past it to the buttons.
         area.setFocusTraversable(false);
-        area.setPrefWidth(width);
         area.setMinHeight(Region.USE_PREF_SIZE);
-        area.prefHeightProperty().bind(Bindings.createDoubleBinding(
-                () -> height(area.getText(), area.getWidth() > 0 ? area.getWidth() : width, area),
-                area.textProperty(), area.widthProperty(), area.fontProperty()));
+        // It is as tall as its text and never scrolls, so the wheel scrolls what contains it.
+        area.addEventFilter(ScrollEvent.ANY, event -> {
+            Parent parent = area.getParent();
+            if (parent != null) {
+                event.consume();
+                parent.fireEvent(event.copyFor(parent, parent));
+            }
+        });
         return area;
     }
 
@@ -149,6 +184,13 @@ final class SelectableText {
 
     private static boolean blank(String text) {
         return text == null || text.isBlank();
+    }
+
+    /** How wide the text's longest line is, in the area's font, with room so it does not wrap. */
+    private static double natural(String text, TextArea area) {
+        Text measure = new Text(text.isEmpty() ? " " : text);
+        measure.setFont(area.getFont());
+        return Math.ceil(measure.getLayoutBounds().getWidth()) + WRAP_SLACK + 4;
     }
 
     /** How tall the text is when wrapped at the width, in the area's font. */

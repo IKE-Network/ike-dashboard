@@ -143,8 +143,7 @@ class DashboardViewSnapshotTest {
                 Scene looseScene = new Scene(loose, 1080, 480);
                 loose.applyCss();
                 loose.layout();
-                unmanagedDetail.complete(loose.lookupAll(".label").stream()
-                        .map(node -> ((javafx.scene.control.Label) node).getText()).toList());
+                unmanagedDetail.complete(Words.of(loose));
                 notManaged.complete(looseScene.snapshot(null));
 
                 DashboardView sized = new DashboardView();
@@ -156,8 +155,7 @@ class DashboardViewSnapshotTest {
                 Scene sizedScene = new Scene(sized, 1080, 480);
                 sized.applyCss();
                 sized.layout();
-                memoryDetail.complete(sized.lookupAll(".label").stream()
-                        .map(node -> ((javafx.scene.control.Label) node).getText()).toList());
+                memoryDetail.complete(Words.of(sized));
                 memory.complete(sizedScene.snapshot(null));
 
                 view.browser().select(coordinate("solor-gudid-kb"));
@@ -262,8 +260,7 @@ class DashboardViewSnapshotTest {
                 oldKometButtons.complete(old.lookupAll(".button").stream()
                         .map(node -> (javafx.scene.control.Button) node)
                         .filter(button -> !button.isDisable()).map(javafx.scene.control.Button::getText).toList());
-                oldKometTexts.complete(old.lookupAll(".label").stream()
-                        .map(node -> ((javafx.scene.control.Label) node).getText()).toList());
+                oldKometTexts.complete(Words.of(old));
 
                 Scene reportScene = new Scene(DashboardView.runReport(run), 820, 420);
                 reportScene.getRoot().applyCss();

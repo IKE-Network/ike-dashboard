@@ -105,6 +105,9 @@ public final class DashboardView extends BorderPane {
     private static final DateTimeFormatter WHEN = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
             .withZone(ZoneId.systemDefault());
     private static final String MUTED = "-fx-text-fill: #6b6b6b;";
+
+    /** The section that lists a knowledge base's copies other than the one the detail shows. */
+    static final String OTHER_COPIES = "Other copies";
     private static final String ATTENTION = "-fx-text-fill: #b35900;";
     private static final String PROBLEM = "-fx-text-fill: #c62828;";
     private static final int TABLE_ROWS = 8;
@@ -123,7 +126,7 @@ public final class DashboardView extends BorderPane {
     private final NexusBrowser browser = new NexusBrowser();
     private Stage browserWindow;
     private final VBox detail = new VBox(10);
-    private final Label message = new Label();
+    private final TextArea message = SelectableText.of("");
     private final MenuButton kometMenu = new MenuButton();
     private final Hyperlink showLog = new Hyperlink("Show last log");
 
@@ -185,6 +188,7 @@ public final class DashboardView extends BorderPane {
 
     /** Builds the view, empty until data is set. */
     public DashboardView() {
+        getStylesheets().add(SelectableText.STYLESHEET);
         search.setPromptText("Search");
         HBox.setHgrow(search, Priority.ALWAYS);
         ToggleGroup sort = new ToggleGroup();
@@ -729,7 +733,7 @@ public final class DashboardView extends BorderPane {
         text.setEditable(false);
         text.setWrapText(true);
         text.setStyle("-fx-font-family: 'Menlo', monospace;");
-        Label log = muted("Log  " + run.log());
+        TextArea log = muted("Log  " + run.log());
         BorderPane pane = new BorderPane(text);
         pane.setTop(outcome);
         pane.setBottom(log);
@@ -846,7 +850,7 @@ public final class DashboardView extends BorderPane {
     private void showNoticesPane() {
         VBox box = noticesBox;                           // the notices fill the window, not the detail pane
         box.getChildren().clear();
-        Label title = new Label("Notices");
+        TextArea title = SelectableText.of("Notices");
         title.setStyle("-fx-font-size: 20px; -fx-font-weight: bold;");
         box.getChildren().add(title);
         if (notices.isEmpty()) {
@@ -861,15 +865,14 @@ public final class DashboardView extends BorderPane {
     }
 
     private Node noticeCard(Notice notice) {
-        Label heading = new Label(notice.title());
+        TextArea heading = SelectableText.of(notice.title());
         heading.setStyle("-fx-font-weight: bold;");
-        heading.setWrapText(true);
         VBox text = new VBox(2, heading);
         if (!notice.detail().isBlank()) {
             text.getChildren().add(muted(notice.detail()));
         }
         notice.freshness().ifPresent(freshness -> {
-            Label checked = muted(freshness.current() ? "checked " + WHEN.format(freshness.checkedAt())
+            TextArea checked = muted(freshness.current() ? "checked " + WHEN.format(freshness.checkedAt())
                     : "as of " + WHEN.format(freshness.checkedAt()) + "; the last check failed");
             checked.setStyle("-fx-font-size: 11px;" + MUTED);
             text.getChildren().add(checked);
@@ -1366,13 +1369,13 @@ public final class DashboardView extends BorderPane {
         }
         Optional<KnowledgeBaseFamily> chosen = selected();
         if (chosen.isEmpty()) {
-            Label none = new Label(families.isEmpty()
+            TextArea none = SelectableText.of(families.isEmpty()
                     ? "No knowledge bases downloaded. Get one from Nexus to begin." : "Choose a knowledge base");
             none.setStyle(MUTED);
             detail.getChildren().add(none);
             return;
         }
-        Label title = new Label(chosen.get().displayName());
+        TextArea title = SelectableText.of(chosen.get().displayName());
         title.setStyle("-fx-font-size: 20px; -fx-font-weight: bold;");
         HBox heading = new HBox(12, icon(chosen.get(), 48), title);
         heading.setAlignment(Pos.CENTER_LEFT);
@@ -1381,15 +1384,14 @@ public final class DashboardView extends BorderPane {
     }
 
     private void showUnmanaged(KnowledgeBase entry) {
-        Label title = new Label(entry.name());
+        TextArea title = SelectableText.of(entry.name());
         title.setStyle("-fx-font-size: 20px; -fx-font-weight: bold;");
         detail.getChildren().add(title);
         detail.getChildren().add(muted(entry.kind().label() + "  ·  " + DashboardCommand.size(entry.sizeBytes())
                 + "  ·  " + WHEN.format(entry.recency())));
         entry.coordinate().ifPresent(coordinate -> detail.getChildren().add(muted(coordinate.toString())));
-        Label why = new Label("Not managed: " + String.join("; ", entry.descriptor().problems()) + ".");
+        TextArea why = SelectableText.of("Not managed: " + String.join("; ", entry.descriptor().problems()) + ".");
         why.setStyle(ATTENTION);
-        why.setWrapText(true);
         detail.getChildren().add(why);
         detail.getChildren().add(muted("The dashboard manages a store that carries a complete knowledge-base descriptor"
                 + " (level 1) and its icon, as builds by ike-maven-plugin 268 or later do. Download a newer build to"
@@ -1418,7 +1420,7 @@ public final class DashboardView extends BorderPane {
                 + "  ·  " + WHEN.format(copy.recency())));
         copy.coordinate().ifPresent(coordinate -> {
             BuildStatus status = status(family.name());
-            Label build = muted(coordinate.artifactId() + " " + copy.resolvedVersion().orElse(coordinate.version())
+            TextArea build = muted(coordinate.artifactId() + " " + copy.resolvedVersion().orElse(coordinate.version())
                     + nexusNote(status));
             if (status.state() == BuildStatus.State.CURRENT) {
                 build.setStyle("-fx-text-fill: #2e7d32;");
@@ -1429,9 +1431,9 @@ public final class DashboardView extends BorderPane {
 
         BuildStatus status = status(family.name());
         if (status.state() == BuildStatus.State.NEWER && status.newest().isPresent()) {
-            Label newer = new Label("A newer build is on Nexus, deployed " + WHEN.format(status.newest().get().updated()));
-            newer.setWrapText(true);
             KnowledgeBase identified = family.latestIdentified().orElse(copy);
+            TextArea newer = SelectableText.of("A newer build is on Nexus, deployed "
+                    + WHEN.format(status.newest().get().updated()) + ", for your copy " + identified.whereShown() + ".");
             String classifier = identified.kind().classifier();
             boolean downloading = identified.coordinate()
                     .map(coordinate -> transferring(downloadKey(coordinate, classifier))).orElse(false);
@@ -1475,7 +1477,7 @@ public final class DashboardView extends BorderPane {
         detail.getChildren().add(actions);
         if (komet.isEmpty()) {
             Optional<KometRelease> fix = kometRelease.filter(release -> LauncherChoice.reads(release.version(), copy));
-            Label need = new Label(LauncherChoice.requirement(copy).map(requirement -> "Needs " + requirement
+            TextArea need = SelectableText.of(LauncherChoice.requirement(copy).map(requirement -> "Needs " + requirement
                     + (fix.isPresent() ? "." : "; none installed reads it, and no newer build was found."))
                     .orElse(fix.isPresent() ? "No Komet installed." : "No Komet installed, and none was found to install."));
             need.setStyle(PROBLEM);
@@ -1485,7 +1487,7 @@ public final class DashboardView extends BorderPane {
                         : "Install Komet " + release.version());
                 install.setDisable(installing);
                 install.setOnAction(event -> onInstallKomet.accept(release));
-                Label from = muted("from " + release.source().label()
+                TextArea from = muted("from " + release.source().label()
                         + (release.sizeBytes() > 0 ? ", " + DashboardCommand.size(release.sizeBytes()) : "")
                         + "; installed beside the Komets you have");
                 HBox row = new HBox(10, install, from);
@@ -1497,14 +1499,14 @@ public final class DashboardView extends BorderPane {
         }
         komet.flatMap(chosen -> heapPlanner.apply(chosen, copy))
                 .ifPresent(plan -> detail.getChildren().add(HeapView.line(plan, komet.get(), copy)));
-        Label folder = muted("Folder  " + copy.path().getFileName());
+        TextArea folder = muted("Folder  " + copy.path().getFileName());
         folder.setTooltip(new Tooltip(copy.path().toString()));
         detail.getChildren().add(folder);
 
         List<KnowledgeBase> older = family.members().stream()
                 .filter(member -> member != copy && member.kind().opensInKomet()).toList();
         if (!older.isEmpty()) {
-            detail.getChildren().add(section("Older copies", older, true, true));
+            detail.getChildren().add(section(OTHER_COPIES, older, true, true));
         }
         if (!changeSets.isEmpty()) {
             detail.getChildren().add(section(KnowledgeBaseTree.PROTOBUFS, changeSets, false, false));
@@ -1585,7 +1587,7 @@ public final class DashboardView extends BorderPane {
             link.setTooltip(new Tooltip("Not in ~/Solor: show it in the Nexus window"));
             label = link;
         } else {
-            label = new Label(name);
+            label = SelectableText.of(name);
         }
         HBox row = new HBox(8, label);
         if (!what.isEmpty()) {
@@ -1595,15 +1597,15 @@ public final class DashboardView extends BorderPane {
         return row;
     }
 
-    private static Label heading(String text) {
-        Label label = new Label(text);
+    private static TextArea heading(String text) {
+        TextArea label = SelectableText.of(text);
         label.setStyle("-fx-font-weight: bold;");
         return label;
     }
 
     /** The row for a store's previous build, kept beside it since the upgrade (decision 20). */
     private Node previousBox(KnowledgeBase copy, KnowledgeBase previous) {
-        Label text = new Label("The build before the upgrade is kept beside this one as " + previous.name() + " ("
+        TextArea text = SelectableText.of("The build before the upgrade is kept beside this one as " + previous.name() + " ("
                 + DashboardCommand.size(previous.sizeBytes()) + ", " + previous.resolvedVersion().orElse("version unknown") + ").");
         text.setWrapText(true);
         HBox.setHgrow(text, Priority.ALWAYS);
@@ -1694,7 +1696,9 @@ public final class DashboardView extends BorderPane {
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
         alert.setTitle("Restore");
         alert.setHeaderText("Put back the previous build of " + store.displayName() + "?");
-        alert.setContentText("The build you have now steps aside and becomes the previous one, and the previous build takes"
+        alert.setContentText("Your copy is the folder " + store.whereShown() + ", and its previous build is "
+                + StoreUpgrade.previousFolder(store.path()).getFileName() + ".\n\n");
+        alert.setContentText(alert.getContentText() + "The build you have now steps aside and becomes the previous one, and the previous build takes"
                 + " its place. The change sets and preferences written since are carried into it, so nothing is lost, and"
                 + " Restore again swaps them back. Quit any Komet that has this store open first.");
         alert.getButtonTypes().setAll(ButtonType.CANCEL, ButtonType.OK);
@@ -1718,6 +1722,9 @@ public final class DashboardView extends BorderPane {
         long bytes = copies.stream().mapToLong(KnowledgeBase::sizeBytes).sum();
         String heading = name + " (" + copies.size() + ")  ·  " + DashboardCommand.size(bytes);
         TableView<KnowledgeBase> table = copiesTable(copies);
+        if (trashAll) {
+            table.getColumns().add(nexusColumn());
+        }
         TitledPane pane = new TitledPane(heading, table);
         pane.setExpanded(expanded);
         pane.setAnimated(false);
@@ -1728,7 +1735,86 @@ public final class DashboardView extends BorderPane {
         trash.setOnAction(event -> confirmTrash(copies));
         HBox bar = new HBox(trash);
         bar.setAlignment(Pos.CENTER_RIGHT);
-        return new VBox(4, pane, bar);
+        VBox box = new VBox(4, pane, bar);
+        if (copies.stream().anyMatch(copy -> upgradeOf(copy).isPresent())) {
+            box.getChildren().add(1, muted("Each copy is a folder of its own, upgraded on its own: Upgrade brings that"
+                    + " folder to the newest build where it is and keeps its change sets, preferences and repositories."));
+        }
+        return box;
+    }
+
+    /**
+     * How a copy stands against the newest build on Nexus, with Upgrade for a copy that is behind it: every copy of
+     * a knowledge base is a folder of its own, upgraded on its own.
+     */
+    private TableColumn<KnowledgeBase, KnowledgeBase> nexusColumn() {
+        TableColumn<KnowledgeBase, KnowledgeBase> column = new TableColumn<>("Nexus");
+        column.setCellValueFactory(cell -> new ReadOnlyObjectWrapper<>(cell.getValue()));
+        column.setPrefWidth(120);
+        column.setCellFactory(view -> new javafx.scene.control.TableCell<>() {
+            @Override
+            protected void updateItem(KnowledgeBase copy, boolean empty) {
+                super.updateItem(copy, empty);
+                setText(null);
+                setGraphic(null);
+                if (empty || copy == null) {
+                    return;
+                }
+                Optional<NoticeAction.Upgrade> upgrade = upgradeOf(copy);
+                if (upgrade.isPresent()) {
+                    Button button = new Button(upgradeBusy(copy) ? "Upgrading …" : "Upgrade…");
+                    button.setStyle("-fx-font-size: 11px; -fx-padding: 1 8 1 8;");
+                    button.setDisable(upgradeBusy(copy) || LauncherChoice.chooseForLoad(komets, copy).isEmpty());
+                    button.setOnAction(event -> confirmUpgrade(upgrade.get()));
+                    setGraphic(button);
+                } else {
+                    setText(standing(copy));
+                }
+            }
+        });
+        return column;
+    }
+
+    /** What a copy that is not behind says in the Nexus column. */
+    private String standing(KnowledgeBase copy) {
+        if (StoreUpgrade.isPrevious(copy.name())) {
+            return "kept by an upgrade";
+        }
+        return newestFor(copy).map(newest -> NewerBuildCheck.compare(copy, newest).state())
+                .map(state -> switch (state) {
+                    case CURRENT -> "newest build";
+                    case NEWER -> "older build";
+                    default -> "";
+                }).orElse("");
+    }
+
+    /** The newest build on Nexus of the knowledge base a copy belongs to, when it has been checked. */
+    private Optional<SnapshotMetadata.Deploy> newestFor(KnowledgeBase copy) {
+        return families.stream().filter(family -> family.members().contains(copy)).findFirst()
+                .map(family -> status(family.name())).flatMap(BuildStatus::newest);
+    }
+
+    /**
+     * The upgrade of one copy, when that folder is behind the newest build on Nexus and says which build it is. A
+     * copy kept by an upgrade ({@code .previous}) is not offered one.
+     *
+     * @param copy the copy
+     * @return its upgrade
+     */
+    Optional<NoticeAction.Upgrade> upgradeOf(KnowledgeBase copy) {
+        if (!copy.kind().opensInKomet() || !copy.identified() || StoreUpgrade.isPrevious(copy.name())
+                || copy.coordinate().isEmpty()) {
+            return Optional.empty();
+        }
+        return newestFor(copy).filter(newest -> NewerBuildCheck.compare(copy, newest).state() == BuildStatus.State.NEWER)
+                .map(newest -> new NoticeAction.Upgrade(copy, copy.coordinate().get(), copy.kind().classifier()));
+    }
+
+    /** Whether an upgrade, a download of its build or another change to the copy is under way. */
+    private boolean upgradeBusy(KnowledgeBase copy) {
+        return transferring(upgradeKey(copy.path()))
+                || copy.coordinate().map(coordinate -> transferring(downloadKey(coordinate, copy.kind().classifier())))
+                .orElse(false);
     }
 
     private TableView<KnowledgeBase> copiesTable(List<KnowledgeBase> copies) {
@@ -1792,6 +1878,21 @@ public final class DashboardView extends BorderPane {
             MenuItem memory = new MenuItem("Memory…");
             memory.setOnAction(event -> onEditHeap.accept(copy));
             items.add(memory);
+            if (withOpenAndTrash) {
+                upgradeOf(copy).ifPresent(upgrade -> {
+                    MenuItem item = new MenuItem("Upgrade…");
+                    item.setDisable(upgradeBusy(copy) || LauncherChoice.chooseForLoad(komets, copy).isEmpty());
+                    item.setOnAction(event -> confirmUpgrade(upgrade));
+                    items.add(item);
+                });
+                if (families.stream().flatMap(family -> family.members().stream())
+                        .anyMatch(member -> member.path().equals(StoreUpgrade.previousFolder(copy.path())))) {
+                    MenuItem restore = new MenuItem("Restore previous build…");
+                    restore.setDisable(transferring(upgradeKey(copy.path())));
+                    restore.setOnAction(event -> confirmRestore(copy));
+                    items.add(restore);
+                }
+            }
             copy.coordinate().filter(coordinate -> copy.identified() && !StoreUpgrade.isPrevious(copy.name())).ifPresent(coordinate -> {
                 MenuItem reinstall = new MenuItem("Reinstall…");
                 reinstall.setDisable(transferring(upgradeKey(copy.path())) || transferring(downloadKey(coordinate, copy.kind().classifier())));
@@ -1840,11 +1941,10 @@ public final class DashboardView extends BorderPane {
         return KnowledgeBaseIcon.of(family.icon().map(file -> icons.computeIfAbsent(file, KnowledgeBaseIcon::load)), size);
     }
 
-    private static Label muted(String text) {
-        Label label = new Label(text);
-        label.setStyle(MUTED);
-        label.setWrapText(true);
-        return label;
+    private static TextArea muted(String text) {
+        TextArea area = SelectableText.of(text);
+        area.setStyle(MUTED);
+        return area;
     }
 
     /** A line of the list: the icon, the name, and a mark only when something needs attention. */

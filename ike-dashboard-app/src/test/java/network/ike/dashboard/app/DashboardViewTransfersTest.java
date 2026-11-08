@@ -142,7 +142,7 @@ class DashboardViewTransfersTest {
     /** The text of every label and button drawn. */
     private static List<String> texts(DashboardView view) {
         List<String> texts = new ArrayList<>();
-        view.lookupAll(".label").stream().map(Label.class::cast).map(Labeled::getText).forEach(texts::add);
+        texts.addAll(Words.of(view));
         view.lookupAll(".button").stream().map(Button.class::cast).map(Labeled::getText).forEach(texts::add);
         return texts;
     }

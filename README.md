@@ -58,8 +58,10 @@ From then on it updates itself (see [Self-update](#self-update)). The links neve
   first, each with one action, and Show for a card about one knowledge base
   (`IKE-Network/ike-issues#1357`).
   A dialog names the copy it acts on by its folder (`solor-gudid-kb in ~/Solor`), since a knowledge base can
-  have several copies, and every dialog's words can be selected and copied, read-only
-  (`IKE-Network/ike-issues#1358`).
+  have several copies, and the window's and every dialog's words can be selected and copied, read-only
+  (`IKE-Network/ike-issues#1358`, `#1359`). Each copy is upgraded on its own: the detail shows the newest, and
+  its *Other copies* table offers *Upgrade…* for any folder behind the newest build, and *Restore previous
+  build…* in a copy's menu when it has one.
 
   A store has three operations (decision 20 of `dev-ike-dashboard`). *Upgrade* brings it to the newest
   build in place: the build downloads into `<store>.upgrade` beside it, the change-set folders, the
