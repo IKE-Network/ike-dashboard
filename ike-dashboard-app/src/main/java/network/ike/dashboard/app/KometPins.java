@@ -15,66 +15,41 @@
  */
 package network.ike.dashboard.app;
 
-import java.util.Map;
 import java.util.Optional;
-import java.util.TreeMap;
-import java.util.function.BiConsumer;
-import java.util.prefs.BackingStoreException;
 import java.util.prefs.Preferences;
 
 /**
  * Which Komet each knowledge base opens in (KEC, 2026-11-08): the latest Komet that can open it, unless the
  * person pins it to one installed version, for testing or otherwise. A pin is kept per knowledge base, by its
- * family name, in the dashboard's preferences ({@code network/ike/dashboard/kometPins}).
+ * family name, in the dashboard's preferences ({@code network/ike/dashboard/komet-pins}), the way the notice
+ * dismissals and the open history are kept.
  */
 public final class KometPins {
 
-    /** The preferences node the pins are kept in, under the dashboard's. */
-    public static final String NODE = "kometPins";
+    /** The node under the dashboard's settings. */
+    static final String NODE = "komet-pins";
 
-    private final Map<String, String> pins;
-    private final BiConsumer<String, Optional<String>> store;
+    /** No pins, kept nowhere: what a view starts with until it is given the person's. */
+    static final KometPins NONE = new KometPins(null);
 
-    private KometPins(Map<String, String> pins, BiConsumer<String, Optional<String>> store) {
-        this.pins = new TreeMap<>(pins);
-        this.store = store;
+    private final Preferences preferences;
+
+    /**
+     * Keeps pins in a preferences node.
+     *
+     * @param preferences the node
+     */
+    public KometPins(Preferences preferences) {
+        this.preferences = preferences;
     }
 
     /**
-     * Pins kept only in memory, for a view with nowhere to keep them.
+     * The pins of the person using the dashboard.
      *
-     * @return no pins
+     * @return them
      */
-    public static KometPins inMemory() {
-        return new KometPins(Map.of(), (family, version) -> { });
-    }
-
-    /**
-     * The pins kept in a preferences node, written back to it as they change.
-     *
-     * @param node the node
-     * @return the pins
-     */
-    public static KometPins from(Preferences node) {
-        Map<String, String> read = new TreeMap<>();
-        try {
-            for (String key : node.keys()) {
-                String version = node.get(key, "");
-                if (!version.isBlank()) {
-                    read.put(key, version);
-                }
-            }
-        } catch (BackingStoreException e) {
-            // Unreadable preferences mean no pins: every knowledge base opens in the latest Komet.
-        }
-        return new KometPins(read, (family, version) -> {
-            version.ifPresentOrElse(pinned -> node.put(family, pinned), () -> node.remove(family));
-            try {
-                node.flush();
-            } catch (BackingStoreException e) {
-                // Kept for this run; the next start reads what was flushed.
-            }
-        });
+    public static KometPins current() {
+        return new KometPins(Preferences.userRoot().node(DashboardSettings.NODE).node(NODE));
     }
 
     /**
@@ -84,7 +59,8 @@ public final class KometPins {
      * @return the version, or empty for the latest
      */
     public Optional<String> of(String family) {
-        return Optional.ofNullable(pins.get(family));
+        return preferences == null ? Optional.empty()
+                : Optional.ofNullable(preferences.get(NoticeDismissals.key(family), null)).filter(version -> !version.isBlank());
     }
 
     /**
@@ -94,16 +70,10 @@ public final class KometPins {
      * @param version the version, or empty for the latest
      */
     public void pin(String family, Optional<String> version) {
-        version.ifPresentOrElse(pinned -> pins.put(family, pinned), () -> pins.remove(family));
-        store.accept(family, version);
-    }
-
-    /**
-     * Every pin, by family name.
-     *
-     * @return the pins
-     */
-    public Map<String, String> all() {
-        return Map.copyOf(pins);
+        if (preferences == null) {
+            return;
+        }
+        version.ifPresentOrElse(pinned -> preferences.put(NoticeDismissals.key(family), pinned),
+                () -> preferences.remove(NoticeDismissals.key(family)));
     }
 }

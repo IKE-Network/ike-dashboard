@@ -33,6 +33,15 @@ class DashboardViewKometsTest {
     private static final KometInstallation OLDER = komet("26.1019.900");
     private static final KometInstallation OLDEST = komet("26.1016.346");
 
+    /** A node of its own, removed after the tests, so a test never touches the person's pins. */
+    private static final java.util.prefs.Preferences TEST_PINS = java.util.prefs.Preferences.userRoot()
+            .node("network/ike/dashboard-test/komet-pins-" + java.util.UUID.randomUUID());
+
+    @org.junit.jupiter.api.AfterAll
+    static void removeTestPins() throws Exception {
+        TEST_PINS.removeNode();
+    }
+
     @BeforeAll
     static void startHeadless() throws Exception {
         System.setProperty("glass.platform", "Monocle");
@@ -121,7 +130,7 @@ class DashboardViewKometsTest {
         CompletableFuture<WritableImage> drawn = new CompletableFuture<>();
         Platform.runLater(() -> {
             try {
-                KometPins pins = KometPins.inMemory();
+                KometPins pins = new KometPins(TEST_PINS);
                 pins.pin("pizza-kb", Optional.of(OLDER.version()));
                 DashboardView view = new DashboardView();
                 view.setKomets(List.of(NEWEST, OLDER, OLDEST));

@@ -165,7 +165,7 @@ public final class DashboardApp extends Application {
         view.setOnDownload(this::download);
         view.setOnTrash(this::trash);
         view.setOnTrashKomets(this::trashKomets);
-        view.setKometPins(KometPins.from(preferences.node(KometPins.NODE)));
+        view.setKometPins(KometPins.current());
         view.setOnBrowse(this::loadCatalog);
         view.setOnInstallKomet(this::installKomet);
         view.setOnUpgrade(this::upgrade);

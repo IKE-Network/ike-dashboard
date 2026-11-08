@@ -181,7 +181,7 @@ public final class DashboardView extends BorderPane {
     private final ScrollPane kometsView = new ScrollPane(kometsBox);
     private boolean showingKomets;
     private Consumer<List<KometInstallation>> onTrashKomets = komets -> { };
-    private KometPins pins = KometPins.inMemory();
+    private KometPins pins = KometPins.NONE;
     private final VBox noticesBox = new VBox(10);
     private final ScrollPane noticesView = new ScrollPane(noticesBox);
     private SplitPane knowledgeBasesView;
@@ -1012,10 +1012,8 @@ public final class DashboardView extends BorderPane {
 
     /** The knowledge bases set to open in a Komet version, by their names. */
     private List<String> pinnedTo(String version) {
-        return pins.all().entrySet().stream().filter(entry -> entry.getValue().equals(version))
-                .map(entry -> families.stream().filter(family -> family.name().equals(entry.getKey())).findFirst()
-                        .map(KnowledgeBaseFamily::displayName).orElse(entry.getKey()))
-                .sorted().toList();
+        return families.stream().filter(family -> pins.of(family.name()).filter(version::equals).isPresent())
+                .map(KnowledgeBaseFamily::displayName).sorted().toList();
     }
 
     /** A folder as a person reads it: the home folder as {@code ~}. */
@@ -1746,7 +1744,6 @@ public final class DashboardView extends BorderPane {
             inLabel.setStyle(MUTED);
             actions.getChildren().addAll(inLabel, in);
         }
-        actions.getChildren().add(moreMenu(copy));
         actions.setAlignment(Pos.CENTER_LEFT);
         actions.setPadding(new Insets(6, 0, 0, 0));
         detail.getChildren().add(actions);
@@ -1780,11 +1777,16 @@ public final class DashboardView extends BorderPane {
                 detail.getChildren().add(row);
             });
         }
-        komet.flatMap(chosen -> heapPlanner.apply(chosen, copy))
-                .ifPresent(plan -> detail.getChildren().add(HeapView.line(plan, komet.get(), copy)));
-        SelectableText folder = muted("Folder  " + Names.of(copy.path().getFileName()));
-        Tooltip.install(folder, new Tooltip(copy.path().toString()));
-        detail.getChildren().add(folder);
+        // Each action sits beside what it acts on, labelled, instead of in a "⋯" menu (KEC, 2026-11-08).
+        komet.flatMap(chosen -> heapPlanner.apply(chosen, copy)).ifPresent(plan -> {
+            Hyperlink change = new Hyperlink("Change…");
+            change.setOnAction(event -> onEditHeap.accept(copy));
+            HBox memory = new HBox(6, HeapView.line(plan, komet.get(), copy), change);
+            memory.setAlignment(Pos.CENTER_LEFT);
+            detail.getChildren().add(memory);
+        });
+        detail.getChildren().add(muted("Folder  " + copy.whereShown()));
+        detail.getChildren().add(folderActions(copy));
 
         List<KnowledgeBase> older = family.members().stream()
                 .filter(member -> member != copy && member.kind().opensInKomet()).toList();
@@ -2063,6 +2065,7 @@ public final class DashboardView extends BorderPane {
         TableColumn<KnowledgeBase, KnowledgeBase> column = new TableColumn<>("Nexus");
         column.setCellValueFactory(cell -> new ReadOnlyObjectWrapper<>(cell.getValue()));
         column.setPrefWidth(120);
+        column.setMinWidth(100);
         column.setCellFactory(view -> new javafx.scene.control.TableCell<>() {
             @Override
             protected void updateItem(KnowledgeBase copy, boolean empty) {
@@ -2092,6 +2095,7 @@ public final class DashboardView extends BorderPane {
         TableColumn<KnowledgeBase, KnowledgeBase> column = new TableColumn<>("");
         column.setCellValueFactory(cell -> new ReadOnlyObjectWrapper<>(cell.getValue()));
         column.setPrefWidth(130);
+        column.setMinWidth(124);
         column.setSortable(false);
         column.setCellFactory(view -> new javafx.scene.control.TableCell<>() {
             @Override
@@ -2105,6 +2109,7 @@ public final class DashboardView extends BorderPane {
                 Button button = new Button("Move to " + Finder.trashName() + "…");
                 button.setStyle("-fx-font-size: 11px; -fx-padding: 1 8 1 8;");
                 button.setDisable(upgradeBusy(copy));
+                button.setMinWidth(Region.USE_PREF_SIZE);
                 button.setOnAction(event -> confirmTrash(List.of(copy)));
                 setGraphic(button);
             }
@@ -2156,6 +2161,9 @@ public final class DashboardView extends BorderPane {
                 column("Kind", 140, copy -> copy.kind().label()),
                 column("Size", 80, copy -> DashboardCommand.size(copy.sizeBytes())),
                 column("Date", 130, copy -> WHEN.format(copy.recency()))));
+        // A size or a date cut short says nothing; the folder name gives way first.
+        table.getColumns().get(2).setMinWidth(72);
+        table.getColumns().get(3).setMinWidth(122);
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_ALL_COLUMNS);
         table.setFixedCellSize(24);
         table.setPrefHeight(28 + 24 * Math.min(copies.size(), TABLE_ROWS) + 4);
@@ -2179,10 +2187,28 @@ public final class DashboardView extends BorderPane {
         return column;
     }
 
-    private MenuButton moreMenu(KnowledgeBase copy) {
-        MenuButton more = new MenuButton("⋯");
-        more.getItems().addAll(menuItems(copy, false));
-        return more;
+    /** What can be done to the folder the detail shows, as labelled buttons on its own line. */
+    private HBox folderActions(KnowledgeBase copy) {
+        boolean busy = transferring(upgradeKey(copy.path()));
+        Button reveal = new Button("Show in " + Finder.name());
+        reveal.setOnAction(event -> onReveal.accept(copy.path()));
+        Button duplicate = new Button("Copy to a new folder…");
+        duplicate.setDisable(busy);
+        duplicate.setOnAction(event -> askCopy(copy));
+        HBox row = new HBox(8, reveal, duplicate);
+        copy.coordinate().filter(coordinate -> copy.identified()).ifPresent(coordinate -> {
+            Button reinstall = new Button("Reinstall…");
+            reinstall.setDisable(busy || transferring(downloadKey(coordinate, copy.kind().classifier())));
+            reinstall.setOnAction(event -> confirmReinstall(new NoticeAction.Reinstall(copy, coordinate, copy.kind().classifier())));
+            row.getChildren().add(reinstall);
+        });
+        Button trash = new Button("Move to " + Finder.trashName() + "…");
+        trash.setDisable(busy);
+        trash.setOnAction(event -> confirmTrash(List.of(copy)));
+        row.getChildren().add(trash);
+        row.getChildren().forEach(node -> ((Region) node).setMinWidth(Region.USE_PREF_SIZE));
+        row.setAlignment(Pos.CENTER_LEFT);
+        return row;
     }
 
     private ContextMenu copyMenu(KnowledgeBase copy) {

@@ -96,8 +96,11 @@ class DashboardViewCopiesTest {
                 .contains("pizza-card-leak-demo", "pizza-teaching")
                 .noneMatch(text -> text.startsWith("A newer build is on Nexus"));
         assertThat(enabledButtons.get(30, TimeUnit.SECONDS)).filteredOn("Upgrade…"::equals).hasSize(2);
-        assertThat(enabledButtons.get(30, TimeUnit.SECONDS)).as("each folder's own Move to Trash, and none for all at once")
-                .filteredOn(("Move to " + Finder.trashName() + "…")::equals).hasSize(2);
+        assertThat(enabledButtons.get(30, TimeUnit.SECONDS)).as("one Move to Trash per folder, the shown one's included,"
+                        + " and none for all at once")
+                .filteredOn(("Move to " + Finder.trashName() + "…")::equals).hasSize(3);
+        assertThat(enabledButtons.get(30, TimeUnit.SECONDS)).as("labelled actions, no ⋯ menu")
+                .contains("Show in " + Finder.name(), "Copy to a new folder…", "Reinstall…").doesNotContain("⋯");
         write(drawn.get(30, TimeUnit.SECONDS), Path.of("target", "dashboard-other-copies.png"));
     }
 
