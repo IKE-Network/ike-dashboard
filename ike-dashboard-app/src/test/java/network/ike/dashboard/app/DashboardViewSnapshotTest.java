@@ -29,8 +29,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * test, and writes it to {@code target/dashboard-view.png} so a person can see what it shows: one line
  * per managed knowledge base on the left beside its icon, the rest folded into Not managed, the
  * selected one's detail on the right; a Not managed entry's detail goes to
- * {@code target/dashboard-not-managed.png}, the Nexus window to {@code target/nexus-browser.png}, and a
- * store's memory line to {@code target/dashboard-memory.png}.
+ * {@code target/dashboard-not-managed.png}, the Nexus window to {@code target/nexus-browser.png}, a
+ * store's memory line to {@code target/dashboard-memory.png}, and the Notices side of the window's switch to
+ * {@code target/dashboard-notices.png}.
  */
 class DashboardViewSnapshotTest {
 
@@ -96,6 +97,7 @@ class DashboardViewSnapshotTest {
         CompletableFuture<List<String>> unmanagedDetail = new CompletableFuture<>();
         CompletableFuture<List<String>> memoryDetail = new CompletableFuture<>();
         CompletableFuture<WritableImage> memory = new CompletableFuture<>();
+        CompletableFuture<WritableImage> noticesImage = new CompletableFuture<>();
         HeapSizing.Machine machine = new HeapSizing.Machine(128 * HeapSizing.GIB, List.of(
                 new HeapSizing.Running(1, Optional.of(solor.resolve("solor-kb")), 42 * HeapSizing.GIB, 0)));
         Platform.runLater(() -> {
@@ -117,6 +119,11 @@ class DashboardViewSnapshotTest {
                 view.applyCss();
                 view.layout();
                 rendered.complete(scene.snapshot(null));
+                view.showNotices();                      // the other side of the switch, across the window
+                view.applyCss();
+                view.layout();
+                noticesImage.complete(scene.snapshot(null));
+                view.showKnowledgeBases();
                 built.complete(view);
             } catch (RuntimeException e) {
                 rendered.completeExceptionally(e);
@@ -194,6 +201,7 @@ class DashboardViewSnapshotTest {
         write(notManaged.get(30, TimeUnit.SECONDS), Path.of("target", "dashboard-not-managed.png"));
         write(nexus.get(30, TimeUnit.SECONDS), Path.of("target", "nexus-browser.png"));
         write(memory.get(30, TimeUnit.SECONDS), Path.of("target", "dashboard-memory.png"));
+        write(noticesImage.get(30, TimeUnit.SECONDS), Path.of("target", "dashboard-notices.png"));
         CompletableFuture<Integer> icons = new CompletableFuture<>();
         Platform.runLater(() -> icons.complete(view.lookupAll(".image-view").size()));
         assertThat(icons.get(30, TimeUnit.SECONDS)).as("each managed line's icon and the detail's").isEqualTo(3);

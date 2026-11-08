@@ -159,8 +159,18 @@ public final class DashboardView extends BorderPane {
     private Consumer<NoticeAction.Upgrade> onUpgrade = action -> { };
     private Consumer<NoticeAction.Reinstall> onReinstall = action -> { };
     private Consumer<KnowledgeBase> onRestore = store -> { };
-    private final Button home = new Button("Notices");
+    /**
+     * The window's two views, one segmented control (KEC, 2026-11-08): the knowledge bases, a list and the
+     * chosen one's detail, and the notices, across the whole window. Notices is the landing page.
+     */
+    private final ToggleButton knowledgeBasesTab = new ToggleButton("Knowledge Bases");
+    private final ToggleButton noticesTab = new ToggleButton("Notices");
+    private final VBox noticesBox = new VBox(10);
+    private final ScrollPane noticesView = new ScrollPane(noticesBox);
+    private SplitPane knowledgeBasesView;
     private boolean showingNotices = true;
+    /** The knowledge base last chosen before Notices was shown, which Knowledge Bases returns to. */
+    private String lastChosen;
     private List<Notice> notices = List.of();
     private final Map<Path, List<RepositorySync.Status>> sync = new HashMap<>();
     private Optional<Notice.Freshness> nexusChecked = Optional.empty();
@@ -212,13 +222,30 @@ public final class DashboardView extends BorderPane {
         updateBar.managedProperty().bind(updateBar.visibleProperty());
         updateBar.setVisible(false);
         updateAll.setOnAction(event -> newerBuilds().forEach(this::upgradeOrCopy));
-        home.setMaxWidth(Double.MAX_VALUE);
-        home.setAlignment(Pos.CENTER_LEFT);
-        home.setOnAction(event -> showNotices());
-        HBox.setHgrow(home, Priority.ALWAYS);
-        HBox homeBar = new HBox(home);
-        homeBar.setPadding(new Insets(8, 8, 0, 8));
-        VBox masterTop = new VBox(homeBar, listBar, updateBar);
+        ToggleGroup views = new ToggleGroup();
+        knowledgeBasesTab.setToggleGroup(views);
+        noticesTab.setToggleGroup(views);
+        knowledgeBasesTab.getStyleClass().add("left-pill");
+        noticesTab.getStyleClass().add("right-pill");
+        knowledgeBasesTab.setMinWidth(Region.USE_PREF_SIZE);
+        noticesTab.setMinWidth(Region.USE_PREF_SIZE);
+        noticesTab.setSelected(true);
+        views.selectedToggleProperty().addListener((observable, was, now) -> {
+            if (now == null) {
+                was.setSelected(true);                   // one view is always shown
+                return;
+            }
+            if (now == noticesTab) {
+                showNotices();
+            } else {
+                showKnowledgeBases();
+            }
+        });
+        HBox viewBar = new HBox(knowledgeBasesTab, noticesTab);
+        viewBar.setAlignment(Pos.CENTER);
+        viewBar.setPadding(new Insets(8, 8, 6, 8));
+        setTop(viewBar);
+        VBox masterTop = new VBox(listBar, updateBar);
 
         fromNexus.setOnAction(event -> openBrowser());
         browser.setOnDownload((coordinate, classifier) -> onDownload.accept(coordinate, classifier));
@@ -230,6 +257,7 @@ public final class DashboardView extends BorderPane {
         list.getSelectionModel().selectedItemProperty().addListener((observable, was, now) -> {
             if (now != null) {
                 showingNotices = false;
+                knowledgeBasesTab.setSelected(true);
             }
             showDetail();
         });
@@ -243,6 +271,7 @@ public final class DashboardView extends BorderPane {
         unmanagedList.getSelectionModel().selectedItemProperty().addListener((observable, was, now) -> {
             if (now != null) {
                 showingNotices = false;
+                knowledgeBasesTab.setSelected(true);
                 list.getSelectionModel().clearSelection();
             }
             showDetail();
@@ -271,7 +300,11 @@ public final class DashboardView extends BorderPane {
         split.setOrientation(Orientation.HORIZONTAL);
         split.setDividerPositions(0.32);
         SplitPane.setResizableWithParent(master, false);
-        setCenter(split);
+        knowledgeBasesView = split;
+        noticesBox.setPadding(new Insets(16, 24, 20, 24));
+        noticesView.setFitToWidth(true);
+        noticesView.setStyle("-fx-background-color: transparent; -fx-background-insets: 0;");
+        setCenter(noticesView);
 
         message.setMaxWidth(Double.MAX_VALUE);
         HBox.setHgrow(message, Priority.ALWAYS);
@@ -707,12 +740,35 @@ public final class DashboardView extends BorderPane {
     }
 
     /**
-     * Shows the landing page: the notices, in place of a knowledge base's detail.
+     * Shows the landing page: the notices, across the window. The knowledge base chosen stays chosen, so
+     * Knowledge Bases returns to it.
      */
     public void showNotices() {
+        // Nothing stays selected behind the notices, so a refresh re-selecting it cannot take the person away.
+        lastChosen = selected().map(KnowledgeBaseFamily::name).orElse(lastChosen);
         showingNotices = true;
+        noticesTab.setSelected(true);
         list.getSelectionModel().clearSelection();
         unmanagedList.getSelectionModel().clearSelection();
+        showDetail();
+    }
+
+    /**
+     * Shows the knowledge bases: the list, and the chosen one's detail; the first when none is chosen.
+     */
+    public void showKnowledgeBases() {
+        showingNotices = false;
+        knowledgeBasesTab.setSelected(true);
+        if (list.getSelectionModel().isEmpty() && unmanagedList.getSelectionModel().isEmpty()) {
+            String last = lastChosen;
+            if (last != null) {
+                list.getItems().stream().filter(family -> family.name().equals(last)).findFirst()
+                        .ifPresent(family -> list.getSelectionModel().select(family));
+            }
+            if (list.getSelectionModel().isEmpty() && !list.getItems().isEmpty()) {
+                list.getSelectionModel().selectFirst();
+            }
+        }
         showDetail();
     }
 
@@ -779,24 +835,26 @@ public final class DashboardView extends BorderPane {
                 catalogLoaded ? Optional.of(catalog) : Optional.empty(), sync, collections, dashboard, Instant.now()),
                 dismissed);
         long atRisk = notices.stream().filter(notice -> notice.urgency() == Notice.Urgency.AT_RISK).count();
-        home.setText(notices.isEmpty() ? "Notices" : "Notices  ·  " + notices.size()
+        noticesTab.setText(notices.isEmpty() ? "Notices" : "Notices  ·  " + notices.size()
                 + (atRisk == 0 ? "" : "  (" + atRisk + " at risk)"));
-        home.setStyle(atRisk > 0 ? PROBLEM : notices.isEmpty() ? "" : ATTENTION);
-        if (showingNotices && unmanagedList.getSelectionModel().getSelectedItem() == null) {
+        noticesTab.setStyle(atRisk > 0 ? PROBLEM : notices.isEmpty() ? "" : ATTENTION);
+        if (showingNotices) {
             showDetail();
         }
     }
 
     private void showNoticesPane() {
+        VBox box = noticesBox;                           // the notices fill the window, not the detail pane
+        box.getChildren().clear();
         Label title = new Label("Notices");
         title.setStyle("-fx-font-size: 20px; -fx-font-weight: bold;");
-        detail.getChildren().add(title);
+        box.getChildren().add(title);
         if (notices.isEmpty()) {
-            detail.getChildren().add(muted(families.isEmpty()
+            box.getChildren().add(muted(families.isEmpty()
                     ? "No knowledge bases downloaded. Get one from Nexus to begin." : "Nothing needs your attention."));
         }
-        notices.forEach(notice -> detail.getChildren().add(noticeCard(notice)));
-        detail.getChildren().add(muted(nexusChecked
+        notices.forEach(notice -> box.getChildren().add(noticeCard(notice)));
+        box.getChildren().add(muted(nexusChecked
                 .map(checked -> checked.current() ? "Nexus checked " + WHEN.format(checked.checkedAt())
                         : "Nexus could not be reached; what it showed as of " + WHEN.format(checked.checkedAt()))
                 .orElse("Nexus not checked yet")));
@@ -837,6 +895,13 @@ public final class DashboardView extends BorderPane {
             button.setMinWidth(Region.USE_PREF_SIZE);
             button.setOnAction(event -> act(action));
             row.getChildren().add(button);
+        });
+        // A notice about one knowledge base opens it, beside whatever it offers to do (KEC, 2026-11-08).
+        boolean showsAlready = notice.action().filter(NoticeAction.Show.class::isInstance).isPresent();
+        notice.family().filter(family -> !showsAlready).ifPresent(family -> {
+            Hyperlink show = new Hyperlink("Show");
+            show.setOnAction(event -> select(family));
+            row.getChildren().add(show);
         });
         Hyperlink dismiss = new Hyperlink("Dismiss");
         dismiss.setMinWidth(Region.USE_PREF_SIZE);
@@ -1287,14 +1352,16 @@ public final class DashboardView extends BorderPane {
     }
 
     private void showDetail() {
+        if (showingNotices) {
+            setCenter(noticesView);
+            showNoticesPane();
+            return;
+        }
+        setCenter(knowledgeBasesView);
         detail.getChildren().clear();
         KnowledgeBase loose = unmanagedList.getSelectionModel().getSelectedItem();
         if (loose != null) {
             showUnmanaged(loose);
-            return;
-        }
-        if (showingNotices) {
-            showNoticesPane();
             return;
         }
         Optional<KnowledgeBaseFamily> chosen = selected();

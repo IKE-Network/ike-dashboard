@@ -20,6 +20,9 @@ import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
+import javafx.scene.control.SplitPane;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.control.ToggleButton;
 import javafx.scene.control.Labeled;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -71,6 +74,50 @@ class DashboardViewNoticesTest {
 
         assertThat(shown).contains("Notices", "1 file not committed in Pizza, change sets",
                 "A newer build of Pizza is on Nexus", "Notices  ·  2  (1 at risk)");
+    }
+
+    /**
+     * Knowledge Bases and Notices are one segmented control (KEC, 2026-11-08): Notices first, across the window;
+     * Knowledge Bases the list and the chosen one's detail, the first when none was chosen; back on Notices nothing
+     * stays selected, and Knowledge Bases returns to the one chosen before.
+     */
+    @Test
+    void knowledgeBasesAndNoticesAreOneSwitchThatRemembersTheChoice() throws Exception {
+        Boolean[] seen = onFx(() -> {
+            DashboardView view = view();
+            ToggleButton knowledgeBases = toggle(view, "Knowledge Bases");
+            ToggleButton notices = toggle(view, "Notices  ·  2  (1 at risk)");
+            boolean noticesFirst = notices.isSelected() && view.getCenter() instanceof ScrollPane;
+            knowledgeBases.fire();
+            boolean firstChosen = !view.showingNotices() && view.getCenter() instanceof SplitPane
+                    && view.selected().map(family -> family.name().equals("pizza-kb")).orElse(false);
+            notices.fire();
+            boolean noticesAgain = view.showingNotices() && view.selected().isEmpty() && view.getCenter() instanceof ScrollPane;
+            notices.fire();
+            boolean staysChosen = notices.isSelected() && view.showingNotices();
+            knowledgeBases.fire();
+            boolean returned = view.selected().map(family -> family.name().equals("pizza-kb")).orElse(false);
+            return new Boolean[] {noticesFirst, firstChosen, noticesAgain, staysChosen, returned};
+        });
+
+        assertThat(seen).as("notices first, the first knowledge base chosen, notices again, a segment stays chosen,"
+                + " the choice remembered").containsExactly(true, true, true, true, true);
+    }
+
+    /** A notice about one knowledge base that offers something else to do still opens it, by a Show link. */
+    @Test
+    void aNoticeWithAnActionOpensItsKnowledgeBaseToo() throws Exception {
+        Boolean[] after = onFx(() -> {
+            DashboardView view = view();
+            List<Hyperlink> shows = view.lookupAll(".hyperlink").stream().map(Hyperlink.class::cast)
+                    .filter(link -> link.getText().equals("Show")).toList();
+            boolean offered = !shows.isEmpty();
+            shows.getFirst().fire();
+            return new Boolean[] {offered, !view.showingNotices(),
+                    view.selected().map(family -> family.name().equals("pizza-kb")).orElse(false)};
+        });
+
+        assertThat(after).containsExactly(true, true, true);
     }
 
     @Test
@@ -152,7 +199,13 @@ class DashboardViewNoticesTest {
         List<String> texts = new ArrayList<>();
         view.lookupAll(".label").stream().map(Label.class::cast).map(Labeled::getText).forEach(texts::add);
         view.lookupAll(".button").stream().map(Button.class::cast).map(Labeled::getText).forEach(texts::add);
+        view.lookupAll(".toggle-button").stream().map(ToggleButton.class::cast).map(Labeled::getText).forEach(texts::add);
         return texts;
+    }
+
+    private static ToggleButton toggle(DashboardView view, String text) {
+        return view.lookupAll(".toggle-button").stream().map(ToggleButton.class::cast).filter(toggle -> toggle.getText().equals(text))
+                .findFirst().orElseThrow(() -> new AssertionError("no toggle " + text));
     }
 
     private static Button button(DashboardView view, String text) {

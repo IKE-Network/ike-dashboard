@@ -51,9 +51,12 @@ From then on it updates itself (see [Self-update](#self-update)). The links neve
   says about itself, asks Nexus whether a newer build is deployed, lists the Komet versions
   installed, and opens a knowledge base in a chosen Komet as an independent process. Also a headless
   `DashboardCommand` (`list`, `check`, `notices`, `komets`, `download <g:a:v> <classifier>`,
-  `dashboard-latest`, `self-update [application]`). Its first screen is Notices: one card per finding of
-  its checks (newer builds, knowledge bases not yet downloaded, a newer Komet, a newer dashboard, the
-  sync state of the git repositories inside each store), work at risk first, each with one action.
+  `dashboard-latest`, `self-update [application]`). The window has two views, one switch across its top:
+  *Knowledge Bases*, the list and the chosen one's detail, and *Notices*, the first screen, across the
+  window: one card per finding of its checks (newer builds, knowledge bases not yet downloaded, a newer
+  Komet, a newer dashboard, the sync state of the git repositories inside each store), work at risk
+  first, each with one action, and Show for a card about one knowledge base
+  (`IKE-Network/ike-issues#1357`).
 
   A store has three operations (decision 20 of `dev-ike-dashboard`). *Upgrade* brings it to the newest
   build in place: the build downloads into `<store>.upgrade` beside it, the change-set folders, the
