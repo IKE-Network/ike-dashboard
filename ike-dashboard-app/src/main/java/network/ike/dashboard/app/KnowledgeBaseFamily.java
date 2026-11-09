@@ -42,6 +42,7 @@ public record KnowledgeBaseFamily(String name, List<KnowledgeBase> members) {
      */
     private static final List<Pattern> COPY_SUFFIXES = List.of(
             Pattern.compile("\\.(zip|rkb)$"),
+            Pattern.compile(" Copy( \\d+)?$"),
             Pattern.compile("-(reasoned|unreasoned)-(pb|sa)$"),
             Pattern.compile("-(pb|sa|rkb)$"),
             Pattern.compile("-\\d+-\\d{8}[.-]\\d{6}(-\\d+)?$"),

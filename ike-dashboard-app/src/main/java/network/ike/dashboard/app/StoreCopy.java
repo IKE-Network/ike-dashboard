@@ -44,16 +44,17 @@ public final class StoreCopy {
     }
 
     /**
-     * A name for a new copy that no folder beside the store has: {@code <store>-copy}, then {@code <store>-copy-2}.
+     * A name for a new copy that no folder beside the store has, as the Finder names a copy (KEC, 2026-11-08):
+     * {@code <store> Copy}, then {@code <store> Copy 2}, {@code <store> Copy 3}.
      *
      * @param store the store
      * @return the name
      */
     public static String suggestedName(Path store) {
-        String base = store.getFileName() + "-copy";
+        String base = store.getFileName() + " Copy";
         String name = base;
         for (int n = 2; Files.exists(store.resolveSibling(name)) || Files.exists(store.resolveSibling(name + PARTIAL_SUFFIX)); n++) {
-            name = base + "-" + n;
+            name = base + " " + n;
         }
         return name;
     }

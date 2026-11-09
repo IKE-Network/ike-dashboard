@@ -182,6 +182,8 @@ public final class DashboardView extends BorderPane {
     private boolean showingKomets;
     private Consumer<List<KometInstallation>> onTrashKomets = komets -> { };
     private KometPins pins = KometPins.NONE;
+    private java.util.function.Function<KnowledgeBase, UnsavedWork.Report> unsavedWork =
+            copy -> new UnsavedWork.Report(List.of(), 0, true);
     private final VBox noticesBox = new VBox(10);
     private final ScrollPane noticesView = new ScrollPane(noticesBox);
     private SplitPane knowledgeBasesView;
@@ -830,6 +832,15 @@ public final class DashboardView extends BorderPane {
      */
     public void setOnTrashKomets(Consumer<List<KometInstallation>> action) {
         onTrashKomets = action;
+    }
+
+    /**
+     * How Move to Trash reads what a store contains that is saved nowhere else.
+     *
+     * @param reader given the store, what is unsaved in it
+     */
+    public void setUnsavedWork(java.util.function.Function<KnowledgeBase, UnsavedWork.Report> reader) {
+        unsavedWork = reader;
     }
 
     /**
@@ -1963,16 +1974,34 @@ public final class DashboardView extends BorderPane {
         if (refusedWhileOpen("Copy " + store.name(), List.of(store))) {
             return;
         }
-        javafx.scene.control.TextInputDialog dialog = new javafx.scene.control.TextInputDialog(
-                StoreCopy.suggestedName(store.path()));
+        javafx.scene.control.Dialog<String> dialog = copyDialog(store);
+        if (getScene() != null) {
+            dialog.initOwner(getScene().getWindow());
+        }
+        dialog.showAndWait().filter(text -> StoreCopy.nameProblem(store.path(), text).isEmpty())
+                .ifPresent(text -> onCopy.accept(store, text));
+    }
+
+    /**
+     * The dialog Copy to a new folder asks with: what a copy is, and the new folder's name, ready to type over.
+     * A plain dialog with a field of its own: a TextInputDialog puts its editor back into its own grid whenever its
+     * content text changes, which took the field out of this layout.
+     *
+     * @param store the folder to copy
+     * @return the dialog, answering the name, or nothing when cancelled
+     */
+    static javafx.scene.control.Dialog<String> copyDialog(KnowledgeBase store) {
+        javafx.scene.control.Dialog<String> dialog = new javafx.scene.control.Dialog<>();
         dialog.setTitle("Copy to a new folder");
         dialog.setHeaderText("Copy " + Names.of(store.name()) + " to a new folder?");
-        dialog.setContentText("Name");
+        ButtonType copy = new ButtonType("Copy", ButtonBar.ButtonData.OK_DONE);
+        dialog.getDialogPane().getButtonTypes().setAll(ButtonType.CANCEL, copy);
         SelectableText about = SelectableText.of(copyText(store), SelectableText.DIALOG_WIDTH);
         SelectableText problem = SelectableText.of("", SelectableText.DIALOG_WIDTH);
         problem.setStyle(PROBLEM);
-        javafx.scene.control.TextField name = dialog.getEditor();
-        Node ok = dialog.getDialogPane().lookupButton(ButtonType.OK);
+        javafx.scene.control.TextField name = new javafx.scene.control.TextField(StoreCopy.suggestedName(store.path()));
+        name.setPrefColumnCount(28);
+        Node ok = dialog.getDialogPane().lookupButton(copy);
         Runnable check = () -> {
             Optional<String> wrong = StoreCopy.nameProblem(store.path(), name.getText());
             problem.setText(wrong.orElse(""));
@@ -1980,16 +2009,20 @@ public final class DashboardView extends BorderPane {
         };
         name.textProperty().addListener((observable, was, now) -> check.run());
         check.run();
-        HBox field = new HBox(8, new Label("Name"), name);
+        Label nameLabel = new Label("New folder name");
+        nameLabel.setMinWidth(Region.USE_PREF_SIZE);
+        HBox field = new HBox(8, nameLabel, name);
         field.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(name, Priority.ALWAYS);
         dialog.getDialogPane().setContent(new VBox(10, about, field, problem));
-        if (getScene() != null) {
-            dialog.initOwner(getScene().getWindow());
-        }
+        dialog.setResultConverter(button -> button == copy ? name.getText().strip() : null);
         SelectableText.in(dialog);
-        dialog.showAndWait().map(String::strip).filter(text -> StoreCopy.nameProblem(store.path(), text).isEmpty())
-                .ifPresent(text -> onCopy.accept(store, text));
+        // The name is ready to type over, as the Finder offers a new name.
+        dialog.setOnShown(event -> {
+            name.requestFocus();
+            name.selectAll();
+        });
+        return dialog;
     }
 
     /**
@@ -2279,20 +2312,67 @@ public final class DashboardView extends BorderPane {
             return;
         }
         long bytes = copies.stream().mapToLong(KnowledgeBase::sizeBytes).sum();
-        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        // What would go to the Trash that is saved nowhere else, read from each folder's git repositories
+        // (KEC, 2026-11-08), so the dialog says what is at stake rather than that something may be.
+        Map<KnowledgeBase, UnsavedWork.Report> reports = new java.util.LinkedHashMap<>();
+        copies.forEach(copy -> reports.put(copy, unsavedWork.apply(copy)));
+        boolean unsaved = reports.values().stream().anyMatch(report -> !report.findings().isEmpty());
+        Alert alert = new Alert(unsaved ? Alert.AlertType.WARNING : Alert.AlertType.CONFIRMATION);
         alert.setTitle("Move to " + Finder.trashName());
         alert.setHeaderText("Move " + (copies.size() == 1 ? Names.of(copies.getFirst().name()) : copies.size() + " copies")
                 + " (" + DashboardCommand.size(bytes) + ") to the " + Finder.trashName() + "?");
-        alert.setContentText((copies.size() == 1 ? "" : copies.stream().map(copy -> Names.of(copy.name()))
-                .collect(Collectors.joining("\n", "", "\n\n")))
-                + "If you changed a copy, it may contain work that is not saved anywhere else. "
-                + "The disk space is freed when you empty the " + Finder.trashName() + ".");
-        alert.getButtonTypes().setAll(ButtonType.CANCEL, ButtonType.OK);
+        alert.setContentText(trashText(reports));
+        ButtonType move = new ButtonType("Move to " + Finder.trashName(), ButtonBar.ButtonData.OK_DONE);
+        alert.getButtonTypes().setAll(ButtonType.CANCEL, move);
+        if (unsaved) {
+            // With work at stake, Return cancels.
+            ((Button) alert.getDialogPane().lookupButton(move)).setDefaultButton(false);
+            ((Button) alert.getDialogPane().lookupButton(ButtonType.CANCEL)).setDefaultButton(true);
+        }
         if (getScene() != null) {
             alert.initOwner(getScene().getWindow());
         }
         SelectableText.in(alert);
-        alert.showAndWait().filter(ButtonType.OK::equals).ifPresent(ok -> onTrash.accept(copies));
+        alert.showAndWait().filter(move::equals).ifPresent(ok -> onTrash.accept(copies));
+    }
+
+    /**
+     * What Move to Trash says: for each folder, what in it is saved nowhere else, or that everything is.
+     *
+     * @param reports each folder's unsaved work
+     * @return the text
+     */
+    static String trashText(Map<KnowledgeBase, UnsavedWork.Report> reports) {
+        StringBuilder text = new StringBuilder();
+        boolean several = reports.size() > 1;
+        boolean unsaved = false;
+        for (Map.Entry<KnowledgeBase, UnsavedWork.Report> entry : reports.entrySet()) {
+            UnsavedWork.Report report = entry.getValue();
+            String folder = Names.of(entry.getKey().name());
+            if (!report.findings().isEmpty()) {
+                unsaved = true;
+                text.append(several ? folder + " has work that is saved nowhere else:\n"
+                        : "This folder has work that is saved nowhere else:\n");
+                report.findings().forEach(finding -> text.append("• ").append(finding).append('\n'));
+                text.append('\n');
+            } else if (several) {
+                text.append(folder).append(report.repositories() > 0
+                        ? ": every change is committed and pushed.\n" : ": no change sets of yours.\n");
+            } else {
+                text.append(report.repositories() > 0
+                        ? "Every change in its git repositories is committed and pushed, so nothing is lost.\n\n"
+                        : "It has no change sets of yours.\n\n");
+            }
+        }
+        if (several && !unsaved) {
+            text.append('\n');
+        }
+        if (unsaved) {
+            text.append("That work goes to the ").append(Finder.trashName()).append(" with the folder. You can restore it")
+                    .append(" from the ").append(Finder.trashName()).append(" if you need it.\n\n");
+        }
+        text.append("The disk space is freed when you empty the ").append(Finder.trashName()).append('.');
+        return text.toString();
     }
 
     /** A knowledge base's icon, read once per refresh. */

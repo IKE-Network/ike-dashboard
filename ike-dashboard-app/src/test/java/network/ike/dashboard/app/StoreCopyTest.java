@@ -60,17 +60,21 @@ class StoreCopyTest {
     void namesAreSuggestedFreeAndRefusedWhenTakenOrTheDashboardsOwn() throws IOException {
         Path store = solor.resolve("pizza-kb");
         Files.createDirectories(store);
-        Files.createDirectories(solor.resolve("pizza-kb-copy"));
-
-        assertThat(StoreCopy.suggestedName(store)).isEqualTo("pizza-kb-copy-2");
-        assertThat(StoreCopy.nameProblem(store, "pizza-kb-copy")).hasValueSatisfying(why -> assertThat(why).contains("already"));
+        assertThat(StoreCopy.suggestedName(store)).isEqualTo("pizza-kb Copy");
+        Files.createDirectories(solor.resolve("pizza-kb Copy"));
+        assertThat(StoreCopy.suggestedName(store)).isEqualTo("pizza-kb Copy 2");
+        Files.createDirectories(solor.resolve("pizza-kb Copy 2"));
+        assertThat(StoreCopy.suggestedName(store)).isEqualTo("pizza-kb Copy 3");
+        assertThat(KnowledgeBaseFamily.familyName("pizza-kb Copy 2")).as("a copy is the same knowledge base")
+                .isEqualTo("pizza-kb");
+        assertThat(StoreCopy.nameProblem(store, "pizza-kb Copy")).hasValueSatisfying(why -> assertThat(why).contains("already"));
         assertThat(StoreCopy.nameProblem(store, "")).isPresent();
         assertThat(StoreCopy.nameProblem(store, "a/b")).isPresent();
         assertThat(StoreCopy.nameProblem(store, ".hidden")).isPresent();
         assertThat(StoreCopy.nameProblem(store, "x.upgrade")).isPresent();
         assertThat(StoreCopy.nameProblem(store, "x.previous")).isPresent();
         assertThat(StoreCopy.nameProblem(store, "pizza-teaching")).isEmpty();
-        assertThatThrownBy(() -> StoreCopy.copy(store, "pizza-kb-copy")).isInstanceOf(IOException.class);
+        assertThatThrownBy(() -> StoreCopy.copy(store, "pizza-kb Copy")).isInstanceOf(IOException.class);
     }
 
     @Test

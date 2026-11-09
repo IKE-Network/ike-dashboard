@@ -166,6 +166,7 @@ public final class DashboardApp extends Application {
         view.setOnDownload(this::download);
         view.setOnTrash(this::trash);
         view.setOnTrashKomets(this::trashKomets);
+        view.setUnsavedWork(copy -> UnsavedWork.of(git, copy.path()));
         view.setKometPins(KometPins.current());
         view.setOnBrowse(this::loadCatalog);
         view.setOnInstallKomet(this::installKomet);
@@ -486,7 +487,7 @@ public final class DashboardApp extends Application {
         }
         List<String> refusals;
         try {
-            refusals = StoreUpgrade.refusals(store, view.sync(store.path()), HeapSizing.Machine.current(komets).running());
+            refusals = StoreUpgrade.refusals(store, syncOf(store.path()), HeapSizing.Machine.current(komets).running());
         } catch (IOException e) {
             view.setMessage("Could not read " + Names.of(store.name()) + ": " + e.getMessage());
             return;
@@ -499,7 +500,7 @@ public final class DashboardApp extends Application {
             return;
         }
         KometInstallation komet = validator.get();
-        List<RepositorySync.Status> sync = view.sync(store.path());
+        List<RepositorySync.Status> sync = syncOf(store.path());
         Path work = StoreUpgrade.workFolder(store.path());
         Path previous = StoreUpgrade.previousFolder(store.path());
         Transfer transfer = new Transfer("Upgrade " + view.nameOf(action.coordinate()));
@@ -702,7 +703,7 @@ public final class DashboardApp extends Application {
         KnowledgeBase store = action.store();
         List<String> refusals;
         try {
-            refusals = StoreUpgrade.refusals(store, view.sync(store.path()), HeapSizing.Machine.current(komets).running());
+            refusals = StoreUpgrade.refusals(store, syncOf(store.path()), HeapSizing.Machine.current(komets).running());
         } catch (IOException e) {
             view.setMessage("Could not read " + Names.of(store.name()) + ": " + e.getMessage());
             return;
@@ -907,6 +908,22 @@ public final class DashboardApp extends Application {
         SelfUpdate.swap(where, staged, ProcessHandle.current().pid(), SelfUpdate.relaunch(where.target()),
                 settings.logFolder().resolve("self-update.log"));
         Platform.runLater(Platform::exit);
+    }
+
+    /**
+     * The git state of the repositories in a store: what the last check found, or, for a folder the check does not
+     * cover (any but a knowledge base's newest), read now from the repositories' own files.
+     */
+    private List<RepositorySync.Status> syncOf(Path store) {
+        List<RepositorySync.Status> checked = view.sync(store);
+        if (!checked.isEmpty() || git.isEmpty()) {
+            return checked;
+        }
+        try {
+            return RepositorySync.find(store).stream().map(repository -> RepositorySync.local(git.get(), repository)).toList();
+        } catch (IOException e) {
+            return List.of();
+        }
     }
 
     /**

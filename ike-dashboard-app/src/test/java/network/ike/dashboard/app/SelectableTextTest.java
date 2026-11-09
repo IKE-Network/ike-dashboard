@@ -152,6 +152,35 @@ class SelectableTextTest {
         assertThat(StoreLock.openInKomet(store)).as("the lock let go").isFalse();
     }
 
+    @Test
+    void copyToANewFolderAsksForTheNameWithTheFindersDefault(@org.junit.jupiter.api.io.TempDir Path solor) throws Exception {
+        Path folder = solor.resolve("solor-gudid-card-leak-demo");
+        Files.createDirectories(folder);
+        Files.createDirectories(solor.resolve("solor-gudid-card-leak-demo Copy"));
+        KnowledgeBase demo = copy(folder);
+        CompletableFuture<String> field = new CompletableFuture<>();
+        CompletableFuture<WritableImage> drawn = new CompletableFuture<>();
+        Platform.runLater(() -> {
+            try {
+                javafx.scene.control.Dialog<String> dialog = DashboardView.copyDialog(demo);
+                DialogPane pane = dialog.getDialogPane();
+                Scene scene = pane.getScene();
+                pane.applyCss();
+                pane.layout();
+                javafx.scene.control.TextField name = (javafx.scene.control.TextField) pane.lookup(".text-field");
+                field.complete(name == null ? "no field" : name.getText());
+                drawn.complete(scene.snapshot(null));
+            } catch (RuntimeException | AssertionError e) {
+                field.completeExceptionally(e);
+                drawn.completeExceptionally(e);
+            }
+        });
+
+        assertThat(field.get(30, TimeUnit.SECONDS)).as("the name field is shown, after the copy that exists")
+                .isEqualTo("solor-gudid-card-leak-demo Copy 2");
+        write(drawn.get(30, TimeUnit.SECONDS), Path.of("target", "dashboard-copy-dialog.png"));
+    }
+
     private static KnowledgeBase copy(Path path) {
         KnowledgeBaseDescriptor descriptor = new KnowledgeBaseDescriptor(1, GUDID, Optional.empty(),
                 "SOLOR + GUDID Knowledge Base", "rocks", 3, Instant.parse("2026-11-06T18:31:00Z"), "public",
