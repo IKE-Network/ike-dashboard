@@ -62,7 +62,6 @@ import java.util.prefs.Preferences;
  */
 public final class DashboardApp extends Application {
 
-    private static final String SORT_RECENT = "sortRecent";
 
     /** How often what needs the network is checked again while the dashboard runs. */
     static final Duration NETWORK_CHECK_INTERVAL = Duration.ofHours(1);
@@ -99,6 +98,7 @@ public final class DashboardApp extends Application {
     private DashboardSettings settings;
     private OpenHistory history;
     private Preferences heapPreferences;
+    private Preferences heapStores;
     private volatile List<KometInstallation> komets = List.of();
     private final Map<Path, Long> dataBytes = new ConcurrentHashMap<>();
     private DashboardView view;
@@ -150,13 +150,14 @@ public final class DashboardApp extends Application {
     public void start(Stage stage) {
         settings = DashboardSettings.current();
         history = OpenHistory.current();
-        Preferences preferences = Preferences.userRoot().node(DashboardSettings.NODE);
-        heapPreferences = preferences.node(HeapSizing.NODE);
+        DashboardPreferences preferences = DashboardPreferences.current();
+        heapPreferences = preferences.node(DashboardPreferences.Node.HEAP);
+        heapStores = preferences.node(DashboardPreferences.Node.HEAP_STORES);
         view = new DashboardView();
         view.setCollections(settings.collections());
         view.setLastOpened(history::lastOpened);
-        view.setSortRecent(preferences.getBoolean(SORT_RECENT, false));
-        view.setOnSortChange(recent -> preferences.putBoolean(SORT_RECENT, recent));
+        view.setSortRecent(preferences.getBoolean(DashboardPreferences.Key.SORT_RECENT).orElse(false));
+        view.setOnSortChange(recent -> preferences.putBoolean(DashboardPreferences.Key.SORT_RECENT, recent));
         view.setOnRefresh(this::refresh);
         view.setOnOpen(this::open);
         view.setHeapPlanner((komet, knowledgeBase) -> Optional.of(heapPlan(komet, knowledgeBase)));
@@ -996,14 +997,14 @@ public final class DashboardApp extends Application {
             }
         });
         return HeapSizing.plan(HeapSizing.Rule.read(heapPreferences), knowledgeBase, data,
-                HeapSizing.override(heapPreferences.node(HeapSizing.STORES_NODE), knowledgeBase), komet,
+                HeapSizing.override(heapStores, knowledgeBase), komet,
                 HeapSizing.Machine.current(komets));
     }
 
     /** The Memory window for a store; what the person changes is kept in the preferences. */
     private void editHeap(KnowledgeBase knowledgeBase) {
         HeapSizing.Rule rule = HeapSizing.Rule.read(heapPreferences);
-        Preferences stores = heapPreferences.node(HeapSizing.STORES_NODE);
+        Preferences stores = heapStores;
         long data = dataBytes.getOrDefault(knowledgeBase.path(), knowledgeBase.sizeBytes());
         HeapView.edit(view.getScene().getWindow(), knowledgeBase, rule, HeapSizing.override(stores, knowledgeBase),
                 HeapSizing.needed(rule, knowledgeBase, data))

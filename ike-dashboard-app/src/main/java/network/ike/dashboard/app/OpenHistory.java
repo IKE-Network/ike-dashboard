@@ -44,7 +44,7 @@ public final class OpenHistory {
      * @return the history in the dashboard's preferences
      */
     public static OpenHistory current() {
-        return new OpenHistory(Preferences.userRoot().node(DashboardSettings.NODE + "/opened"));
+        return new OpenHistory(DashboardPreferences.current().node(DashboardPreferences.Node.OPENED));
     }
 
     /**

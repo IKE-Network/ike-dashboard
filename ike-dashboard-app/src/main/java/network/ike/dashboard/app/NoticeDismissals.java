@@ -25,9 +25,6 @@ import java.util.prefs.Preferences;
  */
 public final class NoticeDismissals {
 
-    /** The node under the dashboard's settings. */
-    static final String NODE = "dismissed-notices";
-
     private final Preferences preferences;
 
     /**
@@ -45,7 +42,7 @@ public final class NoticeDismissals {
      * @return them
      */
     public static NoticeDismissals current() {
-        return new NoticeDismissals(Preferences.userRoot().node(DashboardSettings.NODE).node(NODE));
+        return new NoticeDismissals(DashboardPreferences.current().node(DashboardPreferences.Node.DISMISSED_NOTICES));
     }
 
     /**

@@ -40,9 +40,6 @@ import java.util.stream.Collectors;
 public record DashboardSettings(Path solor, Path installLocation, String repositoryUrl, String serverId,
                                 Path localRepository, Path logFolder, Set<String> collections) {
 
-    /** The preferences node path. */
-    public static final String NODE = "network/ike/dashboard";
-
     /**
      * The collections tracked when the person has named none: the SOLOR pipeline's, every knowledge base
      * the {@code solor-kb-ws} working set publishes. The preference is a comma-separated list; an empty
@@ -111,13 +108,13 @@ public record DashboardSettings(Path solor, Path installLocation, String reposit
             logFolder = home.resolve("Library/Logs/IKE Dashboard");
         }
         return new DashboardSettings(
-                Path.of(preferences.get("solor", home.resolve("Solor").toString())),
-                Path.of(preferences.get("installLocation", installLocation.toString())),
-                preferences.get("repositoryUrl", RepositoryAccess.RESTRICTED_URL),
-                preferences.get("serverId", RepositoryAccess.RESTRICTED_SERVER_ID),
-                Path.of(preferences.get("localRepository", home.resolve(".m2/repository").toString())),
-                Path.of(preferences.get("logFolder", logFolder.toString())),
-                collections(preferences.get("collections", DEFAULT_COLLECTIONS)));
+                Path.of(preferences.get(DashboardPreferences.Key.SOLOR.stored(), home.resolve("Solor").toString())),
+                Path.of(preferences.get(DashboardPreferences.Key.INSTALL_LOCATION.stored(), installLocation.toString())),
+                preferences.get(DashboardPreferences.Key.REPOSITORY_URL.stored(), RepositoryAccess.RESTRICTED_URL),
+                preferences.get(DashboardPreferences.Key.SERVER_ID.stored(), RepositoryAccess.RESTRICTED_SERVER_ID),
+                Path.of(preferences.get(DashboardPreferences.Key.LOCAL_REPOSITORY.stored(), home.resolve(".m2/repository").toString())),
+                Path.of(preferences.get(DashboardPreferences.Key.LOG_FOLDER.stored(), logFolder.toString())),
+                collections(preferences.get(DashboardPreferences.Key.COLLECTIONS.stored(), DEFAULT_COLLECTIONS)));
     }
 
     /**
@@ -126,6 +123,6 @@ public record DashboardSettings(Path solor, Path installLocation, String reposit
      * @return the settings
      */
     public static DashboardSettings current() {
-        return read(Preferences.userRoot().node(NODE), Path.of(System.getProperty("user.home")));
+        return read(DashboardPreferences.current().node(DashboardPreferences.Node.DASHBOARD), Path.of(System.getProperty("user.home")));
     }
 }

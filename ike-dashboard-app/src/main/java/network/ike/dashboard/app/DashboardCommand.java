@@ -164,8 +164,7 @@ public final class DashboardCommand {
         List<KnowledgeBaseFamily> families = KnowledgeBaseFamily.managed(KnowledgeBaseScanner.scan(settings.solor()));
         List<KometInstallation> komets = KometInstallations.find(KometInstallations.defaultRoots(
                 Path.of(System.getProperty("user.home")), settings.installLocation()));
-        java.util.prefs.Preferences heap = java.util.prefs.Preferences.userRoot().node(DashboardSettings.NODE)
-                .node(HeapSizing.NODE);
+        java.util.prefs.Preferences heap = DashboardPreferences.current().node(DashboardPreferences.Node.HEAP);
         HeapSizing.Rule rule = HeapSizing.Rule.read(heap);
         HeapSizing.Machine machine = HeapSizing.Machine.current(komets);
         out.printf("%s of memory, %s kept for everything else, %s claimed by %d Komet%s running%n",
@@ -181,7 +180,7 @@ public final class DashboardCommand {
             }
             KnowledgeBase copy = latest.get();
             HeapSizing.Plan plan = HeapSizing.plan(rule, copy, HeapSizing.dataBytes(copy),
-                    HeapSizing.override(heap.node(HeapSizing.STORES_NODE), copy), komet.get(), machine);
+                    HeapSizing.override(DashboardPreferences.current().node(DashboardPreferences.Node.HEAP_STORES), copy), komet.get(), machine);
             out.printf("%-34s %-20s %9s data  %-26s %-18s %s%n", family.name(), copy.kind().label(),
                     size(plan.data()), plan.need().text(), plan.fit().name().toLowerCase(Locale.ROOT),
                     plan.environment().isEmpty() ? "Komet " + komet.get().version() + " fixes its heap"

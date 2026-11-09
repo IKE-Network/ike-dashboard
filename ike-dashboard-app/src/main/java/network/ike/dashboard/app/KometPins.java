@@ -26,9 +26,6 @@ import java.util.prefs.Preferences;
  */
 public final class KometPins {
 
-    /** The node under the dashboard's settings. */
-    static final String NODE = "komet-pins";
-
     /** No pins, kept nowhere: what a view starts with until it is given the person's. */
     static final KometPins NONE = new KometPins(null);
 
@@ -49,7 +46,7 @@ public final class KometPins {
      * @return them
      */
     public static KometPins current() {
-        return new KometPins(Preferences.userRoot().node(DashboardSettings.NODE).node(NODE));
+        return new KometPins(DashboardPreferences.current().node(DashboardPreferences.Node.KOMET_PINS));
     }
 
     /**

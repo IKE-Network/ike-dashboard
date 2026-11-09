@@ -87,12 +87,6 @@ public final class HeapSizing {
     /** The system property sizing Rocks' block cache. */
     public static final String CACHE_PROPERTY = "rocks.blockCache.bytes";
 
-    /** The preferences node of the rule, beneath the dashboard's. */
-    public static final String NODE = "heap";
-
-    /** The preferences node of the per-store overrides, beneath the rule's. */
-    public static final String STORES_NODE = "stores";
-
     private HeapSizing() {
     }
 
@@ -129,14 +123,14 @@ public final class HeapSizing {
          */
         public static Rule read(Preferences node) {
             return new Rule(
-                    node.getDouble("spined64Share", DEFAULTS.spined64Share),
-                    node.getDouble("rocksShare", DEFAULTS.rocksShare),
-                    node.getDouble("cacheShare", DEFAULTS.cacheShare),
-                    node.getDouble("axiomShare", DEFAULTS.axiomShare),
-                    node.getDouble("measuredRoom", DEFAULTS.measuredRoom),
-                    node.getLong("minimumHeap", DEFAULTS.minimumHeap),
-                    node.getLong("reserveFloor", DEFAULTS.reserveFloor),
-                    node.getDouble("reserveShare", DEFAULTS.reserveShare));
+                    node.getDouble(DashboardPreferences.Key.HEAP_SPINED64_SHARE.stored(), DEFAULTS.spined64Share),
+                    node.getDouble(DashboardPreferences.Key.HEAP_ROCKS_SHARE.stored(), DEFAULTS.rocksShare),
+                    node.getDouble(DashboardPreferences.Key.HEAP_CACHE_SHARE.stored(), DEFAULTS.cacheShare),
+                    node.getDouble(DashboardPreferences.Key.HEAP_AXIOM_SHARE.stored(), DEFAULTS.axiomShare),
+                    node.getDouble(DashboardPreferences.Key.HEAP_MEASURED_ROOM.stored(), DEFAULTS.measuredRoom),
+                    node.getLong(DashboardPreferences.Key.HEAP_MINIMUM.stored(), DEFAULTS.minimumHeap),
+                    node.getLong(DashboardPreferences.Key.HEAP_RESERVE_FLOOR.stored(), DEFAULTS.reserveFloor),
+                    node.getDouble(DashboardPreferences.Key.HEAP_RESERVE_SHARE.stored(), DEFAULTS.reserveShare));
         }
 
         /**
@@ -146,14 +140,14 @@ public final class HeapSizing {
          * @param node the rule's node
          */
         public void write(Preferences node) {
-            putDouble(node, "spined64Share", spined64Share, DEFAULTS.spined64Share);
-            putDouble(node, "rocksShare", rocksShare, DEFAULTS.rocksShare);
-            putDouble(node, "cacheShare", cacheShare, DEFAULTS.cacheShare);
-            putDouble(node, "axiomShare", axiomShare, DEFAULTS.axiomShare);
-            putDouble(node, "measuredRoom", measuredRoom, DEFAULTS.measuredRoom);
-            putLong(node, "minimumHeap", minimumHeap, DEFAULTS.minimumHeap);
-            putLong(node, "reserveFloor", reserveFloor, DEFAULTS.reserveFloor);
-            putDouble(node, "reserveShare", reserveShare, DEFAULTS.reserveShare);
+            putDouble(node, DashboardPreferences.Key.HEAP_SPINED64_SHARE.stored(), spined64Share, DEFAULTS.spined64Share);
+            putDouble(node, DashboardPreferences.Key.HEAP_ROCKS_SHARE.stored(), rocksShare, DEFAULTS.rocksShare);
+            putDouble(node, DashboardPreferences.Key.HEAP_CACHE_SHARE.stored(), cacheShare, DEFAULTS.cacheShare);
+            putDouble(node, DashboardPreferences.Key.HEAP_AXIOM_SHARE.stored(), axiomShare, DEFAULTS.axiomShare);
+            putDouble(node, DashboardPreferences.Key.HEAP_MEASURED_ROOM.stored(), measuredRoom, DEFAULTS.measuredRoom);
+            putLong(node, DashboardPreferences.Key.HEAP_MINIMUM.stored(), minimumHeap, DEFAULTS.minimumHeap);
+            putLong(node, DashboardPreferences.Key.HEAP_RESERVE_FLOOR.stored(), reserveFloor, DEFAULTS.reserveFloor);
+            putDouble(node, DashboardPreferences.Key.HEAP_RESERVE_SHARE.stored(), reserveShare, DEFAULTS.reserveShare);
         }
 
         /**

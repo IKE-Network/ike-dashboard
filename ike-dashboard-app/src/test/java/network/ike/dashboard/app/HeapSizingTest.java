@@ -253,7 +253,7 @@ class HeapSizingTest {
         // A term equal to its default is not kept, so a later default reaches it.
         assertThat(List.of(keys(node))).containsExactlyInAnyOrder("spined64Share", "reserveFloor");
 
-        Preferences stores = node.node(HeapSizing.STORES_NODE);
+        Preferences stores = node.node(DashboardPreferences.Node.HEAP_STORES.stored());
         KnowledgeBase rocks = store("pizza-kb", StoreKind.ROCKS);
         assertThat(HeapSizing.override(stores, rocks)).isEmpty();
         HeapSizing.setOverride(stores, rocks, Optional.of(new HeapSizing.Need(12 * GIB + 1, 2 * GIB)));
