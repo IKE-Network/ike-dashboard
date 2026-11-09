@@ -99,6 +99,10 @@ public final class DashboardApp extends Application {
     private OpenHistory history;
     private Preferences heapPreferences;
     private Preferences heapStores;
+
+    /** How long Komet release notes are kept before GitHub is asked again. */
+    private static final java.time.Duration NOTES_AGE = java.time.Duration.ofMinutes(10);
+    private volatile Instant notesFetched;
     private volatile List<KometInstallation> komets = List.of();
     private final Map<Path, Long> dataBytes = new ConcurrentHashMap<>();
     private DashboardView view;
@@ -167,6 +171,7 @@ public final class DashboardApp extends Application {
         view.setOnTrash(this::trash);
         view.setOnTrashKomets(this::trashKomets);
         view.setUnsavedWork(copy -> UnsavedWork.of(git, copy.path()));
+        view.setOnOpenLink(uri -> getHostServices().showDocument(uri.toString()));
         view.setKometPins(KometPins.current());
         view.setOnBrowse(this::loadCatalog);
         view.setOnInstallKomet(this::installKomet);
@@ -404,6 +409,18 @@ public final class DashboardApp extends Application {
             Platform.runLater(() -> view.setKometRelease(release));
         } catch (Exception e) {
             problem = (problem == null ? "" : problem + "; ") + "could not look for a newer Komet: " + e.getMessage();
+        }
+        // What changed in each Komet version, from its checkpoint release; asked at most every ten minutes, so
+        // GitHub's limit on unsigned requests is never near.
+        if (notesFetched == null || notesFetched.isBefore(Instant.now().minus(NOTES_AGE))) {
+            try {
+                Map<String, KometNotes> notes = KometNotes.fetch(RepositoryHttpClients.newClient(),
+                        KometReleases.GITHUB_REPOSITORY);
+                notesFetched = Instant.now();
+                Platform.runLater(() -> view.setKometNotes(notes));
+            } catch (Exception e) {
+                // The notes stay as they were; the Komet tab links to the releases page instead.
+            }
         }
         if (placement.isPresent()) {
             try {

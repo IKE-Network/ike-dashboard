@@ -69,42 +69,61 @@ class DashboardViewKometsTest {
     }
 
     @Test
-    void theKometTabListsEachKometWithItsUseAndMovesTheOlderOnesTogether() throws Exception {
-        CompletableFuture<List<String>> words = new CompletableFuture<>();
-        CompletableFuture<List<String>> buttons = new CompletableFuture<>();
+    void theKometTabIsAListAndADetailWithWhatChangedAndAnOpenForAnyKnowledgeBase() throws Exception {
+        CompletableFuture<List<String>> newestWords = new CompletableFuture<>();
+        CompletableFuture<List<String>> links = new CompletableFuture<>();
+        CompletableFuture<List<String>> severalWords = new CompletableFuture<>();
+        CompletableFuture<List<String>> severalButtons = new CompletableFuture<>();
         CompletableFuture<List<String>> tabs = new CompletableFuture<>();
+        CompletableFuture<String> opened = new CompletableFuture<>();
         CompletableFuture<WritableImage> drawn = new CompletableFuture<>();
         Platform.runLater(() -> {
             try {
                 DashboardView view = new DashboardView();
                 view.setKomets(List.of(NEWEST, OLDER, OLDEST));
                 view.setFamilies(List.of(new KnowledgeBaseFamily("pizza-kb", List.of(store("pizza-kb", "3")))));
-                Scene scene = new Scene(view, 1080, 520);
+                view.setKometNotes(KometNotes.read(KometNotesTest.RELEASES.replace("26.1108.1917", NEWEST.version())));
+                view.setOnOpen((komet, copy) -> opened.complete(komet.version() + " " + copy.name()));
+                Scene scene = new Scene(view, 1080, 640);
                 view.showKomets();
                 view.applyCss();
                 view.layout();
                 assertThat(view.showingKomets()).isTrue();
-                words.complete(Words.of(view));
-                buttons.complete(view.lookupAll(".button").stream().map(Button.class::cast)
-                        .filter(button -> !button.isDisabled()).map(Button::getText).toList());
+                newestWords.complete(Words.of(view));
+                links.complete(view.lookupAll(".hyperlink").stream().map(javafx.scene.control.Hyperlink.class::cast)
+                        .map(javafx.scene.control.Hyperlink::getText).toList());
                 tabs.complete(view.lookupAll(".toggle-button").stream().map(ToggleButton.class::cast)
                         .map(ToggleButton::getText).toList());
                 drawn.complete(scene.snapshot(null));
+                view.lookupAll(".button").stream().map(Button.class::cast).filter(button -> button.getText().equals("Open"))
+                        .findFirst().orElseThrow().fire();
+                @SuppressWarnings("unchecked")
+                javafx.scene.control.ListView<KometInstallation> list =
+                        (javafx.scene.control.ListView<KometInstallation>) view.lookup("#komet-list");
+                list.getSelectionModel().clearSelection();
+                list.getSelectionModel().selectIndices(1, 2);
+                view.applyCss();
+                view.layout();
+                severalWords.complete(Words.of(view));
+                severalButtons.complete(view.lookupAll(".button").stream().map(Button.class::cast)
+                        .filter(button -> !button.isDisabled()).map(Button::getText).toList());
             } catch (RuntimeException | AssertionError e) {
-                words.completeExceptionally(e);
-                buttons.completeExceptionally(e);
-                tabs.completeExceptionally(e);
-                drawn.completeExceptionally(e);
+                for (CompletableFuture<?> future : List.of(newestWords, links, severalWords, severalButtons, tabs, opened, drawn)) {
+                    future.completeExceptionally(e);
+                }
             }
         });
 
         assertThat(tabs.get(30, TimeUnit.SECONDS)).containsSubsequence("Knowledge Bases", "Komet", "Notices");
-        assertThat(words.get(30, TimeUnit.SECONDS)).contains("Komet", "Komet 26.1108.1917", "Komet 26.1019.900",
-                        "Komet 26.1016.346")
-                .anyMatch(text -> text.contains("This is the newest. Knowledge bases open in it unless they need another."))
-                .anyMatch(text -> text.contains("It is the only Komet that can open pizza-kb."));
-        assertThat(buttons.get(30, TimeUnit.SECONDS)).contains("Move 2 older Komets to the " + Finder.trashName() + "…")
-                .filteredOn(("Move to " + Finder.trashName() + "…")::equals).hasSize(3);
+        assertThat(newestWords.get(30, TimeUnit.SECONDS)).contains("Komet 26.1108.1917", "Komet 26.1019.900",
+                        "Komet 26.1016.346", "The newest. Knowledge bases open in it unless they are set to another.",
+                        "Only it can open", "tinkar-core", "Give a STAMP its module's kind")
+                .anyMatch(text -> text.startsWith("Application  komet-26.1108.1917.app in "));
+        assertThat(links.get(30, TimeUnit.SECONDS)).contains("Checkpoint main-20261108-191310", "compare", "c371628",
+                "pizza-kb");
+        assertThat(opened.get(30, TimeUnit.SECONDS)).as("Open in this Komet, then and there").isEqualTo("26.1108.1917 pizza-kb");
+        assertThat(severalWords.get(30, TimeUnit.SECONDS)).contains("2 Komets chosen");
+        assertThat(severalButtons.get(30, TimeUnit.SECONDS)).contains("Move 2 Komets to the " + Finder.trashName() + "…");
         write(drawn.get(30, TimeUnit.SECONDS), Path.of("target", "dashboard-komets.png"));
     }
 
@@ -147,9 +166,17 @@ class DashboardViewKometsTest {
                         .toString(in.getValue()));
                 drawn.complete(scene.snapshot(null));
                 view.showKomets();
+                view.applyCss();                         // a split pane adds its items once its skin exists
+                @SuppressWarnings("unchecked")
+                javafx.scene.control.ListView<KometInstallation> list =
+                        (javafx.scene.control.ListView<KometInstallation>) view.lookup("#komet-list");
+                list.getSelectionModel().clearAndSelect(1);
                 view.applyCss();
                 view.layout();
-                kometWords.complete(Words.of(view));
+                List<String> seen = new java.util.ArrayList<>(Words.of(view));
+                view.lookupAll(".hyperlink").stream().map(javafx.scene.control.Hyperlink.class::cast)
+                        .map(javafx.scene.control.Hyperlink::getText).forEach(seen::add);
+                kometWords.complete(seen);
                 pins.pin("pizza-kb", Optional.of("26.0101.1"));
                 view.select("pizza-kb");
                 view.showKnowledgeBases();
@@ -168,7 +195,7 @@ class DashboardViewKometsTest {
         assertThat(choices.get(30, TimeUnit.SECONDS)).containsExactly("Latest Komet (26.1108.1917)", "Komet 26.1108.1917",
                 "Komet 26.1019.900", "Komet 26.1016.346");
         assertThat(chosen.get(30, TimeUnit.SECONDS)).isEqualTo("Komet 26.1019.900");
-        assertThat(kometWords.get(30, TimeUnit.SECONDS)).anyMatch(text -> text.contains("Set as the Komet for Pizza."));
+        assertThat(kometWords.get(30, TimeUnit.SECONDS)).contains("Set to open in it", "Pizza");
         assertThat(missingWords.get(30, TimeUnit.SECONDS)).anyMatch(text -> text.startsWith(
                 "This knowledge base is set to open in Komet 26.0101.1, which is not installed."));
         write(drawn.get(30, TimeUnit.SECONDS), Path.of("target", "dashboard-komet-choice.png"));

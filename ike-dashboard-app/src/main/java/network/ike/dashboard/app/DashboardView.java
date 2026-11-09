@@ -32,6 +32,7 @@ import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.SelectionMode;
 import javafx.scene.control.ChoiceBox;
 import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
@@ -177,8 +178,13 @@ public final class DashboardView extends BorderPane {
     private final ToggleButton knowledgeBasesTab = new ToggleButton("Knowledge Bases");
     private final ToggleButton noticesTab = new ToggleButton("Notices");
     private final ToggleButton kometsTab = new ToggleButton("Komet");
-    private final VBox kometsBox = new VBox(10);
-    private final ScrollPane kometsView = new ScrollPane(kometsBox);
+    /** The Komet tab, laid out as the Knowledge Bases tab: the Komets on the left, the chosen one's detail. */
+    private final ListView<KometInstallation> kometList = new ListView<>();
+    private final VBox kometDetail = new VBox(10);
+    private final HBox kometBanner = new HBox(8);
+    private SplitPane kometsView;
+    private Map<String, KometNotes> kometNotes = Map.of();
+    private Consumer<java.net.URI> onOpenLink = uri -> { };
     private boolean showingKomets;
     private Consumer<List<KometInstallation>> onTrashKomets = komets -> { };
     private KometPins pins = KometPins.NONE;
@@ -340,9 +346,7 @@ public final class DashboardView extends BorderPane {
         noticesBox.setPadding(new Insets(16, 24, 20, 24));
         noticesView.setFitToWidth(true);
         noticesView.setStyle("-fx-background-color: transparent; -fx-background-insets: 0;");
-        kometsBox.setPadding(new Insets(16, 24, 20, 24));
-        kometsView.setFitToWidth(true);
-        kometsView.setStyle("-fx-background-color: transparent; -fx-background-insets: 0;");
+        kometsView = kometSplit();
         setCenter(noticesView);
 
         message.setMaxWidth(Double.MAX_VALUE);
@@ -844,6 +848,27 @@ public final class DashboardView extends BorderPane {
     }
 
     /**
+     * What changed in each Komet version, from its checkpoint release.
+     *
+     * @param notes the notes, by Komet version
+     */
+    public void setKometNotes(Map<String, KometNotes> notes) {
+        kometNotes = Map.copyOf(notes);
+        if (showingKomets) {
+            showKometDetail();
+        }
+    }
+
+    /**
+     * How a link to the web is opened.
+     *
+     * @param action given the link
+     */
+    public void setOnOpenLink(Consumer<java.net.URI> action) {
+        onOpenLink = action;
+    }
+
+    /**
      * Which Komet each knowledge base opens in: the latest, or one it is pinned to.
      *
      * @param kometPins the pins
@@ -944,80 +969,292 @@ public final class DashboardView extends BorderPane {
                 .orElse("Nexus not checked yet")));
     }
 
+    /** The Komet tab: the installed Komets as a list, as the knowledge bases are, and the chosen one's detail. */
+    private SplitPane kometSplit() {
+        kometList.setId("komet-list");
+        kometList.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+        kometList.setCellFactory(view -> new KometCell());
+        kometList.setPlaceholder(new Label("No Komet is installed"));
+        kometList.getSelectionModel().getSelectedItems().addListener(
+                (javafx.collections.ListChangeListener<KometInstallation>) change -> showKometDetail());
+        kometList.setOnKeyPressed(event -> {
+            // ⌘⌫ moves the selection to the Trash, as in the Finder.
+            if (event.getCode() == javafx.scene.input.KeyCode.BACK_SPACE && event.isShortcutDown()
+                    && !kometList.getSelectionModel().getSelectedItems().isEmpty()) {
+                confirmTrashKomets(List.copyOf(kometList.getSelectionModel().getSelectedItems()));
+            }
+        });
+        kometBanner.setAlignment(Pos.CENTER_LEFT);
+        kometBanner.setPadding(new Insets(6, 8, 6, 10));
+        kometBanner.setStyle("-fx-background-color: #fff3e0;");
+        kometBanner.managedProperty().bind(kometBanner.visibleProperty());
+        kometBanner.setVisible(false);
+        BorderPane master = new BorderPane(kometList);
+        master.setTop(kometBanner);
+        master.setMinWidth(260);
+        kometDetail.setPadding(new Insets(16, 20, 20, 20));
+        ScrollPane detailScroll = new ScrollPane(kometDetail);
+        detailScroll.setFitToWidth(true);
+        detailScroll.setStyle("-fx-background-color: transparent; -fx-background-insets: 0;");
+        SplitPane split = new SplitPane(master, detailScroll);
+        split.setOrientation(Orientation.HORIZONTAL);
+        split.setDividerPositions(0.32);
+        SplitPane.setResizableWithParent(master, false);
+        return split;
+    }
+
+    /** Fills the Komet list again, keeping what was chosen, the newest when nothing was. */
     private void showKometsPane() {
-        VBox box = kometsBox;
-        box.getChildren().clear();
-        SelectableText title = SelectableText.of("Komet");
-        title.setStyle("-fx-font-size: 20px; -fx-font-weight: bold;");
-        box.getChildren().add(title);
-        newerKomet().ifPresent(release -> {
-            SelectableText about = SelectableText.of("Komet " + release.version() + " is available from "
-                    + release.source().label() + (release.sizeBytes() > 0 ? ", " + DashboardCommand.size(release.sizeBytes()) : "")
-                    + ". It installs next to the Komets you have.");
+        List<String> chosen = kometList.getSelectionModel().getSelectedItems().stream().map(KometInstallation::version).toList();
+        kometList.getItems().setAll(komets);
+        newerKomet().ifPresentOrElse(release -> {
+            Label about = new Label("Komet " + release.version() + " is available");
+            about.setStyle(ATTENTION);
+            about.setMaxWidth(Double.MAX_VALUE);
             HBox.setHgrow(about, Priority.ALWAYS);
-            Button install = new Button(installing ? "Installing …" : "Install Komet " + release.version());
+            Hyperlink install = new Hyperlink(installing ? "Installing …" : "Install");
             install.setDisable(installing);
             install.setMinWidth(Region.USE_PREF_SIZE);
             install.setOnAction(event -> onInstallKomet.accept(release));
-            HBox row = new HBox(10, about, install);
-            row.setAlignment(Pos.CENTER_LEFT);
-            row.setPadding(new Insets(8, 10, 8, 10));
-            row.setStyle("-fx-background-radius: 6; -fx-background-color: #fff3e0;");
-            box.getChildren().add(row);
-        });
-        if (komets.isEmpty()) {
-            box.getChildren().add(muted("No Komet is installed."));
+            kometBanner.getChildren().setAll(about, install);
+            kometBanner.setVisible(true);
+        }, () -> kometBanner.setVisible(false));
+        boolean any = false;
+        for (int i = 0; i < komets.size(); i++) {
+            if (chosen.contains(komets.get(i).version())) {
+                kometList.getSelectionModel().select(i);
+                any = true;
+            }
+        }
+        if (!any && !komets.isEmpty()) {
+            kometList.getSelectionModel().select(0);
+        }
+        showKometDetail();
+    }
+
+    /** The chosen Komet's detail, or what several chosen have in common. */
+    private void showKometDetail() {
+        kometDetail.getChildren().clear();
+        List<KometInstallation> chosen = List.copyOf(kometList.getSelectionModel().getSelectedItems());
+        if (chosen.isEmpty()) {
+            kometDetail.getChildren().add(muted(komets.isEmpty() ? "No Komet is installed." : "Choose a Komet"));
             return;
         }
-        List<KnowledgeBase> stores = families.stream().flatMap(family -> family.members().stream()).toList();
-        List<KometInstallation> older = new ArrayList<>();
-        for (KometInstallation komet : komets) {
-            boolean running = KometRemoval.running(komet);
-            boolean newest = komet == komets.getFirst();
-            if (!newest && !running) {
-                older.add(komet);
-            }
-            SelectableText heading = SelectableText.of("Komet " + komet.version());
-            heading.setStyle("-fx-font-weight: bold;");
-            List<String> about = new ArrayList<>();
-            about.add(Names.of(komet.bundle().getFileName()) + " in " + Names.of(shownFolder(komet.bundle().getParent())) + ".");
-            if (newest) {
-                about.add("This is the newest. Knowledge bases open in it unless they need another.");
-            }
-            List<KnowledgeBase> only = KometRemoval.stranded(komets, List.of(komet), stores);
-            if (!only.isEmpty()) {
-                about.add("It is the only Komet that can open " + only.stream().map(store -> Names.of(store.name()))
-                        .collect(Collectors.joining(", ")) + ".");
-            }
-            List<String> pinned = pinnedTo(komet.version());
-            if (!pinned.isEmpty()) {
-                about.add("Set as the Komet for " + String.join(", ", pinned) + ".");
-            }
-            if (running) {
-                about.add("It is running now.");
-            }
-            VBox text = new VBox(2, heading, muted(String.join(" ", about)));
-            HBox.setHgrow(text, Priority.ALWAYS);
-            text.setMaxWidth(Double.MAX_VALUE);
-            Button reveal = new Button("Show in " + Finder.name());
-            reveal.setMinWidth(Region.USE_PREF_SIZE);
-            reveal.setOnAction(event -> onReveal.accept(komet.bundle()));
-            Button trash = new Button("Move to " + Finder.trashName() + "…");
-            trash.setMinWidth(Region.USE_PREF_SIZE);
-            trash.setDisable(running);
-            trash.setOnAction(event -> confirmTrashKomets(List.of(komet)));
-            HBox row = new HBox(10, text, reveal, trash);
-            row.setAlignment(Pos.CENTER_LEFT);
-            row.setPadding(new Insets(8, 10, 8, 10));
-            row.setStyle("-fx-background-radius: 6; -fx-background-color: " + (newest ? "#eef6ee;" : "#f4f6f8;"));
-            box.getChildren().add(row);
+        if (chosen.size() > 1) {
+            showKomets(chosen);
+            return;
         }
-        if (older.size() > 1) {
-            Button all = new Button("Move " + older.size() + " older Komets to the " + Finder.trashName() + "…");
-            all.setOnAction(event -> confirmTrashKomets(List.copyOf(older)));
-            HBox bar = new HBox(all);
-            bar.setAlignment(Pos.CENTER_RIGHT);
-            box.getChildren().add(bar);
+        KometInstallation komet = chosen.getFirst();
+        boolean running = KometRemoval.running(komet);
+        boolean newest = komet == komets.getFirst();
+        SelectableText title = SelectableText.of("Komet " + komet.version());
+        title.setStyle("-fx-font-size: 20px; -fx-font-weight: bold;");
+        HBox heading = new HBox(12, kometTile(48), title);
+        heading.setAlignment(Pos.CENTER_LEFT);
+        kometDetail.getChildren().add(heading);
+        kometDetail.getChildren().add(muted("Application  " + Names.of(komet.bundle().getFileName()) + " in "
+                + Names.of(shownFolder(komet.bundle().getParent()))));
+        SelectableText status = SelectableText.of(newest
+                ? "The newest. Knowledge bases open in it unless they are set to another."
+                : "An older version. A knowledge base opens in it only when it is set to it.");
+        status.setStyle(newest ? "-fx-text-fill: #2e7d32;" : MUTED);
+        kometDetail.getChildren().add(status);
+        if (running) {
+            kometDetail.getChildren().add(muted("It is running now."));
+        }
+
+        // Open a knowledge base in this Komet then and there, without changing which Komet it is set to.
+        List<KnowledgeBase> openable = families.stream().map(KnowledgeBaseFamily::latest).flatMap(Optional::stream)
+                .filter(copy -> LauncherChoice.reads(komet, copy)).toList();
+        if (!openable.isEmpty()) {
+            ChoiceBox<KnowledgeBase> which = new ChoiceBox<>();
+            which.getItems().setAll(openable);
+            which.setConverter(new javafx.util.StringConverter<>() {
+                @Override
+                public String toString(KnowledgeBase copy) {
+                    return copy == null ? "" : copy.displayName();
+                }
+
+                @Override
+                public KnowledgeBase fromString(String text) {
+                    return null;
+                }
+            });
+            which.getSelectionModel().selectFirst();
+            Button open = new Button("Open");
+            open.setDefaultButton(true);
+            open.setStyle("-fx-font-size: 14px; -fx-padding: 6 28 6 28;");
+            open.setOnAction(event -> Optional.ofNullable(which.getValue()).ifPresent(copy -> onOpen.accept(komet, copy)));
+            Label in = new Label("in this Komet");
+            in.setStyle(MUTED);
+            HBox openRow = new HBox(8, open, which, in);
+            openRow.setAlignment(Pos.CENTER_LEFT);
+            openRow.setPadding(new Insets(6, 0, 0, 0));
+            kometDetail.getChildren().add(openRow);
+            kometDetail.getChildren().add(muted("This opens it once in Komet " + komet.version()
+                    + ". Which Komet a knowledge base opens in is set beside its own Open."));
+        }
+
+        Button reveal = new Button("Show in " + Finder.name());
+        reveal.setOnAction(event -> onReveal.accept(komet.bundle()));
+        Button trash = new Button("Move to " + Finder.trashName() + "…");
+        trash.setDisable(running);
+        trash.setOnAction(event -> confirmTrashKomets(List.of(komet)));
+        if (running) {
+            Tooltip.install(trash, new Tooltip("Quit this Komet first."));
+        }
+        HBox actions = new HBox(8, reveal, trash);
+        actions.setAlignment(Pos.CENTER_LEFT);
+        kometDetail.getChildren().add(actions);
+
+        List<KnowledgeBaseFamily> pinned = families.stream()
+                .filter(family -> pins.of(family.name()).filter(komet.version()::equals).isPresent()).toList();
+        List<KnowledgeBase> only = KometRemoval.stranded(komets, List.of(komet),
+                families.stream().flatMap(family -> family.members().stream()).toList());
+        if (!pinned.isEmpty() || !only.isEmpty()) {
+            VBox box = new VBox(6);
+            if (!pinned.isEmpty()) {
+                box.getChildren().add(heading("Set to open in it"));
+                pinned.forEach(family -> {
+                    Hyperlink link = new Hyperlink(family.displayName());
+                    link.setOnAction(event -> select(family.name()));
+                    box.getChildren().add(link);
+                });
+            }
+            if (!only.isEmpty()) {
+                box.getChildren().add(heading("Only it can open"));
+                only.forEach(store -> {
+                    Hyperlink link = new Hyperlink(store.name());
+                    link.setOnAction(event -> select(KnowledgeBaseFamily.familyName(store)));
+                    box.getChildren().add(link);
+                });
+            }
+            TitledPane pane = new TitledPane("Knowledge bases", box);
+            pane.setAnimated(false);
+            kometDetail.getChildren().add(pane);
+        }
+        kometDetail.getChildren().add(whatChanged(komet));
+    }
+
+    /** What changed in a Komet version: its checkpoint's notes, each commit linked, and the release itself. */
+    private Node whatChanged(KometInstallation komet) {
+        VBox box = new VBox(6);
+        KometNotes notes = kometNotes.get(komet.version());
+        if (notes == null) {
+            box.getChildren().add(muted("No release notes were found for this version. The releases on GitHub list"
+                    + " the recent checkpoints."));
+            Hyperlink releases = new Hyperlink("Releases on GitHub");
+            releases.setOnAction(event -> onOpenLink.accept(java.net.URI.create(
+                    "https://github.com/" + KometReleases.GITHUB_REPOSITORY + "/releases")));
+            box.getChildren().add(releases);
+        } else {
+            Hyperlink release = new Hyperlink(notes.title());
+            release.setOnAction(event -> onOpenLink.accept(notes.url()));
+            HBox top = new HBox(6, release);
+            notes.published().ifPresent(when -> top.getChildren().add(muted("published " + WHEN.format(when))));
+            top.setAlignment(Pos.CENTER_LEFT);
+            box.getChildren().add(top);
+            if (notes.members().isEmpty()) {
+                box.getChildren().add(muted("Its notes list no changes."));
+            }
+            for (KometNotes.Member member : notes.members()) {
+                SelectableText name = SelectableText.of(member.name());
+                name.setStyle("-fx-font-weight: bold;");
+                HBox memberRow = new HBox(6, name);
+                memberRow.setAlignment(Pos.CENTER_LEFT);
+                member.compare().ifPresent(compare -> {
+                    Hyperlink diff = new Hyperlink("compare");
+                    diff.setOnAction(event -> onOpenLink.accept(compare));
+                    memberRow.getChildren().add(diff);
+                });
+                VBox.setMargin(memberRow, new Insets(6, 0, 0, 0));
+                box.getChildren().add(memberRow);
+                for (KometNotes.Commit commit : member.commits()) {
+                    Hyperlink sha = new Hyperlink(commit.sha());
+                    sha.setStyle("-fx-font-family: 'Menlo', monospace; -fx-font-size: 11px;");
+                    sha.setMinWidth(Region.USE_PREF_SIZE);
+                    sha.setOnAction(event -> onOpenLink.accept(commit.url()));
+                    SelectableText subject = SelectableText.of(commit.subject());
+                    HBox.setHgrow(subject, Priority.ALWAYS);
+                    HBox commitRow = new HBox(4, sha, subject);
+                    commitRow.setAlignment(Pos.CENTER_LEFT);
+                    commitRow.setPadding(new Insets(0, 0, 0, 12));
+                    box.getChildren().add(commitRow);
+                }
+            }
+        }
+        TitledPane pane = new TitledPane("What changed", box);
+        pane.setAnimated(false);
+        return pane;
+    }
+
+    /** Several Komets chosen: which they are, and Move to Trash for all of them. */
+    private void showKomets(List<KometInstallation> chosen) {
+        SelectableText title = SelectableText.of(chosen.size() + " Komets chosen");
+        title.setStyle("-fx-font-size: 20px; -fx-font-weight: bold;");
+        kometDetail.getChildren().add(title);
+        kometDetail.getChildren().add(muted(chosen.stream().map(komet -> "Komet " + komet.version())
+                .collect(Collectors.joining(", ")) + "."));
+        List<KometInstallation> running = chosen.stream().filter(KometRemoval::running).toList();
+        Button trash = new Button("Move " + chosen.size() + " Komets to the " + Finder.trashName() + "…");
+        trash.setDisable(!running.isEmpty());
+        trash.setOnAction(event -> confirmTrashKomets(chosen));
+        kometDetail.getChildren().add(trash);
+        if (!running.isEmpty()) {
+            SelectableText why = SelectableText.of(running.stream().map(komet -> "Komet " + komet.version())
+                    .collect(Collectors.joining(", ")) + (running.size() == 1 ? " is" : " are")
+                    + " running. Quit " + (running.size() == 1 ? "it" : "them") + " first.");
+            why.setStyle(ATTENTION);
+            kometDetail.getChildren().add(why);
+        }
+    }
+
+    /** A Komet's tile: the same shape as a knowledge base's icon, so the two lists read alike. */
+    private static Node kometTile(double size) {
+        Label letter = new Label("K");
+        letter.setStyle("-fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: " + Math.round(size * 0.5) + "px;");
+        StackPane tile = new StackPane(letter);
+        tile.setMinSize(size, size);
+        tile.setPrefSize(size, size);
+        tile.setMaxSize(size, size);
+        tile.setStyle("-fx-background-color: #2f5f8a; -fx-background-radius: " + Math.round(size * 0.22) + ";");
+        return tile;
+    }
+
+    /** A line of the Komet list: the tile, the version, and a mark for what sets it apart. */
+    private final class KometCell extends ListCell<KometInstallation> {
+        @Override
+        protected void updateItem(KometInstallation komet, boolean empty) {
+            super.updateItem(komet, empty);
+            setText(null);
+            if (empty || komet == null) {
+                setGraphic(null);
+                return;
+            }
+            Label name = new Label("Komet " + komet.version());
+            Label mark = new Label();
+            mark.setStyle("-fx-font-size: 11px;" + MUTED);
+            List<String> marks = new ArrayList<>();
+            if (komet == komets.getFirst()) {
+                marks.add("newest");
+            }
+            if (families.stream().anyMatch(family -> pins.of(family.name()).filter(komet.version()::equals).isPresent())) {
+                marks.add("set for some");
+            }
+            if (KometRemoval.running(komet)) {
+                marks.add("running");
+            }
+            mark.setText(String.join(" · ", marks));
+            if (komet == komets.getFirst()) {
+                mark.setStyle("-fx-font-size: 11px; -fx-text-fill: #2e7d32;");
+            }
+            Region gap = new Region();
+            HBox.setHgrow(gap, Priority.ALWAYS);
+            HBox line = new HBox(6, kometTile(20), name, gap, mark);
+            line.setAlignment(Pos.CENTER_LEFT);
+            line.setMinWidth(0);
+            line.prefWidthProperty().bind(kometList.widthProperty().subtract(36));
+            setGraphic(line);
         }
     }
 
