@@ -51,7 +51,9 @@ class DashboardViewCopiesTest {
         KnowledgeBase demo = copy("pizza-card-leak-demo", "20250627.1-20261001.101010-1");
         KnowledgeBase teaching = copy("pizza-teaching", "20250627.1-20260901.101010-1");
         CompletableFuture<List<String>> words = new CompletableFuture<>();
-        CompletableFuture<List<String>> enabledButtons = new CompletableFuture<>();
+        CompletableFuture<List<String>> newestButtons = new CompletableFuture<>();
+        CompletableFuture<List<String>> demoButtons = new CompletableFuture<>();
+        CompletableFuture<List<String>> demoWords = new CompletableFuture<>();
         CompletableFuture<List<Optional<NoticeAction.Upgrade>>> upgrades = new CompletableFuture<>();
         CompletableFuture<WritableImage> drawn = new CompletableFuture<>();
         Platform.runLater(() -> {
@@ -63,7 +65,7 @@ class DashboardViewCopiesTest {
                 view.setStatus("pizza-kb", new BuildStatus(BuildStatus.State.CURRENT, "the newest deploy", Optional.of(
                         new SnapshotMetadata.Deploy(NEWEST, Instant.parse("2026-10-24T00:20:14Z")))));
                 view.select("pizza-kb");
-                Scene scene = new Scene(view, 1080, 640);
+                Scene scene = new Scene(view, 1080, 720);
                 view.applyCss();
                 view.layout();
                 upgrades.complete(List.of(view.upgradeOf(current), view.upgradeOf(demo), view.upgradeOf(teaching)));
@@ -73,35 +75,46 @@ class DashboardViewCopiesTest {
                 view.lookupAll(".table-cell").stream().map(javafx.scene.control.Labeled.class::cast)
                         .map(javafx.scene.control.Labeled::getText).filter(java.util.Objects::nonNull).forEach(seen::add);
                 words.complete(seen);
-                enabledButtons.complete(view.lookupAll(".button").stream().map(Button.class::cast)
-                        .filter(button -> !button.isDisabled()).map(Button::getText).toList());
+                newestButtons.complete(enabled(view));
+                @SuppressWarnings("unchecked")
+                javafx.scene.control.TableView<KnowledgeBase> table =
+                        (javafx.scene.control.TableView<KnowledgeBase>) view.lookup(".table-view");
+                table.getSelectionModel().select(demo);
+                view.applyCss();
+                view.layout();
+                demoButtons.complete(enabled(view));
+                demoWords.complete(Words.of(view).stream().map(Names::plain).toList());
                 drawn.complete(scene.snapshot(null));
             } catch (RuntimeException | AssertionError e) {
-                upgrades.completeExceptionally(e);
-                words.completeExceptionally(e);
-                enabledButtons.completeExceptionally(e);
-                drawn.completeExceptionally(e);
+                for (CompletableFuture<?> future : List.of(words, newestButtons, demoButtons, demoWords, upgrades, drawn)) {
+                    future.completeExceptionally(e);
+                }
             }
         });
 
         List<Optional<NoticeAction.Upgrade>> offered = upgrades.get(30, TimeUnit.SECONDS);
-        assertThat(offered.get(0)).as("the copy the detail shows is current").isEmpty();
-        assertThat(offered.get(1)).as("the folder behind the newest build upgrades on its own")
+        assertThat(offered.get(0)).as("the newest folder is current").isEmpty();
+        assertThat(offered.get(1)).as("the folder behind the newest version upgrades on its own")
                 .contains(new NoticeAction.Upgrade(demo, PIZZA, "rkb"));
-        assertThat(offered.get(2)).as("every folder behind the newest build, each its own")
+        assertThat(offered.get(2)).as("every folder behind the newest version, each its own")
                 .contains(new NoticeAction.Upgrade(teaching, PIZZA, "rkb"));
         assertThat(words.get(30, TimeUnit.SECONDS))
-                .anyMatch(text -> text.startsWith(DashboardView.OTHER_COPIES + " (2)"))
-                .anyMatch(text -> text.startsWith("Each folder is a separate copy"))
-                .contains("pizza-card-leak-demo", "pizza-teaching")
-                .noneMatch(text -> text.startsWith("A newer build is on Nexus"));
-        assertThat(enabledButtons.get(30, TimeUnit.SECONDS)).filteredOn("Upgrade…"::equals).hasSize(2);
-        assertThat(enabledButtons.get(30, TimeUnit.SECONDS)).as("one Move to Trash per folder, the shown one's included,"
-                        + " and none for all at once")
-                .filteredOn(("Move to " + Finder.trashName() + "…")::equals).hasSize(3);
-        assertThat(enabledButtons.get(30, TimeUnit.SECONDS)).as("labelled actions, no ⋯ menu")
-                .contains("Show in " + Finder.name(), "Copy to a new folder…", "Reinstall…").doesNotContain("⋯");
-        write(drawn.get(30, TimeUnit.SECONDS), Path.of("target", "dashboard-other-copies.png"));
+                .anyMatch(text -> text.startsWith(DashboardView.FOLDERS + " (3)"))
+                .anyMatch(text -> text.startsWith("Each folder is a separate copy with its own change sets."))
+                .contains("pizza-kb", "pizza-card-leak-demo", "pizza-teaching", "latest version", "older version");
+        assertThat(newestButtons.get(30, TimeUnit.SECONDS)).as("every action, on the chosen folder: the newest at first")
+                .contains("Open", "Show in " + Finder.name(), "Copy to a new folder…", "Reinstall…",
+                        "Move to " + Finder.trashName() + "…")
+                .doesNotContain("Upgrade…", "⋯");
+        assertThat(demoButtons.get(30, TimeUnit.SECONDS)).as("the same actions on another folder, with its Upgrade")
+                .contains("Open", "Copy to a new folder…", "Upgrade…", "Move to " + Finder.trashName() + "…");
+        assertThat(demoWords.get(30, TimeUnit.SECONDS)).anyMatch(text -> text.startsWith("Folder  pizza-card-leak-demo in "));
+        write(drawn.get(30, TimeUnit.SECONDS), Path.of("target", "dashboard-folders.png"));
+    }
+
+    private static List<String> enabled(DashboardView view) {
+        return view.lookupAll(".button").stream().map(Button.class::cast).filter(button -> !button.isDisabled())
+                .map(Button::getText).toList();
     }
 
     private static KnowledgeBase copy(String name, String resolved) {

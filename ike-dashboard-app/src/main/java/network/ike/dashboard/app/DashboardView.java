@@ -115,8 +115,11 @@ public final class DashboardView extends BorderPane {
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault());
     private static final String MUTED = "-fx-text-fill: #6b6b6b;";
 
-    /** The section that lists a knowledge base's copies other than the one the detail shows. */
-    static final String OTHER_COPIES = "Other copies";
+    /** The section that lists every folder of a knowledge base. */
+    static final String FOLDERS = "Folders";
+
+    /** The folder chosen in each knowledge base's Folders table, by family name, kept while the window is open. */
+    private final Map<String, String> chosenFolders = new java.util.HashMap<>();
     private static final String ATTENTION = "-fx-text-fill: #b35900;";
     private static final String PROBLEM = "-fx-text-fill: #c62828;";
     private static final int TABLE_ROWS = 8;
@@ -1894,59 +1897,98 @@ public final class DashboardView extends BorderPane {
         List<KnowledgeBase> changeSets = family.members().stream().filter(member -> member.kind() == StoreKind.CHANGE_SETS).toList();
         if (latest.isEmpty()) {
             detail.getChildren().add(muted("Only protobuf files. Komet cannot open these directly. It loads them into a knowledge base."));
-            detail.getChildren().add(section(KnowledgeBaseTree.PROTOBUFS, changeSets, true, false));
+            detail.getChildren().add(section(KnowledgeBaseTree.PROTOBUFS, changeSets, true));
             relations(family).ifPresent(detail.getChildren()::add);
             return;
         }
-        KnowledgeBase copy = latest.get();
-        detail.getChildren().add(muted(copy.kind().label() + "  ·  " + DashboardCommand.size(copy.sizeBytes())
-                + "  ·  " + WHEN.format(copy.recency())));
-        copy.coordinate().ifPresent(coordinate -> {
-            BuildStatus status = status(family.name());
-            SelectableText build = muted(coordinate.artifactId() + " " + copy.resolvedVersion().orElse(coordinate.version())
-                    + nexusNote(status));
+        List<KnowledgeBase> folders = family.members().stream().filter(member -> member.kind().opensInKomet()).toList();
+        // One folder is chosen, and every folder action acts on it (KEC, 2026-11-08): the newest until another is.
+        KnowledgeBase copy = folders.stream().filter(member -> member.name().equals(chosenFolders.get(family.name())))
+                .findFirst().orElse(latest.get());
+        BuildStatus status = status(family.name());
+        latest.get().coordinate().ifPresent(coordinate -> {
+            long bytes = folders.stream().mapToLong(KnowledgeBase::sizeBytes).sum();
+            SelectableText about = muted(coordinate.artifactId() + "  ·  " + (folders.size() == 1 ? "1 folder"
+                    : folders.size() + " folders") + ", " + DashboardCommand.size(bytes) + nexusNote(status));
             if (status.state() == BuildStatus.State.CURRENT) {
-                build.setStyle("-fx-text-fill: #2e7d32;");
+                about.setStyle("-fx-text-fill: #2e7d32;");
             }
-            Tooltip.install(build, new Tooltip(coordinate.toString() + (status.detail().isEmpty() ? "" : "\n" + status.detail())));
-            detail.getChildren().add(build);
+            Tooltip.install(about, new Tooltip(coordinate.toString() + (status.detail().isEmpty() ? "" : "\n" + status.detail())));
+            detail.getChildren().add(about);
         });
 
-        BuildStatus status = status(family.name());
         if (status.state() == BuildStatus.State.NEWER && status.newest().isPresent()) {
             KnowledgeBase identified = family.latestIdentified().orElse(copy);
+            long behind = folders.stream().filter(folder -> upgradeOf(folder).isPresent()).count();
+            String which = folders.size() == 1 ? "Your folder has an older version."
+                    : behind == folders.size() ? (folders.size() == 2 ? "Both your folders have an older version."
+                    : "All " + folders.size() + " of your folders have an older version.")
+                    : behind + " of your " + folders.size() + " folders " + (behind == 1 ? "has" : "have") + " an older version.";
             SelectableText newer = SelectableText.of("A newer version is on Nexus, published "
-                    + WHEN.format(status.newest().get().updated()) + ". It can update your folder " + identified.whereShown()
-                    + ".");
+                    + WHEN.format(status.newest().get().updated()) + ". " + which);
             String classifier = identified.kind().classifier();
             boolean downloading = identified.coordinate()
                     .map(coordinate -> transferring(downloadKey(coordinate, classifier))).orElse(false);
-            boolean upgrading = transferring(upgradeKey(identified.path()));
-            Optional<KometInstallation> validator = LauncherChoice.chooseForLoad(komets, identified);
-            Button upgrade = new Button(upgrading ? "Upgrading …" : "Upgrade");
-            upgrade.setDisable(upgrading || downloading || validator.isEmpty() || identified.coordinate().isEmpty());
-            upgrade.setMinWidth(Region.USE_PREF_SIZE);
-            upgrade.setOnAction(event -> identified.coordinate().ifPresent(coordinate ->
-                    confirmUpgrade(new NoticeAction.Upgrade(identified, coordinate, classifier))));
             Button copyBeside = new Button(downloading ? "Downloading …" : "Install a new copy");
-            copyBeside.setDisable(downloading || upgrading);
+            copyBeside.setDisable(downloading);
             copyBeside.setMinWidth(Region.USE_PREF_SIZE);
             copyBeside.setOnAction(event -> identified.coordinate()
                     .ifPresent(coordinate -> onDownload.accept(coordinate, classifier)));
-            Region gap = new Region();
-            HBox.setHgrow(gap, Priority.ALWAYS);
             HBox.setHgrow(newer, Priority.ALWAYS);
-            HBox row = new HBox(10, newer, gap, upgrade, copyBeside);
+            HBox row = new HBox(10, newer, copyBeside);
             row.setAlignment(Pos.CENTER_LEFT);
-            VBox box = new VBox(4, row, muted(validator.isPresent()
-                    ? "Upgrade keeps your change sets, preferences and repositories. The old version goes to the "
-                            + Finder.trashName() + "."
-                    : "To upgrade this folder you need Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE + " or later. Until"
-                            + " then, Install a new copy puts the new version in a separate folder."));
+            VBox box = new VBox(4, row, muted("Upgrade, on a folder below, brings that folder to it and keeps its change"
+                    + " sets, preferences and repositories. Install a new copy puts it in a folder of its own."));
             box.setPadding(new Insets(8, 10, 8, 10));
             box.setStyle("-fx-background-color: #fff3e0; -fx-background-radius: 6;");
             detail.getChildren().add(box);
         }
+
+        if (folders.size() > 1) {
+            detail.getChildren().add(foldersTable(family, folders, copy));
+        }
+        detail.getChildren().add(folderPanel(copy));
+
+        if (!changeSets.isEmpty()) {
+            detail.getChildren().add(section(KnowledgeBaseTree.PROTOBUFS, changeSets, false));
+        }
+        relations(family).ifPresent(detail.getChildren()::add);
+    }
+
+    /**
+     * Every folder of a knowledge base, the chosen one selected: choosing a row makes it the folder the actions below
+     * act on, and double-clicking one opens it.
+     */
+    private Node foldersTable(KnowledgeBaseFamily family, List<KnowledgeBase> folders, KnowledgeBase chosen) {
+        TableView<KnowledgeBase> table = copiesTable(folders);
+        TableColumn<KnowledgeBase, String> version = column("Version", 120, this::standing);
+        version.setMinWidth(100);
+        table.getColumns().add(version);
+        table.getSelectionModel().select(chosen);
+        table.getSelectionModel().selectedItemProperty().addListener((observable, was, now) -> {
+            if (now != null && !now.name().equals(chosenFolders.get(family.name()))) {
+                chosenFolders.put(family.name(), now.name());
+                showDetail();
+            }
+        });
+        long bytes = folders.stream().mapToLong(KnowledgeBase::sizeBytes).sum();
+        TitledPane pane = new TitledPane(FOLDERS + " (" + folders.size() + ")  ·  " + DashboardCommand.size(bytes), table);
+        pane.setAnimated(false);
+        pane.setExpanded(true);
+        return new VBox(4, pane, muted("Each folder is a separate copy with its own change sets. Choose one to open,"
+                + " copy, upgrade or move it."));
+    }
+
+    /** The chosen folder: where it is, what it is, and everything that can be done with it. */
+    private Node folderPanel(KnowledgeBase copy) {
+        VBox panel = new VBox(10);
+        SelectableText where = SelectableText.of("Folder  " + copy.whereShown());
+        where.setStyle("-fx-font-weight: bold;");
+        panel.getChildren().add(where);
+        panel.getChildren().add(muted(copy.kind().label() + "  ·  " + DashboardCommand.size(copy.sizeBytes())
+                + "  ·  " + WHEN.format(copy.recency())
+                + copy.resolvedVersion().map(version -> "  ·  " + version).orElse("")
+                + (standing(copy).isEmpty() ? "" : "  ·  " + standing(copy))));
 
         Optional<KometInstallation> komet = launcher(copy);
         Button open = new Button("Open");
@@ -1986,24 +2028,23 @@ public final class DashboardView extends BorderPane {
                     showDetail();
                 }
             });
-            Tooltip.install(in, new Tooltip("The Komet this knowledge base opens in. Latest follows each new Komet you"
-                    + " install; a version stays until you change it."));
+            Tooltip.install(in, new Tooltip("The Komet this knowledge base opens in, whichever folder. Latest follows"
+                    + " each new Komet you install; a version stays until you change it."));
             Label inLabel = new Label("in");
             inLabel.setStyle(MUTED);
             actions.getChildren().addAll(inLabel, in);
         }
         actions.setAlignment(Pos.CENTER_LEFT);
-        actions.setPadding(new Insets(6, 0, 0, 0));
-        detail.getChildren().add(actions);
+        panel.getChildren().add(actions);
         pin.filter(version -> readers.stream().noneMatch(reader -> reader.version().equals(version)))
                 .ifPresent(missing -> {
                     SelectableText gone = SelectableText.of("This knowledge base is set to open in Komet " + missing
                             + ", which is not installed. It opens in the latest Komet until you choose another.");
                     gone.setStyle(PROBLEM);
-                    detail.getChildren().add(gone);
+                    panel.getChildren().add(gone);
                 });
         if (StoreLock.openInKomet(copy.path())) {
-            detail.getChildren().add(muted("Open in a Komet now."));
+            panel.getChildren().add(muted("Open in a Komet now."));
         }
         if (komet.isEmpty()) {
             Optional<KometRelease> fix = kometRelease.filter(release -> LauncherChoice.reads(release.version(), copy));
@@ -2011,7 +2052,7 @@ public final class DashboardView extends BorderPane {
                     + (fix.isPresent() ? "." : ". No installed Komet can open it, and no newer Komet was found."))
                     .orElse(fix.isPresent() ? "No Komet is installed." : "No Komet is installed, and none was found to install."));
             need.setStyle(PROBLEM);
-            detail.getChildren().add(need);
+            panel.getChildren().add(need);
             fix.ifPresent(release -> {
                 Button install = new Button(installing ? "Installing Komet " + release.version() + " …"
                         : "Install Komet " + release.version());
@@ -2022,29 +2063,25 @@ public final class DashboardView extends BorderPane {
                         + ". It installs next to the Komets you have.");
                 HBox row = new HBox(10, install, from);
                 row.setAlignment(Pos.CENTER_LEFT);
-                detail.getChildren().add(row);
+                panel.getChildren().add(row);
             });
         }
-        // Each action sits beside what it acts on, labelled, instead of in a "⋯" menu (KEC, 2026-11-08).
         komet.flatMap(chosen -> heapPlanner.apply(chosen, copy)).ifPresent(plan -> {
             Hyperlink change = new Hyperlink("Change…");
             change.setOnAction(event -> onEditHeap.accept(copy));
             HBox memory = new HBox(6, HeapView.line(plan, komet.get(), copy), change);
             memory.setAlignment(Pos.CENTER_LEFT);
-            detail.getChildren().add(memory);
+            panel.getChildren().add(memory);
         });
-        detail.getChildren().add(muted("Folder  " + copy.whereShown()));
-        detail.getChildren().add(folderActions(copy));
-
-        List<KnowledgeBase> older = family.members().stream()
-                .filter(member -> member != copy && member.kind().opensInKomet()).toList();
-        if (!older.isEmpty()) {
-            detail.getChildren().add(section(OTHER_COPIES, older, true, true));
+        panel.getChildren().add(folderActions(copy));
+        if (upgradeOf(copy).isPresent() && LauncherChoice.chooseForLoad(komets, copy).isEmpty()) {
+            panel.getChildren().add(muted("To upgrade this folder you need Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE
+                    + " or later. Until then, Install a new copy puts the new version in a separate folder."));
         }
-        if (!changeSets.isEmpty()) {
-            detail.getChildren().add(section(KnowledgeBaseTree.PROTOBUFS, changeSets, false, false));
-        }
-        relations(family).ifPresent(detail.getChildren()::add);
+        panel.setPadding(new Insets(12, 14, 14, 14));
+        panel.setStyle("-fx-background-color: #f7f8fa; -fx-background-radius: 8; -fx-border-color: #e1e4e8;"
+                + " -fx-border-radius: 8;");
+        return panel;
     }
 
     /**
@@ -2305,87 +2342,16 @@ public final class DashboardView extends BorderPane {
         };
     }
 
-    private Node section(String name, List<KnowledgeBase> copies, boolean expanded, boolean trashAll) {
+    private Node section(String name, List<KnowledgeBase> copies, boolean expanded) {
         long bytes = copies.stream().mapToLong(KnowledgeBase::sizeBytes).sum();
         String heading = name + " (" + copies.size() + ")  ·  " + DashboardCommand.size(bytes);
-        TableView<KnowledgeBase> table = copiesTable(copies);
-        if (trashAll) {
-            table.getColumns().addAll(List.of(nexusColumn(), trashColumn()));
-        }
-        TitledPane pane = new TitledPane(heading, table);
+        TitledPane pane = new TitledPane(heading, copiesTable(copies));
         pane.setExpanded(expanded);
         pane.setAnimated(false);
-        if (!trashAll) {
-            return pane;
-        }
-        // Each folder is moved to the Trash on its own, from its row (KEC, 2026-11-08), never all at once.
-        VBox box = new VBox(4, pane);
-        if (copies.stream().anyMatch(copy -> upgradeOf(copy).isPresent())) {
-            box.getChildren().add(muted("Each folder is a separate copy. Upgrade updates only that folder to the"
-                    + " latest version, and keeps its change sets, preferences and repositories."));
-        }
-        return box;
+        return pane;
     }
 
-    /**
-     * How a copy stands against the newest build on Nexus, with Upgrade for a copy that is behind it: every copy of
-     * a knowledge base is a folder of its own, upgraded on its own.
-     */
-    private TableColumn<KnowledgeBase, KnowledgeBase> nexusColumn() {
-        TableColumn<KnowledgeBase, KnowledgeBase> column = new TableColumn<>("Nexus");
-        column.setCellValueFactory(cell -> new ReadOnlyObjectWrapper<>(cell.getValue()));
-        column.setPrefWidth(120);
-        column.setMinWidth(100);
-        column.setCellFactory(view -> new javafx.scene.control.TableCell<>() {
-            @Override
-            protected void updateItem(KnowledgeBase copy, boolean empty) {
-                super.updateItem(copy, empty);
-                setText(null);
-                setGraphic(null);
-                if (empty || copy == null) {
-                    return;
-                }
-                Optional<NoticeAction.Upgrade> upgrade = upgradeOf(copy);
-                if (upgrade.isPresent()) {
-                    Button button = new Button(upgradeBusy(copy) ? "Upgrading …" : "Upgrade…");
-                    button.setStyle("-fx-font-size: 11px; -fx-padding: 1 8 1 8;");
-                    button.setDisable(upgradeBusy(copy) || LauncherChoice.chooseForLoad(komets, copy).isEmpty());
-                    button.setOnAction(event -> confirmUpgrade(upgrade.get()));
-                    setGraphic(button);
-                } else {
-                    setText(standing(copy));
-                }
-            }
-        });
-        return column;
-    }
 
-    /** Move to Trash for one folder, on its own row. */
-    private TableColumn<KnowledgeBase, KnowledgeBase> trashColumn() {
-        TableColumn<KnowledgeBase, KnowledgeBase> column = new TableColumn<>("");
-        column.setCellValueFactory(cell -> new ReadOnlyObjectWrapper<>(cell.getValue()));
-        column.setPrefWidth(130);
-        column.setMinWidth(124);
-        column.setSortable(false);
-        column.setCellFactory(view -> new javafx.scene.control.TableCell<>() {
-            @Override
-            protected void updateItem(KnowledgeBase copy, boolean empty) {
-                super.updateItem(copy, empty);
-                setText(null);
-                setGraphic(null);
-                if (empty || copy == null) {
-                    return;
-                }
-                Button button = new Button("Move to " + Finder.trashName() + "…");
-                button.setStyle("-fx-font-size: 11px; -fx-padding: 1 8 1 8;");
-                button.setDisable(upgradeBusy(copy));
-                button.setMinWidth(Region.USE_PREF_SIZE);
-                button.setOnAction(event -> confirmTrash(List.of(copy)));
-                setGraphic(button);
-            }
-        });
-        return column;
-    }
 
     /** What a copy that is not behind says in the Nexus column. */
     private String standing(KnowledgeBase copy) {
@@ -2466,6 +2432,16 @@ public final class DashboardView extends BorderPane {
         duplicate.setDisable(busy);
         duplicate.setOnAction(event -> askCopy(copy));
         HBox row = new HBox(8, reveal, duplicate);
+        upgradeOf(copy).ifPresent(upgrade -> {
+            Button button = new Button(upgradeBusy(copy) ? "Upgrading …" : "Upgrade…");
+            button.setDisable(upgradeBusy(copy) || LauncherChoice.chooseForLoad(komets, copy).isEmpty());
+            button.setOnAction(event -> confirmUpgrade(upgrade));
+            if (LauncherChoice.chooseForLoad(komets, copy).isEmpty()) {
+                Tooltip.install(button, new Tooltip("Upgrading needs Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE
+                        + " or later."));
+            }
+            row.getChildren().add(button);
+        });
         copy.coordinate().filter(coordinate -> copy.identified()).ifPresent(coordinate -> {
             Button reinstall = new Button("Reinstall…");
             reinstall.setDisable(busy || transferring(downloadKey(coordinate, copy.kind().classifier())));
