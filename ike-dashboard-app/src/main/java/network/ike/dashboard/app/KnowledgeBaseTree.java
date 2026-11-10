@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 
 /**
  * The knowledge bases Nexus offers as a tree (decision 18 of the {@code dev-ike-dashboard} topic): each
@@ -34,8 +35,13 @@ import java.util.Optional;
  * ├─ Databases      Rocks, spined array
  * ├─ Protobufs      protobuf, reasoned
  * ├─ Built from     IKE Starter Set, SNOMED CT, …, GUDID
+ * │   └─ SNOMED CT     the release it was imported from
  * └─ Included in    …
  * </pre>
+ *
+ * <p>A knowledge base built from another names it, not the source release that one was imported from;
+ * that is in the other's own descriptor, so each knowledge base it was built from shows the sources its
+ * descriptor records beneath it.
  */
 public final class KnowledgeBaseTree {
 
@@ -149,14 +155,50 @@ public final class KnowledgeBaseTree {
      * @return the node
      */
     static Node input(KnowledgeBaseDescriptor.Input input, Map<Coordinate, NexusCatalog.Described> described) {
-        Optional<Map.Entry<Coordinate, NexusCatalog.Described>> known = described.entrySet().stream()
-                .filter(entry -> input.of(entry.getKey())).findFirst();
-        String label = known.map(entry -> entry.getValue().descriptor().displayName())
-                .or(() -> input.coordinate().map(Coordinate::artifactId))
-                .or(input::file)
-                .orElse(input.reference());
-        return new Node(Kind.INPUT, label, known.map(Map.Entry::getKey).or(input::coordinate), Optional.empty(),
-                Optional.of(input), List.of());
+        return input(input, named -> described.entrySet().stream().filter(entry -> named.of(entry.getKey()))
+                .findFirst().map(entry -> entry.getValue().descriptor()));
+    }
+
+    /**
+     * What a knowledge base was built from, as {@link #input(KnowledgeBaseDescriptor.Input, Map)} names it,
+     * with the sources it reads beneath it: an included knowledge base's own descriptor records the source
+     * release it was imported from, which the knowledge base that includes it does not.
+     *
+     * @param input       the input
+     * @param describedBy the descriptor of the knowledge base an input is an artifact of, when one is known
+     * @return the node, its children the sources of the knowledge base it names
+     */
+    static Node input(KnowledgeBaseDescriptor.Input input,
+                      Function<KnowledgeBaseDescriptor.Input, Optional<KnowledgeBaseDescriptor>> describedBy) {
+        Optional<KnowledgeBaseDescriptor> known = describedBy.apply(input);
+        String label = known.map(KnowledgeBaseDescriptor::displayName).orElseGet(() -> name(input));
+        List<Node> sources = known.map(descriptor -> sources(input, descriptor)).orElse(List.of()).stream()
+                .map(source -> new Node(Kind.INPUT, name(source), source.coordinate(), Optional.empty(),
+                        Optional.of(source), List.of()))
+                .toList();
+        return new Node(Kind.INPUT, label, known.map(KnowledgeBaseDescriptor::coordinate).or(input::coordinate),
+                Optional.empty(), Optional.of(input), sources);
+    }
+
+    /**
+     * The sources a knowledge base reads, when its descriptor is of the version the input names: a
+     * descriptor of another version may record another release.
+     *
+     * @param input      the input that names the knowledge base
+     * @param descriptor the knowledge base's descriptor
+     * @return its {@code SOURCE} inputs, in order; empty when the versions differ
+     */
+    static List<KnowledgeBaseDescriptor.Input> sources(KnowledgeBaseDescriptor.Input input,
+                                                       KnowledgeBaseDescriptor descriptor) {
+        boolean sameVersion = input.coordinate()
+                .filter(coordinate -> coordinate.version().equals(descriptor.coordinate().version())).isPresent();
+        return sameVersion ? descriptor.inputs().stream().filter(source -> source.role().equals("SOURCE")).toList()
+                : List.of();
+    }
+
+    /** An input no descriptor names: an artifact by its artifactId, a file by its name. */
+    private static String name(KnowledgeBaseDescriptor.Input input) {
+        return input.coordinate().map(Coordinate::artifactId).or(input::file).orElse(input.reference());
     }
 
     /**

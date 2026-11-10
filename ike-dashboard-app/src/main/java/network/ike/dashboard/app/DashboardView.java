@@ -1461,14 +1461,17 @@ public final class DashboardView extends BorderPane {
      * @return the name
      */
     public String nameOf(Coordinate coordinate) {
-        return families.stream()
-                .filter(family -> family.members().stream().anyMatch(member -> member.coordinate()
-                        .map(named -> named.artifactId().equals(coordinate.artifactId())).orElse(false)))
-                .map(KnowledgeBaseFamily::displayName).findFirst()
+        return familyOf(coordinate).map(KnowledgeBaseFamily::displayName)
                 .or(() -> catalog.described().entrySet().stream()
-                        .filter(entry -> entry.getKey().artifactId().equals(coordinate.artifactId()))
+                        .filter(entry -> entry.getKey().sameArtifact(coordinate))
                         .map(entry -> entry.getValue().descriptor().displayName()).findFirst())
                 .orElse(coordinate.artifactId());
+    }
+
+    /** The family in {@code ~/Solor} with a copy of a knowledge base, matched by groupId and artifactId. */
+    private Optional<KnowledgeBaseFamily> familyOf(Coordinate coordinate) {
+        return families.stream().filter(family -> family.members().stream()
+                .flatMap(member -> member.coordinate().stream()).anyMatch(coordinate::sameArtifact)).findFirst();
     }
 
     /**
@@ -1908,7 +1911,10 @@ public final class DashboardView extends BorderPane {
         BuildStatus status = status(family.name());
         latest.get().coordinate().ifPresent(coordinate -> {
             long bytes = folders.stream().mapToLong(KnowledgeBase::sizeBytes).sum();
-            SelectableText about = muted(coordinate.artifactId() + "  ·  " + (folders.size() == 1 ? "1 folder"
+            // The knowledge base by groupId and artifactId (KEC, 2026-11-10): the list names folders, the detail
+            // says which artifact they are.
+            SelectableText about = muted(coordinate.groupId() + ":" + coordinate.artifactId() + "  ·  "
+                    + (folders.size() == 1 ? "1 folder"
                     : folders.size() + " folders") + ", " + DashboardCommand.size(bytes) + nexusNote(status));
             if (status.state() == BuildStatus.State.CURRENT) {
                 about.setStyle("-fx-text-fill: #2e7d32;");
@@ -2087,7 +2093,13 @@ public final class DashboardView extends BorderPane {
     /**
      * What a knowledge base was built from and what is built from it (decision 18): the inputs its newest
      * descriptor records, and every knowledge base here or on Nexus whose descriptor records it. Each one
-     * the dashboard knows is a link: to its line here, else to it in the Nexus window.
+     * the dashboard knows is a link: to its line here, else to it in the Nexus window. Beneath each knowledge
+     * base it was built from are the source releases that one's own descriptor records.
+     *
+     * <p>A store loaded from its knowledge base's own protobuf may record that protobuf alone (stores
+     * assembled before kb-assemble carried the protobuf's inputs into them). When the folder is the newest
+     * version on Nexus, the descriptor Nexus has beside it is of the same version, and says what it was
+     * built from.
      */
     private Optional<Node> relations(KnowledgeBaseFamily family) {
         Optional<KnowledgeBaseDescriptor> descriptor = family.members().stream()
@@ -2097,34 +2109,43 @@ public final class DashboardView extends BorderPane {
         }
         Coordinate self = descriptor.get().coordinate();
         Map<Coordinate, NexusCatalog.Described> described = catalog.described();
-        VBox built = new VBox(2);
-        descriptor.get().inputs().stream().filter(input -> !input.of(self)).forEach(input -> {
-            KnowledgeBaseTree.Node node = KnowledgeBaseTree.input(input, described);
-            String version = input.version().map(text -> "  " + text).orElse("");
-            built.getChildren().add(relation(node.label(), node.knowledgeBase(),
-                    KnowledgeBaseTree.describe(input) + version));
-        });
+        List<KnowledgeBaseDescriptor.Input> inputs = descriptor.get().inputs().stream()
+                .filter(input -> !input.of(self)).toList();
+        if (inputs.isEmpty() && status(family.name()).state() == BuildStatus.State.CURRENT) {
+            inputs = Optional.ofNullable(described.get(self)).map(NexusCatalog.Described::descriptor).stream()
+                    .flatMap(onNexus -> onNexus.inputs().stream()).filter(input -> !input.of(self)).toList();
+        }
         Map<String, Coordinate> including = new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         families.stream().filter(other -> other != family)
                 .forEach(other -> other.members().stream().flatMap(member -> member.descriptor().descriptor().stream())
                         .filter(found -> found.includes(self)).findFirst()
                         .ifPresent(found -> including.putIfAbsent(found.displayName(), found.coordinate())));
         described.forEach((coordinate, entry) -> {
-            if (!coordinate.artifactId().equals(self.artifactId()) && entry.descriptor().includes(self)) {
+            if (!coordinate.sameArtifact(self) && entry.descriptor().includes(self)) {
                 including.putIfAbsent(entry.descriptor().displayName(), coordinate);
             }
         });
-        VBox included = new VBox(2);
-        including.forEach((name, coordinate) -> included.getChildren().add(relation(name, Optional.of(coordinate), "")));
-        if (built.getChildren().isEmpty() && included.getChildren().isEmpty()) {
+        if (inputs.isEmpty() && including.isEmpty()) {
             return Optional.empty();
         }
         VBox box = new VBox(6);
-        if (!built.getChildren().isEmpty()) {
-            box.getChildren().addAll(heading(KnowledgeBaseTree.BUILT_FROM), built);
+        if (!inputs.isEmpty()) {
+            box.getChildren().add(heading(KnowledgeBaseTree.BUILT_FROM));
+            inputs.forEach(input -> {
+                KnowledgeBaseTree.Node node = KnowledgeBaseTree.input(input, this::describedHereOrOnNexus);
+                box.getChildren().add(relationEntry(node.label(), node.knowledgeBase(), Optional.of(input), 0));
+                node.children().forEach(source -> box.getChildren().add(
+                        relationEntry(source.label(), source.knowledgeBase(), source.input(), 1)));
+            });
         }
-        if (!included.getChildren().isEmpty()) {
-            box.getChildren().addAll(heading(KnowledgeBaseTree.INCLUDED_IN), included);
+        if (!including.isEmpty()) {
+            Node heading = heading(KnowledgeBaseTree.INCLUDED_IN);
+            if (!inputs.isEmpty()) {
+                VBox.setMargin(heading, new Insets(6, 0, 0, 0));
+            }
+            box.getChildren().add(heading);
+            including.forEach((name, coordinate) -> box.getChildren().add(
+                    relationEntry(name, Optional.of(coordinate), Optional.empty(), 0)));
         }
         TitledPane pane = new TitledPane("Knowledge bases", box);
         pane.setAnimated(false);
@@ -2133,23 +2154,58 @@ public final class DashboardView extends BorderPane {
     }
 
     /**
-     * One knowledge base a relation names, by its name here when it is here: a link when the dashboard can
-     * show it, with what it is beside it.
+     * One knowledge base or source a relation names, on two lines: its name, a link when the dashboard can
+     * show it, with the version beside it; beneath, its group and how the assembly took it. Each line is
+     * short, so neither wraps inside an identifier.
      */
-    private Node relation(String named, Optional<Coordinate> knowledgeBase, String what) {
-        Optional<KnowledgeBaseFamily> here = knowledgeBase.flatMap(coordinate -> families.stream()
-                .filter(family -> family.name().equalsIgnoreCase(coordinate.artifactId())).findFirst());
+    private Node relationEntry(String named, Optional<Coordinate> knowledgeBase,
+                               Optional<KnowledgeBaseDescriptor.Input> input, int depth) {
+        HBox first = new HBox(10, relationName(named, knowledgeBase));
+        input.flatMap(KnowledgeBaseDescriptor.Input::version).ifPresent(version -> first.getChildren().add(muted(version)));
+        first.setAlignment(Pos.BASELINE_LEFT);
+        List<String> about = new java.util.ArrayList<>();
+        knowledgeBase.map(Coordinate::groupId).ifPresent(about::add);
+        input.map(KnowledgeBaseTree::describe).ifPresent(about::add);
+        VBox entry = new VBox(1, first);
+        if (!about.isEmpty()) {
+            entry.getChildren().add(muted(String.join("  ·  ", about)));
+        }
+        VBox.setMargin(entry, new Insets(0, 0, 0, 18 * depth));
+        return entry;
+    }
+
+    /**
+     * The descriptor of the knowledge base an input is an artifact of: a folder's in {@code ~/Solor}, of
+     * the version the input names when there is one, else the one Nexus has.
+     */
+    private Optional<KnowledgeBaseDescriptor> describedHereOrOnNexus(KnowledgeBaseDescriptor.Input input) {
+        List<KnowledgeBaseDescriptor> here = families.stream().flatMap(family -> family.members().stream())
+                .flatMap(member -> member.descriptor().descriptor().stream())
+                .filter(found -> input.of(found.coordinate())).toList();
+        return here.stream().filter(found -> !KnowledgeBaseTree.sources(input, found).isEmpty()).findFirst()
+                .or(() -> catalog.described().entrySet().stream().filter(entry -> input.of(entry.getKey()))
+                        .findFirst().map(entry -> entry.getValue().descriptor()))
+                .or(() -> here.stream().findFirst());
+    }
+
+    /**
+     * The name of one knowledge base a relation names, by its name here when it is here: a link when the
+     * dashboard can show it. It is the same knowledge base only when the groupId matches as well as the
+     * artifactId.
+     */
+    private Node relationName(String named, Optional<Coordinate> knowledgeBase) {
+        Optional<KnowledgeBaseFamily> here = knowledgeBase.flatMap(this::familyOf);
         String name = here.map(KnowledgeBaseFamily::displayName).orElse(named);
-        Optional<Coordinate> onNexus = knowledgeBase.filter(coordinate -> catalog.described().keySet().stream()
-                .anyMatch(described -> described.artifactId().equals(coordinate.artifactId())));
+        Optional<Coordinate> onNexus = knowledgeBase.flatMap(coordinate -> catalog.described().keySet().stream()
+                .filter(coordinate::sameArtifact).findFirst());
         Node label;
         if (here.isPresent()) {
-            Hyperlink link = new Hyperlink(name);
+            Hyperlink link = relationLink(name);
             link.setOnAction(event -> select(here.get().name()));
             Tooltip.install(link, new Tooltip("In ~/Solor: show it"));
             label = link;
         } else if (onNexus.isPresent()) {
-            Hyperlink link = new Hyperlink(name);
+            Hyperlink link = relationLink(name);
             link.setOnAction(event -> {
                 openBrowser();
                 browser.select(onNexus.get());
@@ -2159,12 +2215,14 @@ public final class DashboardView extends BorderPane {
         } else {
             label = SelectableText.of(name);
         }
-        HBox row = new HBox(8, label);
-        if (!what.isEmpty()) {
-            row.getChildren().add(muted(what));
-        }
-        row.setAlignment(Pos.CENTER_LEFT);
-        return row;
+        return label;
+    }
+
+    /** A link without a link's own padding, so it lines up with the line beneath it. */
+    private static Hyperlink relationLink(String name) {
+        Hyperlink link = new Hyperlink(name);
+        link.setPadding(Insets.EMPTY);
+        return link;
     }
 
     private static SelectableText heading(String text) {

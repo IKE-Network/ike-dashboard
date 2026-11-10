@@ -86,6 +86,38 @@ class KnowledgeBaseTreeTest {
         assertThat(rf2.classifier()).as("a four-part coordinate names no classifier").isEmpty();
     }
 
+    @Test
+    void anIncludedKnowledgeBaseShowsTheSourcesItsOwnDescriptorRecords() {
+        KnowledgeBaseDescriptor.Input release = new KnowledgeBaseDescriptor.Input("SOURCE",
+                "dev.ikm.data.rxnorm:rxnorm-origin:zip:rxnorm-2024-04-10+1.0.0-SNAPSHOT",
+                Optional.of("rxnorm-2024-04-10+1.0.0-20261019.181821-3"), Optional.of("rxnorm-owl"));
+        Map<Coordinate, NexusCatalog.Described> described = Map.of(coordinate("rxnorm-kb", "20240410.2-SNAPSHOT"),
+                described("rxnorm-kb", "20240410.2-SNAPSHOT", "RxNorm",
+                        pb("network.ike.foundation:ike-starter-set:zip:unreasoned-pb:1-SNAPSHOT", null), release));
+
+        KnowledgeBaseTree.Node rxnorm = KnowledgeBaseTree.input(
+                pb("network.ike.data:rxnorm-kb:zip:unreasoned-pb:20240410.2-SNAPSHOT", null), described);
+
+        assertThat(rxnorm.label()).isEqualTo("RxNorm");
+        assertThat(rxnorm.children()).as("the release it was imported from, not the protobufs it is layered on")
+                .extracting(KnowledgeBaseTree.Node::label, node -> KnowledgeBaseTree.describe(node.input().orElseThrow()),
+                        node -> node.input().flatMap(KnowledgeBaseDescriptor.Input::version).orElse(""))
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("rxnorm-origin", "source, read by rxnorm-owl",
+                        "rxnorm-2024-04-10+1.0.0-20261019.181821-3"));
+
+        assertThat(KnowledgeBaseTree.input(pb("network.ike.data:rxnorm-kb:zip:unreasoned-pb:20230101.1", null), described)
+                .children()).as("a descriptor of another version may record another release").isEmpty();
+
+        assertThat(rxnorm.children()).extracting(NexusBrowser::group).as("the Nexus window's Group column")
+                .containsExactly("dev.ikm.data.rxnorm");
+        assertThat(NexusBrowser.group(rxnorm)).isEqualTo("network.ike.data");
+        KnowledgeBaseTree.Node elsewhere = KnowledgeBaseTree.input(
+                pb("org.example:rxnorm-kb:zip:unreasoned-pb:20240410.2-SNAPSHOT", null), described);
+        assertThat(elsewhere.label()).as("another group's artifact of the same name is not the described one")
+                .isEqualTo("rxnorm-kb");
+        assertThat(NexusBrowser.group(elsewhere)).isEqualTo("org.example");
+    }
+
     private static KnowledgeBaseDescriptor.Input pb(String reference, String resolved) {
         return new KnowledgeBaseDescriptor.Input("PB", reference, Optional.ofNullable(resolved), Optional.empty());
     }

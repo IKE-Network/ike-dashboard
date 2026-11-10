@@ -95,6 +95,7 @@ public final class NexusBrowser extends BorderPane {
         });
         table.getColumns().addAll(List.of(
                 name,
+                column("Group", 150, NexusBrowser::group),
                 column("Collection", 90, node -> node.kind() == KnowledgeBaseTree.Kind.KNOWLEDGE_BASE
                         ? node.knowledgeBase().flatMap(this::collection).orElse("") : ""),
                 column("What", 150, NexusBrowser::what),
@@ -376,6 +377,17 @@ public final class NexusBrowser extends BorderPane {
             case INPUT, INCLUDED_IN -> node.knowledgeBase().map(icons::get)
                     .map(icon -> KnowledgeBaseIcon.of(Optional.of(icon), 14)).orElse(null);
             case HEADING, OFFER -> null;
+        };
+    }
+
+    /**
+     * The groupId of a knowledge base, or of one it names: two groups may publish an artifact of the same
+     * name. A store or protobuf is its parent's, and is left blank.
+     */
+    static String group(KnowledgeBaseTree.Node node) {
+        return switch (node.kind()) {
+            case KNOWLEDGE_BASE, INPUT, INCLUDED_IN -> node.knowledgeBase().map(Coordinate::groupId).orElse("");
+            case HEADING, OFFER -> "";
         };
     }
 

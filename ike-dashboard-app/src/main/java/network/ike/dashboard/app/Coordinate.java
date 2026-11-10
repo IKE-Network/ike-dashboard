@@ -34,6 +34,17 @@ public record Coordinate(String groupId, String artifactId, String version) {
     }
 
     /**
+     * Whether another coordinate is of the same artifact, at any version: the same groupId and artifactId.
+     * Two groups may publish an artifact of the same name, so the artifactId alone does not say.
+     *
+     * @param other the other coordinate
+     * @return whether both name the same artifact
+     */
+    public boolean sameArtifact(Coordinate other) {
+        return groupId.equals(other.groupId) && artifactId.equals(other.artifactId);
+    }
+
+    /**
      * Reads {@code groupId:artifactId:version}.
      *
      * @param text the coordinate

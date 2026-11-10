@@ -76,13 +76,79 @@ class DashboardViewRelationsTest {
         });
 
         assertThat(shown.getFirst()).as("the assembly: its inputs, here or on Nexus or neither")
-                .contains("Built from", "link SNOMED CT", "link GUDID", "ike-starter-set",
-                        "protobuf, unreasoned  20260601.2-20261026.160451-9")
+                .contains("Built from", "link SNOMED CT", "link GUDID", "ike-starter-set", "20260601.2-20261026.160451-9")
                 .doesNotContain("Included in");
+        assertThat(shown.getFirst()).as("the knowledge base itself by groupId and artifactId")
+                .anyMatch(text -> text.startsWith("network.ike.data:solor-gudid-kb  ·  1 folder"));
+        assertThat(shown.getFirst()).as("beneath each name, its group and how the assembly took it")
+                .contains("network.ike.foundation  ·  protobuf, unreasoned", "network.ike.data  ·  protobuf, unreasoned");
+        assertThat(shown.getFirst()).as("and beneath each, the source release its own descriptor records, here or on Nexus")
+                .contains("snomedct-origin", "SnomedCT_InternationalRF2_20260601+1.0.0",
+                        "org.snomed  ·  source, read by snomed-rf2", "gudid-origin", "20261001",
+                        "gov.fda  ·  source, read by gudid");
         assertThat(shown.getLast()).as("the source, a protobuf, which the link selected")
                 .contains("selected snomedct-kb", "Only protobuf files. Komet cannot open these directly. It loads them into a knowledge base.",
                         "Included in", "link SOLOR", "link SOLOR GUDID");
     }
+
+    @Test
+    void aFolderThatRecordsOnlyItsOwnProtobufShowsWhatNexusRecordsOnceItIsTheNewestVersion() throws Exception {
+        List<List<String>> shown = onFx(() -> {
+            KnowledgeBase rocks = knowledgeBase("solor-gudid-kb", "1-SNAPSHOT", "SOLOR GUDID", StoreKind.ROCKS,
+                    input("network.ike.data:solor-gudid-kb:zip:reasoned-pb:1-SNAPSHOT"));
+            DashboardView view = new DashboardView();
+            view.setKomets(List.of(new KometInstallation("Komet Desktop 26.1024.1820", "26.1024.1820",
+                    Path.of("/Applications/Komet.app"), Path.of("/Applications/Komet.app/Contents/MacOS/Komet"))));
+            view.setFamilies(List.of(new KnowledgeBaseFamily("solor-gudid-kb", List.of(rocks))));
+            view.setCatalog(new NexusCatalog.Catalog(List.of(), Map.of(
+                    coordinate("solor-gudid-kb", "1-SNAPSHOT"), described("solor-gudid-kb", "1-SNAPSHOT", "SOLOR GUDID",
+                            input("network.ike.data:gudid-kb:zip:unreasoned-pb:20261001.2-SNAPSHOT")),
+                    coordinate("gudid-kb", "20261001.2-SNAPSHOT"), described("gudid-kb", "20261001.2-SNAPSHOT", "GUDID",
+                            GUDID_RELEASE))));
+            new Scene(view, 1080, 640);
+            view.select("solor-gudid-kb");
+            view.applyCss();
+            view.layout();
+            List<String> unchecked = texts(view);
+            view.setStatus("solor-gudid-kb", new BuildStatus(BuildStatus.State.CURRENT, "the newest deploy", Optional.of(
+                    new SnapshotMetadata.Deploy("1-20261107.023118-4", ASSEMBLED))));
+            view.applyCss();
+            view.layout();
+            return List.of(unchecked, texts(view));
+        });
+
+        assertThat(shown.getFirst()).as("not known to be the version Nexus describes: nothing is claimed")
+                .doesNotContain("Built from");
+        assertThat(shown.getLast()).as("the newest version: what Nexus records it was built from")
+                .contains("Built from", "link GUDID", "20261001.2-SNAPSHOT", "network.ike.data  ·  protobuf, unreasoned",
+                        "gudid-origin", "20261001", "gov.fda  ·  source, read by gudid");
+    }
+
+    @Test
+    void anArtifactOfTheSameNameFromAnotherGroupIsNotLinkedToTheOneHere() throws Exception {
+        List<String> shown = onFx(() -> {
+            KnowledgeBase assembly = knowledgeBase("solor-gudid-kb", "1-SNAPSHOT", "SOLOR GUDID", StoreKind.SPINED_64,
+                    input("gov.fda:gudid-kb:zip:unreasoned-pb:20261001.2"));
+            KnowledgeBase ours = knowledgeBase("gudid-kb", "20261001.2-SNAPSHOT", "GUDID", StoreKind.CHANGE_SETS);
+            DashboardView view = new DashboardView();
+            view.setFamilies(List.of(new KnowledgeBaseFamily("gudid-kb", List.of(ours)),
+                    new KnowledgeBaseFamily("solor-gudid-kb", List.of(assembly))));
+            view.setCatalog(new NexusCatalog.Catalog(List.of(), Map.of(
+                    coordinate("gudid-kb", "20261001.2-SNAPSHOT"), described("gudid-kb", "20261001.2-SNAPSHOT", "GUDID"))));
+            new Scene(view, 1080, 640);
+            view.select("solor-gudid-kb");
+            view.applyCss();
+            view.layout();
+            return texts(view);
+        });
+
+        assertThat(shown).as("gov.fda's gudid-kb is not network.ike.data's, here or on Nexus")
+                .contains("Built from", "gudid-kb", "20261001.2", "gov.fda  ·  protobuf, unreasoned")
+                .doesNotContain("link GUDID", "link gudid-kb");
+    }
+
+    private static final KnowledgeBaseDescriptor.Input GUDID_RELEASE = new KnowledgeBaseDescriptor.Input("SOURCE",
+            "gov.fda:gudid-origin:zip:20261001", Optional.empty(), Optional.of("gudid"));
 
     private static DashboardView view() {
         KnowledgeBase gudid = knowledgeBase("solor-gudid-kb", "1-SNAPSHOT", "SOLOR GUDID", StoreKind.SPINED_64,
@@ -90,14 +156,18 @@ class DashboardViewRelationsTest {
                 new KnowledgeBaseDescriptor.Input("PB", "network.ike.data:snomedct-kb:zip:unreasoned-pb:20260601.2-SNAPSHOT",
                         Optional.of("20260601.2-20261026.160451-9"), Optional.empty()),
                 input("network.ike.data:gudid-kb:zip:unreasoned-pb:20261001.2-SNAPSHOT"));
-        KnowledgeBase snomed = knowledgeBase("snomedct-kb", "20260601.2-SNAPSHOT", "SNOMED CT", StoreKind.CHANGE_SETS);
+        KnowledgeBase snomed = knowledgeBase("snomedct-kb", "20260601.2-SNAPSHOT", "SNOMED CT", StoreKind.CHANGE_SETS,
+                new KnowledgeBaseDescriptor.Input("SOURCE",
+                        "org.snomed:snomedct-origin:zip:SnomedCT_InternationalRF2_20260601+1.0.0", Optional.empty(),
+                        Optional.of("snomed-rf2")));
         DashboardView view = new DashboardView();
         view.setKomets(List.of(new KometInstallation("Komet Desktop 26.1024.1820", "26.1024.1820",
                 Path.of("/Applications/Komet.app"), Path.of("/Applications/Komet.app/Contents/MacOS/Komet"))));
         view.setFamilies(List.of(new KnowledgeBaseFamily("snomedct-kb", List.of(snomed)),
                 new KnowledgeBaseFamily("solor-gudid-kb", List.of(gudid))));
         view.setCatalog(new NexusCatalog.Catalog(List.of(), Map.of(
-                coordinate("gudid-kb", "20261001.2-SNAPSHOT"), described("gudid-kb", "20261001.2-SNAPSHOT", "GUDID"),
+                coordinate("gudid-kb", "20261001.2-SNAPSHOT"), described("gudid-kb", "20261001.2-SNAPSHOT", "GUDID",
+                        GUDID_RELEASE),
                 coordinate("solor-kb", "1-SNAPSHOT"), described("solor-kb", "1-SNAPSHOT", "SOLOR",
                         input("network.ike.data:snomedct-kb:zip:unreasoned-pb:20260601.2-SNAPSHOT")))));
         new Scene(view, 1080, 640);
