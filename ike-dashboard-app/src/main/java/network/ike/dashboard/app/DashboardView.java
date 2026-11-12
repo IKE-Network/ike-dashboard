@@ -139,6 +139,8 @@ public final class DashboardView extends BorderPane {
     private final Button fromNexus = new Button("Get from Nexus…");
     private final NexusBrowser browser = new NexusBrowser();
     private Stage browserWindow;
+    /** The git repositories inside the chosen folder, and the remote its change sets are given. */
+    private final RepositoriesSection repositories = new RepositoriesSection(this::showDetail);
     /** The Projects tab: the projects that build knowledge bases, apart from the knowledge bases themselves. */
     private final ProjectsPane projects = new ProjectsPane();
     private final ToggleButton projectsTab = new ToggleButton("Projects");
@@ -876,6 +878,52 @@ public final class DashboardView extends BorderPane {
     }
 
     /**
+     * The repositories shown in a knowledge-base folder's detail, where its change sets are given a remote.
+     *
+     * @return the section
+     */
+    RepositoriesSection repositories() {
+        return repositories;
+    }
+
+    /**
+     * What checking a remote for a knowledge base's change sets, and adding it, do.
+     *
+     * @param action given the repository's folder, the address, and whether to add it
+     */
+    public void setOnRepositoryRemote(RepositoriesSection.RemoteAction action) {
+        repositories.setOnRemote(action);
+    }
+
+    /**
+     * Says that git is being asked about a repository inside a knowledge base.
+     *
+     * @param folder the repository's folder
+     */
+    public void repositoryWorking(Path folder) {
+        repositories.working(folder);
+    }
+
+    /**
+     * Shows what a check of a remote for a repository inside a knowledge base found.
+     *
+     * @param check what adding it will do, or why it cannot be added
+     */
+    public void repositoryChecked(RepositoryRemote.Check check) {
+        repositories.checked(check);
+    }
+
+    /**
+     * Shows how adding a remote to a repository inside a knowledge base ended.
+     *
+     * @param folder  the repository's folder
+     * @param failure why it failed, or empty when the remote was added
+     */
+    public void repositoryRemoteAdded(Path folder, Optional<String> failure) {
+        repositories.added(folder, failure);
+    }
+
+    /**
      * The Projects tab's content.
      *
      * @return the pane
@@ -968,8 +1016,12 @@ public final class DashboardView extends BorderPane {
      * @param statuses its repositories' states; none when it holds no repository
      */
     public void setSync(Path store, List<RepositorySync.Status> statuses) {
+        boolean changed = !List.copyOf(statuses).equals(sync.get(store));
         sync.put(store, List.copyOf(statuses));
         refreshNotices();
+        if (changed && !showingNotices && !showingKomets && !showingProjects) {
+            showDetail();                                // the chosen folder lists its repositories
+        }
     }
 
     /**
@@ -2034,6 +2086,13 @@ public final class DashboardView extends BorderPane {
             detail.getChildren().add(foldersTable(family, folders, copy));
         }
         detail.getChildren().add(folderPanel(copy));
+        List<Node> inside = repositories.nodes(sync(copy.path()));
+        if (!inside.isEmpty()) {
+            SelectableText heading = SelectableText.of("Repositories");
+            heading.setStyle("-fx-font-weight: bold; -fx-padding: 8 0 0 0;");
+            detail.getChildren().add(heading);
+            detail.getChildren().addAll(inside);
+        }
 
         if (!changeSets.isEmpty()) {
             detail.getChildren().add(section(KnowledgeBaseTree.PROTOBUFS, changeSets, false));

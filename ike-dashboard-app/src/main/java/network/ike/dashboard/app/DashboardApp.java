@@ -183,6 +183,7 @@ public final class DashboardApp extends Application {
         view.setOnOpenLink(uri -> getHostServices().showDocument(uri.toString()));
         view.setKometPins(KometPins.current());
         view.setOnBrowse(this::loadCatalog);
+        view.setOnRepositoryRemote(this::repositoryRemote);
         NewKnowledgeBaseForm form = view.newKnowledgeBase();
         form.setProjectsFolder(settings.projects());
         form.setPrerequisites(KnowledgeBaseCreation.prerequisites().missing());
@@ -386,6 +387,8 @@ public final class DashboardApp extends Application {
                 for (RepositorySync.Repository repository : RepositorySync.find(store)) {
                     local.add(RepositorySync.local(git.get(), repository));
                 }
+                // A change-set folder that is no repository yet is shown too, so it can be given a remote.
+                RepositorySync.changeSetsNotYet(store).ifPresent(local::add);
                 List<RepositorySync.Status> shown = List.copyOf(local);
                 Platform.runLater(() -> view.setSync(store, shown));
                 List<RepositorySync.Status> checked = new ArrayList<>();
@@ -1140,6 +1143,35 @@ public final class DashboardApp extends Application {
                             + Names.of(project.artifactId()));
                     refresh();                               // when it was last built, and what is uncommitted
                 }, reason -> projects.failed(folder, reason));
+    }
+
+    /**
+     * Checks what giving a repository inside a knowledge base its remote would do, or does it, with git
+     * alone. The sync state is read again afterwards, so the folder's detail shows the remote.
+     */
+    private void repositoryRemote(Path folder, String address, boolean add) {
+        if (git.isEmpty()) {
+            view.repositoryRemoteAdded(folder, Optional.of("git is not installed, so the remote cannot be added."));
+            return;
+        }
+        view.repositoryWorking(folder);
+        files.submit(() -> {
+            if (!add) {
+                RepositoryRemote.Check check = RepositoryRemote.check(git.get(), folder, address);
+                Platform.runLater(() -> view.repositoryChecked(check));
+                return;
+            }
+            try {
+                RepositoryRemote.add(git.get(), folder, address);
+                Platform.runLater(() -> {
+                    view.repositoryRemoteAdded(folder, Optional.empty());
+                    view.setMessage("Added the remote of " + Names.of(folder.getParent().getFileName()) + "'s change sets");
+                });
+            } catch (IOException e) {
+                Platform.runLater(() -> view.repositoryRemoteAdded(folder, Optional.of(e.getMessage())));
+            }
+            Platform.runLater(this::refresh);               // the folder's repositories are read again
+        });
     }
 
     /** Makes an empty working set in the projects folder; projects are added to it afterwards. */

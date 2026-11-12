@@ -44,6 +44,10 @@ import java.util.Locale;
  * komet-install [folder] [repository-url] install it beside the others (default: the install location)
  * download &lt;g:a:v&gt; &lt;classifier&gt;          the newest deploy of a store, into ~/Solor/&lt;artifactId&gt;
  * projects                              the projects that build knowledge bases, in ~/knowledge-bases
+ * changes-remote-check &lt;folder&gt; &lt;git-url&gt;  what changes-remote would do for a knowledge base's change sets
+ * changes-remote &lt;folder&gt; &lt;git-url&gt;      give the change sets of a folder in ~/Solor their remote, with git:
+ *                                       make the repository when there is none, set origin, and push only
+ *                                       what adds to the remote
  * ws-new &lt;name&gt; [groupId]                an empty working set in ~/knowledge-bases, to build projects together
  * ws-add &lt;working-set&gt; &lt;project&gt;        move a project into a working set, which then lists it as a member
  * ws-remove &lt;working-set&gt; &lt;member&gt;      stop listing a member, and move it back out into ~/knowledge-bases
@@ -103,6 +107,12 @@ public final class DashboardCommand {
                 download(out, settings, Coordinate.parse(args[1]), args[2]);
             }
             case "projects" -> projects(out, settings);
+            case "changes-remote-check", "changes-remote" -> {
+                if (args.length != 3) {
+                    throw new IllegalArgumentException(command + " <folder> <git-url>");
+                }
+                changesRemote(out, settings, command.equals("changes-remote"), args[1], args[2]);
+            }
             case "ws-new", "ws-add", "ws-remove" -> workingSet(out, settings, command, List.of(args).subList(1, args.length));
             case "kb-remote-draft", "kb-remote" -> {
                 if (args.length != 3) {
@@ -125,7 +135,7 @@ public final class DashboardCommand {
             case "self-update" -> selfUpdate(out, settings, args.length > 1 ? Optional.of(Path.of(args[1])) : Optional.empty());
             default -> throw new IllegalArgumentException("Unknown command " + command
                     + "; use list, check, notices, komets, heap, download, projects, kb-draft, kb-new, kb-remote-draft, kb-remote,"
-                    + " ws-new, ws-add, ws-remove,"
+                    + " ws-new, ws-add, ws-remove, changes-remote-check, changes-remote,"
                     + " dashboard-latest or self-update");
         }
     }
@@ -352,6 +362,26 @@ public final class DashboardCommand {
         out.printf("%s: %s, %s, %s%n", store, knowledgeBase.kind().label(), size(knowledgeBase.sizeBytes()),
                 knowledgeBase.coordinate().map(Coordinate::toString).orElse("unidentified"));
         knowledgeBase.attributes().forEach((name, value) -> out.printf("  %s: %s%n", name, value));
+    }
+
+    /** Checks what giving a knowledge base's change sets their remote would do, or does it, as the window does. */
+    private static void changesRemote(PrintStream out, DashboardSettings settings, boolean add, String folder, String address)
+            throws Exception {
+        Path named = settings.solor().resolve(folder);
+        Path store = java.nio.file.Files.isDirectory(named) ? named : Path.of(folder).toAbsolutePath().normalize();
+        Path changeSets = store.resolve(RepositorySync.CHANGE_SETS);
+        if (!java.nio.file.Files.isDirectory(changeSets)) {
+            throw new IllegalArgumentException(store + " has no " + RepositorySync.CHANGE_SETS + " folder");
+        }
+        RepositorySync.Git git = RepositorySync.Git.find().orElseThrow(() -> new IllegalStateException("git is not installed"));
+        RepositoryRemote.Check check = add ? RepositoryRemote.add(git, changeSets, address) : RepositoryRemote.check(git, changeSets, address);
+        if (check.refusal().isPresent()) {
+            throw new IllegalStateException(check.refusal().get());
+        }
+        out.println((add ? "Done for " : "For ") + changeSets + ":");
+        for (int index = 0; index < check.steps().size(); index++) {
+            out.println("  " + (index + 1) + ". " + check.steps().get(index));
+        }
     }
 
     /** Makes a working set, or adds or removes a member, as the Projects tab does. */

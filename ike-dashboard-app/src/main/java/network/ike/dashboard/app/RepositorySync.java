@@ -58,7 +58,39 @@ public final class RepositorySync {
     private static final Duration REMOTE_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration FETCH_TIMEOUT = Duration.ofMinutes(2);
 
+    /** What {@link Status#problem()} says of a folder that could be a repository and is not one yet. */
+    static final String NOT_YET = "not a git repository yet";
+
+    /** The folder Komet keeps a store's change sets in, which its sync makes a repository. */
+    static final String CHANGE_SETS = "changeSets";
+
     private RepositorySync() {
+    }
+
+    /**
+     * The change-set folder of a store when it is there and is no repository yet, so the dashboard can
+     * say so and offer to make it one with a remote.
+     *
+     * @param store the store's folder
+     * @return the folder's state: no branch, nothing uncommitted, no remote, and {@link #NOT_YET} as its problem
+     */
+    public static Optional<Status> changeSetsNotYet(Path store) {
+        Path folder = store.resolve(CHANGE_SETS);
+        if (!Files.isDirectory(folder) || Files.exists(folder.resolve(".git"))) {
+            return Optional.empty();
+        }
+        return Optional.of(changeSetsNotYetIn(store));
+    }
+
+    /**
+     * The state of a store's change-set folder that is no repository yet, without looking at the folder.
+     *
+     * @param store the store's folder
+     * @return the state
+     */
+    static Status changeSetsNotYetIn(Path store) {
+        Path folder = store.resolve(CHANGE_SETS);
+        return new Status(new Repository(folder, label(store, folder)), "", 0, 0, Remote.NONE, 0, Optional.empty(), NOT_YET);
     }
 
     /**
@@ -109,6 +141,15 @@ public final class RepositorySync {
          * @param problem   why it could not be asked, or empty
          * @return the state
          */
+        /**
+         * Whether the folder is a git repository, not one that could become one.
+         *
+         * @return {@code false} for a change-set folder with no repository yet
+         */
+        public boolean isRepository() {
+            return !NOT_YET.equals(problem);
+        }
+
         Status withRemote(Remote remote, int behind, Optional<Notice.Freshness> freshness, String problem) {
             return new Status(repository, branch, uncommitted, ahead, remote, behind, freshness, problem);
         }

@@ -54,6 +54,7 @@ From then on it updates itself (see [Self-update](#self-update)). The links neve
   `projects`, `kb-draft <name> [property=value …]`, `kb-new <name> [property=value …]`,
   `kb-remote-draft <project> <git-url>`, `kb-remote <project> <git-url>`,
   `ws-new <name> [groupId]`, `ws-add <working-set> <project>`, `ws-remove <working-set> <member>`,
+  `changes-remote-check <folder> <git-url>`, `changes-remote <folder> <git-url>`,
   `dashboard-latest`, `self-update [application]`). The window has three views, one switch across its top:
   *Knowledge Bases*, the list and the chosen one's detail, and *Notices*, the first screen, across the
   window: one card per finding of its checks (newer builds, knowledge bases not yet downloaded, a newer
@@ -111,6 +112,28 @@ From then on it updates itself (see [Self-update](#self-update)). The links neve
 
 The Nexus check reads the `ike-restricted` login from `~/.m2/settings.xml`, filling `${env.…}`
 placeholders from the environment, so run it from a shell that has them.
+
+## A remote for a knowledge base's change sets
+
+On the *Knowledge Bases* tab, a folder's detail lists the git repositories inside it under
+*Repositories*: each one's branch, whether everything is committed, and whether it has a remote. The
+change sets, which are shared with the others who author the knowledge base, are given a remote
+there. *Add remote…* takes the address, *Check* shows what adding it will do, and the remote is added
+only as it was checked. It is done with git alone:
+
+1. A change-set folder that is no repository yet is made one, on the branch `main`.
+2. Its remote, `origin`, is set.
+3. It is pushed only when that adds to what the remote has. For an empty remote and a new repository a
+   `README.md` is committed and pushed, as Komet does when it connects. When the remote already has
+   other change sets, nothing is pushed and nothing is merged: Komet's sync pulls them and loads them.
+
+Komet keeps its own record of the address and the login it syncs with, so its sync is still connected
+in Komet, with the same address. Preferences are not given a remote yet.
+
+```bash
+DashboardCommand changes-remote-check solor-kb https://github.com/my-org/solor-changes.git
+DashboardCommand changes-remote       solor-kb https://github.com/my-org/solor-changes.git
+```
 
 ## New knowledge base
 
