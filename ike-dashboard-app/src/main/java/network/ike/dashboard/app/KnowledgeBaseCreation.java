@@ -70,6 +70,15 @@ public final class KnowledgeBaseCreation {
      */
     static final List<String> PLAIN = List.of("-B", "-ntp", "-Dstyle.color=never");
 
+    /** The plugin version that first contains the goals that give a project its remote. */
+    public static final String REMOTE_TOOLING_VERSION = "281";
+
+    /** The goal that shows what adding a remote would do, and changes nothing. */
+    public static final String REMOTE_DRAFT = "kb-remote-draft";
+
+    /** The goal that sets a project's remote, commits its POM and pushes. */
+    public static final String REMOTE_PUBLISH = "kb-remote-publish";
+
     /** The JDK a knowledge base builds on, at least. */
     public static final int JDK = 27;
 
@@ -77,12 +86,20 @@ public final class KnowledgeBaseCreation {
     static final List<String> WRAPPER = List.of("mvnw", "mvnw.cmd", ".mvn/wrapper/maven-wrapper.properties");
 
     private static final Pattern JAVA_VERSION = Pattern.compile("JAVA_VERSION=\"(\\d+)[^\"]*\"");
+    /** The first line of the report the remote goals write. */
+    public static final String REMOTE_HEADING = "Add remote:";
+
+    /** The first line of the report the creation goals write. */
+    public static final String CREATE_HEADING = "Knowledge base:";
+
     private static final String INFO = "[INFO] ";
+    private static final String WARNING = "[WARNING] ";
     private static final String ERROR = "[ERROR] ";
     private static final Pattern FAILED_GOAL = Pattern.compile("^Failed to execute goal \\S+ \\([^)]*\\) on project \\S+: ");
 
     private final Prerequisites prerequisites;
     private final String toolingVersion;
+    private final String remoteToolingVersion;
     private final Function<Path, List<String>> maven;
 
     /**
@@ -163,6 +180,16 @@ public final class KnowledgeBaseCreation {
          * @return the report's lines, as the goals indent them; empty when there is none
          */
         public List<String> report() {
+            return report(CREATE_HEADING);
+        }
+
+        /**
+         * The report that starts at a heading and runs through the lines indented beneath it.
+         *
+         * @param heading how its first line starts
+         * @return the report's lines, as the goals indent them; empty when there is none
+         */
+        public List<String> report(String heading) {
             List<String> report = new ArrayList<>();
             boolean within = false;
             for (String line : lines) {
@@ -171,7 +198,7 @@ public final class KnowledgeBaseCreation {
                     continue;
                 }
                 String text = line.substring(INFO.length());
-                if (text.startsWith("Knowledge base:")) {
+                if (text.startsWith(heading)) {
                     within = true;
                 } else if (within && !text.startsWith("  ")) {
                     within = false;
@@ -203,6 +230,17 @@ public final class KnowledgeBaseCreation {
                 }
             }
             return pinned;
+        }
+
+        /**
+         * Why a goal that ran cleanly says its publish half will refuse, such as a remote that cannot be read.
+         *
+         * @return the reason, or empty when it gave none
+         */
+        public Optional<String> refusal() {
+            String marker = " Publish will refuse.";
+            return lines.stream().filter(line -> line.startsWith(WARNING) && line.endsWith(marker))
+                    .map(line -> line.substring(WARNING.length(), line.length() - marker.length()).strip()).findFirst();
         }
 
         /**
@@ -251,7 +289,8 @@ public final class KnowledgeBaseCreation {
      * @param prerequisites the JDK and git to run with
      */
     public KnowledgeBaseCreation(Prerequisites prerequisites) {
-        this(prerequisites, toolingVersion(System.getenv()), KnowledgeBaseCreation::wrapper);
+        this(prerequisites, toolingVersion(System.getenv(), TOOLING_VERSION),
+                toolingVersion(System.getenv(), REMOTE_TOOLING_VERSION), KnowledgeBaseCreation::wrapper);
     }
 
     /**
@@ -262,20 +301,27 @@ public final class KnowledgeBaseCreation {
      * @param maven          the command that runs Maven in a folder, to which the arguments are added
      */
     KnowledgeBaseCreation(Prerequisites prerequisites, String toolingVersion, Function<Path, List<String>> maven) {
+        this(prerequisites, toolingVersion, toolingVersion, maven);
+    }
+
+    private KnowledgeBaseCreation(Prerequisites prerequisites, String toolingVersion, String remoteToolingVersion,
+                                  Function<Path, List<String>> maven) {
         this.prerequisites = prerequisites;
         this.toolingVersion = toolingVersion;
+        this.remoteToolingVersion = remoteToolingVersion;
         this.maven = maven;
     }
 
     /**
-     * The plugin version to run.
+     * The plugin version to run for goals that a version first contains.
      *
      * @param environment the dashboard's environment
-     * @return what {@value #TOOLING_OVERRIDE} names, else {@value #TOOLING_VERSION}
+     * @param since       the version that first contains the goals
+     * @return what {@value #TOOLING_OVERRIDE} names, else that version
      */
-    static String toolingVersion(Map<String, String> environment) {
+    static String toolingVersion(Map<String, String> environment, String since) {
         return Optional.ofNullable(environment.get(TOOLING_OVERRIDE)).map(String::strip).filter(version -> !version.isEmpty())
-                .orElse(TOOLING_VERSION);
+                .orElse(since);
     }
 
     /**
@@ -461,6 +507,43 @@ public final class KnowledgeBaseCreation {
         List<String> arguments = new ArrayList<>(PLAIN);
         arguments.add(phase);
         return run(folder, arguments, line);
+    }
+
+    /**
+     * Shows what giving a project its remote would do: the remote is asked for its branches, and nothing
+     * is changed. The remote is the project's own, not that of the knowledge base it builds.
+     *
+     * @param folder the project
+     * @param remote the remote's git URL
+     * @param line   given each line Maven writes, as it is written
+     * @return how the draft ended; its {@link Outcome#report(String) report} under {@value #REMOTE_HEADING}
+     *         is the plan, and {@link Outcome#refusal()} says why the push would fail
+     * @throws IOException          if Maven cannot be run
+     * @throws InterruptedException if interrupted, after Maven has been stopped
+     */
+    public Outcome remoteDraft(Path folder, String remote, Consumer<String> line) throws IOException, InterruptedException {
+        return run(folder, remoteArguments(REMOTE_DRAFT, remote), line);
+    }
+
+    /**
+     * Gives a project its remote: sets {@code origin}, has the POM name it, commits that, and pushes.
+     *
+     * @param folder the project
+     * @param remote the remote's git URL
+     * @param line   given each line Maven writes, as it is written
+     * @return how it ended
+     * @throws IOException          if Maven cannot be run
+     * @throws InterruptedException if interrupted, after Maven has been stopped
+     */
+    public Outcome remotePublish(Path folder, String remote, Consumer<String> line) throws IOException, InterruptedException {
+        return run(folder, remoteArguments(REMOTE_PUBLISH, remote), line);
+    }
+
+    private List<String> remoteArguments(String goal, String remote) {
+        List<String> arguments = new ArrayList<>(PLAIN);
+        arguments.add(PLUGIN + ":" + remoteToolingVersion + ":" + goal);
+        arguments.add("-Dremote=" + remote.strip());
+        return arguments;
     }
 
     private Outcome run(Path folder, List<String> arguments, Consumer<String> line) throws IOException, InterruptedException {

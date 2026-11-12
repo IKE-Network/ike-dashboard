@@ -44,6 +44,9 @@ import java.util.Locale;
  * komet-install [folder] [repository-url] install it beside the others (default: the install location)
  * download &lt;g:a:v&gt; &lt;classifier&gt;          the newest deploy of a store, into ~/Solor/&lt;artifactId&gt;
  * projects                              the projects that build knowledge bases, in ~/knowledge-bases
+ * kb-remote-draft &lt;project&gt; &lt;git-url&gt;   what kb-remote would do; the remote is asked, nothing is changed
+ * kb-remote &lt;project&gt; &lt;git-url&gt;         give a project its remote: origin, the POM's scm, a commit, the
+ *                                       push; the project by its name in ~/knowledge-bases, or its folder
  * kb-draft &lt;name&gt; [property=value …]    what kb-new would create, each layer pinned; nothing is written
  * kb-new &lt;name&gt; [property=value …]      create a knowledge-base project in a local git repository:
  *                                       layers=&lt;g:a:zip:classifier:v,…&gt; in load order, folder=&lt;path&gt;
@@ -97,6 +100,12 @@ public final class DashboardCommand {
                 download(out, settings, Coordinate.parse(args[1]), args[2]);
             }
             case "projects" -> projects(out, settings);
+            case "kb-remote-draft", "kb-remote" -> {
+                if (args.length != 3) {
+                    throw new IllegalArgumentException(command + " <project> <git-url>");
+                }
+                remote(out, settings, command.equals("kb-remote"), args[1], args[2]);
+            }
             case "kb-draft", "kb-new" -> {
                 if (args.length < 2) {
                     throw new IllegalArgumentException(command + " <name> [property=value …], such as layers=<g:a:zip:classifier:v,…>");
@@ -111,7 +120,8 @@ public final class DashboardCommand {
                             () -> out.println("No IKE Dashboard build found"));
             case "self-update" -> selfUpdate(out, settings, args.length > 1 ? Optional.of(Path.of(args[1])) : Optional.empty());
             default -> throw new IllegalArgumentException("Unknown command " + command
-                    + "; use list, check, notices, komets, heap, download, projects, kb-draft, kb-new, dashboard-latest or self-update");
+                    + "; use list, check, notices, komets, heap, download, projects, kb-draft, kb-new, kb-remote-draft, kb-remote,"
+                    + " dashboard-latest or self-update");
         }
     }
 
@@ -337,6 +347,29 @@ public final class DashboardCommand {
         out.printf("%s: %s, %s, %s%n", store, knowledgeBase.kind().label(), size(knowledgeBase.sizeBytes()),
                 knowledgeBase.coordinate().map(Coordinate::toString).orElse("unidentified"));
         knowledgeBase.attributes().forEach((name, value) -> out.printf("  %s: %s%n", name, value));
+    }
+
+    /** Checks what giving a project its remote would do, or does it, as the Projects tab does. */
+    private static void remote(PrintStream out, DashboardSettings settings, boolean publish, String project, String url)
+            throws Exception {
+        Path named = settings.projects().resolve(project);
+        Path folder = KnowledgeBaseProjectFolder.isProject(named) ? named : Path.of(project).toAbsolutePath().normalize();
+        if (!KnowledgeBaseProjectFolder.isProject(folder)) {
+            throw new IllegalArgumentException(project + " is no project in " + settings.projects() + ", and no project's folder");
+        }
+        KnowledgeBaseCreation.Prerequisites prerequisites = KnowledgeBaseCreation.prerequisites();
+        if (!prerequisites.missing().isEmpty()) {
+            throw new IllegalStateException(String.join(" ", prerequisites.missing()));
+        }
+        KnowledgeBaseCreation creation = new KnowledgeBaseCreation(prerequisites);
+        KnowledgeBaseCreation.Outcome outcome = publish ? creation.remotePublish(folder, url, out::println)
+                : creation.remoteDraft(folder, url, out::println);
+        if (!outcome.succeeded()) {
+            throw new IllegalStateException(outcome.failure().orElse("Maven ended with " + outcome.exit()));
+        }
+        out.println(publish ? "The remote of " + folder.getFileName() + " is " + url
+                : outcome.refusal().map(reason -> "It cannot be added as it stands: " + reason)
+                .orElse("Draft only: kb-remote with the same words does it"));
     }
 
     /** Lists the projects that build knowledge bases, each with what it is built from and its repository's state. */

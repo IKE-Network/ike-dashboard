@@ -118,9 +118,12 @@ class KnowledgeBaseCreationTest {
 
     @Test
     void thePluginVersionIsTheDashboardsOwnUnlessTheEnvironmentNamesAnother() {
-        assertThat(KnowledgeBaseCreation.toolingVersion(Map.of())).isEqualTo(KnowledgeBaseCreation.TOOLING_VERSION);
-        assertThat(KnowledgeBaseCreation.toolingVersion(Map.of(KnowledgeBaseCreation.TOOLING_OVERRIDE, " 281-SNAPSHOT ")))
-                .isEqualTo("281-SNAPSHOT");
+        assertThat(KnowledgeBaseCreation.toolingVersion(Map.of(), KnowledgeBaseCreation.TOOLING_VERSION)).isEqualTo("280");
+        assertThat(KnowledgeBaseCreation.toolingVersion(Map.of(), KnowledgeBaseCreation.REMOTE_TOOLING_VERSION))
+                .as("the remote goals came a version later").isEqualTo("281");
+        assertThat(KnowledgeBaseCreation.toolingVersion(Map.of(KnowledgeBaseCreation.TOOLING_OVERRIDE, " 282-SNAPSHOT "),
+                KnowledgeBaseCreation.REMOTE_TOOLING_VERSION)).as("a version named in the environment runs every goal")
+                .isEqualTo("282-SNAPSHOT");
     }
 
     @Test
@@ -228,6 +231,49 @@ class KnowledgeBaseCreationTest {
             assertThat(entries.map(path -> path.getFileName().toString())).as("a folder that was there keeps only what was in it")
                     .containsExactly("notes.txt");
         }
+    }
+
+    @Test
+    void aRemotesReportIsReadAndWhyItCannotBeAddedIsSaid() {
+        KnowledgeBaseCreation.Outcome outcome = new KnowledgeBaseCreation.Outcome(0, List.of(
+                "[INFO] --- ike:281:kb-remote-draft (default-cli) @ my-kb ---",
+                "[INFO] Add remote: my-kb",
+                "[INFO]   Remote:       https://github.com/my-org/my-kb.git  (could not be read)",
+                "[INFO]   origin:       added",
+                "[INFO]   Push:         branch main to origin, which it then tracks",
+                "[WARNING]   The remote could not be read: fatal: repository not found. Create the repository on the git host"
+                        + " first, empty, and check that you are signed in. Publish will refuse.",
+                "[INFO] Draft only — run ike:kb-remote-publish with the same inputs to do it.",
+                "[INFO] BUILD SUCCESS"));
+
+        assertThat(outcome.report(KnowledgeBaseCreation.REMOTE_HEADING)).as("from its heading through the lines beneath it")
+                .containsExactly("Add remote: my-kb",
+                        "  Remote:       https://github.com/my-org/my-kb.git  (could not be read)",
+                        "  origin:       added", "  Push:         branch main to origin, which it then tracks");
+        assertThat(outcome.report()).as("it is no creation report").isEmpty();
+        assertThat(outcome.refusal()).contains("The remote could not be read: fatal: repository not found. Create the"
+                + " repository on the git host first, empty, and check that you are signed in.");
+        assertThat(new KnowledgeBaseCreation.Outcome(0, DRAFT).refusal()).isEmpty();
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void aRemoteIsCheckedAndAddedByItsGoalsRunInTheProjectsFolder(@TempDir Path root) throws Exception {
+        Path jdk = jdk(root.resolve("jdk-27"), "27.0.1");
+        Path record = root.resolve("ran.txt");
+        Path project = Files.createDirectories(root.resolve("projects/my-kb"));
+        KnowledgeBaseCreation creation = creation(jdk, standIn(root, record, true));
+
+        creation.remoteDraft(project, " https://github.com/my-org/my-kb.git ", line -> { });
+        List<String> draft = Files.readAllLines(record);
+        creation.remotePublish(project, "https://github.com/my-org/my-kb.git", line -> { });
+        List<String> publish = Files.readAllLines(record);
+
+        assertThat(draft).as("the draft goal, by coordinates, in the project's own folder")
+                .contains("cwd=" + project.toRealPath(), "-B", "-ntp", "-Dstyle.color=never",
+                        "network.ike.tooling:ike-maven-plugin:280:kb-remote-draft", "-Dremote=https://github.com/my-org/my-kb.git");
+        assertThat(publish).contains("network.ike.tooling:ike-maven-plugin:280:kb-remote-publish",
+                "-Dremote=https://github.com/my-org/my-kb.git");
     }
 
     private static KnowledgeBaseCreation creation(Path jdk, Path maven) {

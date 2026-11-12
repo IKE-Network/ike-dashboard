@@ -188,6 +188,7 @@ public final class DashboardApp extends Application {
         form.setOnCancel(() -> Optional.ofNullable(mavenRun).ifPresent(run -> run.cancel(true)));
         ProjectsPane projects = view.projects();
         projects.setOnBuild(this::buildProject);
+        projects.setOnRemote(this::remoteProject);
         projects.setOnReveal(path -> run(() -> Finder.reveal(path), "Could not show " + Names.of(path)));
         projects.setOnCancel(() -> Optional.ofNullable(mavenRun).ifPresent(run -> run.cancel(true)));
         view.setOnInstallKomet(this::installKomet);
@@ -1126,6 +1127,30 @@ public final class DashboardApp extends Application {
                     view.setMessage((outcome.succeeded() ? (deploy ? "Deployed " : "Built ") : "Could not " + (deploy ? "deploy " : "build "))
                             + Names.of(project.artifactId()));
                     refresh();                               // when it was last built, and what is uncommitted
+                }, reason -> projects.failed(folder, reason));
+    }
+
+    /**
+     * Checks what giving a project its remote would do, or does it: origin, the POM's scm, a commit, and
+     * the push. The remote is the project's own, not that of the knowledge base it builds.
+     */
+    private void remoteProject(KnowledgeBaseProjectFolder project, String url, boolean publish) {
+        ProjectsPane projects = view.projects();
+        Path folder = project.folder();
+        runMaven("kb-remote-" + (publish ? "" : "draft-") + project.artifactId(),
+                (creation, line) -> publish ? creation.remotePublish(folder, url, line) : creation.remoteDraft(folder, url, line),
+                () -> projects.working(folder, publish ? "Adding the remote and pushing " + project.artifactId() + " …"
+                        : "Asking the remote what it has …"),
+                projects::progress, outcome -> {
+                    if (publish) {
+                        projects.remoteAdded(folder, outcome);
+                        if (outcome.succeeded()) {
+                            view.setMessage("Added the remote of " + Names.of(project.artifactId()));
+                        }
+                        refresh();                           // its repository now has a remote
+                    } else {
+                        projects.remoteDrafted(folder, url, outcome);
+                    }
                 }, reason -> projects.failed(folder, reason));
     }
 

@@ -52,6 +52,7 @@ From then on it updates itself (see [Self-update](#self-update)). The links neve
   installed, and opens a knowledge base in a chosen Komet as an independent process. Also a headless
   `DashboardCommand` (`list`, `check`, `notices`, `komets`, `download <g:a:v> <classifier>`,
   `projects`, `kb-draft <name> [property=value …]`, `kb-new <name> [property=value …]`,
+  `kb-remote-draft <project> <git-url>`, `kb-remote <project> <git-url>`,
   `dashboard-latest`, `self-update [application]`). The window has three views, one switch across its top:
   *Knowledge Bases*, the list and the chosen one's detail, and *Notices*, the first screen, across the
   window: one card per finding of its checks (newer builds, knowledge bases not yet downloaded, a newer
@@ -117,6 +118,13 @@ The *Projects* tab lists the projects that build knowledge bases. They are kept 
 shows the layers it is built from, where it deploys, the state of its git repository, and when it was
 last built. *Build* runs `./mvnw verify` in it. *Deploy…* asks first, then runs `./mvnw deploy`.
 
+A project with no remote offers *Add remote…*. Create the repository on your git host first, and
+leave it empty. *Check* asks the remote what it has and shows what adding it will do. *Add remote and
+push* then sets `origin`, has the POM's `<scm>` name the remote in place of the project's own folder,
+commits that change alone, and pushes. This is the remote of the project that builds the knowledge
+base, not of the knowledge base. A remote that cannot be read, or that already has other commits on
+the branch, is refused before anything is changed.
+
 *New knowledge base…*, on that tab, creates a Maven 4 project for a knowledge base built from
 protobuf layers already on Nexus (IKE-Network/ike-issues#1370). The form asks for a name, the layers
 in load order, and a folder. *Draft* shows what will be created, with each layer at its exact version
@@ -132,14 +140,17 @@ from a shell:
 DashboardCommand kb-draft my-kb layers=network.ike.data:ncbi-gene-kb:zip:unreasoned-pb:20261020.1-SNAPSHOT
 DashboardCommand kb-new   my-kb layers=network.ike.data:ncbi-gene-kb:zip:unreasoned-pb:20261020.1-SNAPSHOT
 DashboardCommand projects
+DashboardCommand kb-remote-draft my-kb https://github.com/my-org/my-kb.git
+DashboardCommand kb-remote       my-kb https://github.com/my-org/my-kb.git
 ```
 
 Each `property=value` is a property of the goals (`kind`, `collection`, `rocks`, and the others);
 `folder=<path>` names the project's folder, `~/knowledge-bases/<name>` unless given. Projects are
 kept apart from the knowledge bases in `~/Solor`. A name must be new: one that a project, a knowledge
 base in `~/Solor` or a knowledge base on Nexus already has is refused, and a free one is offered. The dashboard
-runs plugin version 280. Set `IKE_DASHBOARD_TOOLING_VERSION` to run another, such as a snapshot
-under test.
+runs plugin version 280 to create a project and 281 to add a remote, the versions that first contain
+those goals. Set `IKE_DASHBOARD_TOOLING_VERSION` to run another for both, such as a snapshot under
+test.
 
 ## The application
 

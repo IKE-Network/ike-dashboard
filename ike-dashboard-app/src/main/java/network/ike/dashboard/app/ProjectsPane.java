@@ -26,6 +26,7 @@ import javafx.scene.control.ListView;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextArea;
+import javafx.scene.control.TextField;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -49,8 +50,10 @@ import java.util.function.Consumer;
  * knowledge bases, kept apart from the knowledge bases Komet opens. It is laid out as the Knowledge Bases
  * tab is: the projects in the projects folder on the left, each by its knowledge base's name, and the
  * chosen one's detail on the right, with what it is built from, where it deploys, the state of its git
- * repository, and Build and Deploy. Listing every project also shows which names are in use. It does no
- * IO of its own; {@link DashboardApp} reads the projects and runs their builds.
+ * repository, and Build and Deploy. A project with no remote yet is given one here: the remote of the
+ * project that builds the knowledge base, not of the knowledge base. Listing every project also shows
+ * which names are in use. It does no IO of its own; {@link DashboardApp} reads the projects and runs
+ * their builds.
  */
 public final class ProjectsPane extends SplitPane {
 
@@ -78,6 +81,38 @@ public final class ProjectsPane extends SplitPane {
     /** The project the output shown belongs to. */
     private Optional<Path> outputOf = Optional.empty();
 
+    /** The project a remote is being added to, and the URL typed for it. */
+    private Optional<Path> addingRemote = Optional.empty();
+    private final TextField remoteUrl = new TextField();
+    /** What the last check of a remote showed, offered to be done while the URL stays as it was checked. */
+    private Optional<RemoteDraft> remoteDraft = Optional.empty();
+    private RemoteAction onRemote = (project, url, publish) -> { };
+
+    /**
+     * What a check of a remote showed.
+     *
+     * @param project the project's folder
+     * @param url     the remote's URL, as checked
+     * @param report  what adding it would do
+     * @param refusal why it cannot be added as it stands, or empty
+     */
+    private record RemoteDraft(Path project, String url, List<String> report, Optional<String> refusal) {
+    }
+
+    /** What checking a remote, or adding it, does. */
+    @FunctionalInterface
+    public interface RemoteAction {
+
+        /**
+         * Checks or adds a remote.
+         *
+         * @param project the project
+         * @param url     the remote's git URL
+         * @param publish {@code false} to check what adding it would do, {@code true} to add it and push
+         */
+        void run(KnowledgeBaseProjectFolder project, String url, boolean publish);
+    }
+
     private Runnable onNew = () -> { };
     private BiConsumer<KnowledgeBaseProjectFolder, String> onBuild = (project, phase) -> { };
     private Consumer<Path> onReveal = path -> { };
@@ -101,6 +136,8 @@ public final class ProjectsPane extends SplitPane {
             confirming = Optional.empty();
             showDetail();
         });
+        remoteUrl.setPromptText("https://github.com/my-org/my-kb.git");
+        HBox.setHgrow(remoteUrl, Priority.ALWAYS);
         newKnowledgeBase.setMinWidth(Region.USE_PREF_SIZE);
         newKnowledgeBase.setOnAction(event -> onNew.run());
         HBox masterBottom = new HBox(newKnowledgeBase);
@@ -206,6 +243,15 @@ public final class ProjectsPane extends SplitPane {
     }
 
     /**
+     * What checking a remote and adding it do.
+     *
+     * @param action the action
+     */
+    public void setOnRemote(RemoteAction action) {
+        onRemote = action;
+    }
+
+    /**
      * What Cancel does while a build runs.
      *
      * @param action the action
@@ -256,6 +302,49 @@ public final class ProjectsPane extends SplitPane {
                 ? new Ended(deploy ? "Deployed." : "Built.", false)
                 : new Ended((deploy ? "The deploy failed" : "The build failed")
                         + outcome.failure().map(reason -> ": " + reason.lines().findFirst().orElse("")).orElse(". Maven's output is below."), true));
+        list.refresh();
+        showDetail();
+    }
+
+    /**
+     * Shows what a check of a remote found: what adding it would do, or why it cannot be added.
+     *
+     * @param project the project's folder
+     * @param url     the remote's URL, as checked
+     * @param outcome how the check ended
+     */
+    public void remoteDrafted(Path project, String url, KnowledgeBaseCreation.Outcome outcome) {
+        working = Optional.empty();
+        if (outcome.succeeded()) {
+            remoteDraft = Optional.of(new RemoteDraft(project, url, outcome.report(KnowledgeBaseCreation.REMOTE_HEADING),
+                    outcome.refusal()));
+            ended.remove(project);
+        } else {
+            remoteDraft = Optional.empty();
+            ended.put(project, new Ended("The remote cannot be added" + outcome.failure()
+                    .map(reason -> ": " + reason.lines().findFirst().orElse("")).orElse(". Maven's output is below."), true));
+        }
+        list.refresh();
+        showDetail();
+    }
+
+    /**
+     * Shows how adding a remote ended.
+     *
+     * @param project the project's folder
+     * @param outcome how it ended
+     */
+    public void remoteAdded(Path project, KnowledgeBaseCreation.Outcome outcome) {
+        working = Optional.empty();
+        if (outcome.succeeded()) {
+            ended.put(project, new Ended("The remote is set and the project is pushed.", false));
+            addingRemote = Optional.empty();
+            remoteDraft = Optional.empty();
+            remoteUrl.clear();
+        } else {
+            ended.put(project, new Ended("The remote was not added" + outcome.failure()
+                    .map(reason -> ": " + reason.lines().findFirst().orElse("")).orElse(". Maven's output is below."), true));
+        }
         list.refresh();
         showDetail();
     }
@@ -350,6 +439,21 @@ public final class ProjectsPane extends SplitPane {
         project.collection().ifPresent(collection -> detail.getChildren().add(muted("Collection  " + collection)));
         detail.getChildren().add(heading("Repository"));
         detail.getChildren().add(repository(project));
+        RepositorySync.Status state = git.get(project.folder());
+        if (state != null && state.remote() == RepositorySync.Remote.NONE) {
+            if (addingRemote.filter(project.folder()::equals).isPresent()) {
+                detail.getChildren().add(remoteBox(project, busy));
+            } else {
+                Button add = new Button("Add remote…");
+                add.setDisable(busy);
+                add.setOnAction(event -> {
+                    addingRemote = Optional.of(project.folder());
+                    remoteDraft = Optional.empty();
+                    showDetail();
+                });
+                detail.getChildren().add(add);
+            }
+        }
         detail.getChildren().add(heading("Last build"));
         detail.getChildren().add(project.built().map(when -> SelectableText.of("Built " + WHEN.format(when)))
                 .orElseGet(() -> muted("Not built yet.")));
@@ -378,6 +482,49 @@ public final class ProjectsPane extends SplitPane {
         VBox box = new VBox(8, question, buttons);
         box.setPadding(new Insets(10));
         box.setStyle("-fx-background-color: #fff3e0; -fx-background-radius: 6;");
+        return box;
+    }
+
+    /**
+     * Where a remote is typed, checked, and then added: the check shows what adding it will do, and
+     * adding is offered only for the URL as it was checked.
+     */
+    private Node remoteBox(KnowledgeBaseProjectFolder project, boolean busy) {
+        SelectableText what = muted("Create the repository on your git host first, and leave it empty. This is the remote"
+                + " of the project that builds the knowledge base, not of the knowledge base.");
+        Button check = new Button("Check");
+        check.disableProperty().bind(remoteUrl.textProperty().map(text -> busy || text.isBlank()).orElse(true));
+        check.setOnAction(event -> onRemote.run(project, remoteUrl.getText().strip(), false));
+        Button close = new Button("Close");
+        close.setOnAction(event -> {
+            addingRemote = Optional.empty();
+            remoteDraft = Optional.empty();
+            showDetail();
+        });
+        HBox line = new HBox(8, remoteUrl, check, close);
+        line.setAlignment(Pos.CENTER_LEFT);
+        VBox box = new VBox(8, what, line);
+        remoteDraft.filter(draft -> draft.project().equals(project.folder())).ifPresent(draft -> {
+            SelectableText report = SelectableText.of(String.join("\n", draft.report()));
+            report.setStyle("-fx-font-family: Menlo, Consolas, monospace; -fx-font-size: 11px;");
+            VBox checked = new VBox(8, report);
+            if (draft.refusal().isPresent()) {
+                SelectableText refusal = SelectableText.of(draft.refusal().get());
+                refusal.setStyle(PROBLEM);
+                checked.getChildren().add(refusal);
+            } else {
+                Button add = new Button("Add remote and push");
+                add.setDisable(busy);
+                add.setOnAction(event -> onRemote.run(project, draft.url(), true));
+                checked.getChildren().add(add);
+            }
+            // What was checked is offered only while the URL stays as it was checked.
+            checked.visibleProperty().bind(remoteUrl.textProperty().map(text -> text.strip().equals(draft.url())).orElse(false));
+            checked.managedProperty().bind(checked.visibleProperty());
+            box.getChildren().add(checked);
+        });
+        box.setPadding(new Insets(10));
+        box.setStyle("-fx-background-color: white; -fx-background-radius: 6; -fx-border-color: #d9d9d9; -fx-border-radius: 6;");
         return box;
     }
 

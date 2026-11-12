@@ -21,6 +21,7 @@ import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.control.TextField;
 import javafx.scene.control.ToggleButton;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -173,6 +174,83 @@ class ProjectsPaneTest {
         assertThat(words(shown.get(4))).as("a failure, in Maven's words, with its output kept")
                 .contains("failed", "The build failed: The reasoner ran out of memory", "Maven's output, from the last run");
         assertThat(words(shown.get(5))).contains("Deployed.").doesNotContain("failed");
+    }
+
+    @Test
+    void aProjectWithNoRemoteIsGivenOneAfterACheckOfWhatThatWillDo() throws Exception {
+        List<Object> shown = onFx(() -> {
+            ProjectsPane pane = new ProjectsPane();
+            new Scene(pane, 1080, 640);
+            setProjects(pane);
+            layout(pane);
+            Path gene = PROJECTS.resolve("gene-kb");
+            List<String> asked = new ArrayList<>();
+            pane.setOnRemote((project, url, publish) -> asked.add((publish ? "add " : "check ") + project.artifactId() + " " + url));
+            button(pane, "Add remote…").fire();
+            layout(pane);
+            List<String> asking = Words.of(pane);
+            boolean nothingToCheck = button(pane, "Check").isDisable();
+            TextField url = all(pane, TextField.class).getFirst();
+            url.setText(" https://github.com/my-org/gene-kb.git ");
+            button(pane, "Check").fire();
+            pane.working(gene, "Asking the remote what it has …");
+            pane.remoteDrafted(gene, "https://github.com/my-org/gene-kb.git", new KnowledgeBaseCreation.Outcome(0, List.of(
+                    "[INFO] Add remote: gene-kb",
+                    "[INFO]   Remote:       https://github.com/my-org/gene-kb.git  (could not be read)",
+                    "[WARNING]   The remote could not be read: fatal: repository not found. Publish will refuse.",
+                    "[INFO] Draft only — run ike:kb-remote-publish with the same inputs to do it.")));
+            layout(pane);
+            List<String> refused = Words.of(pane);
+            boolean notOffered = all(pane, Button.class).stream().noneMatch(button -> "Add remote and push".equals(button.getText()));
+            pane.remoteDrafted(gene, "https://github.com/my-org/gene-kb.git", new KnowledgeBaseCreation.Outcome(0, List.of(
+                    "[INFO] Add remote: gene-kb",
+                    "[INFO]   Remote:       https://github.com/my-org/gene-kb.git  (empty)",
+                    "[INFO]   origin:       added",
+                    "[INFO] Draft only — run ike:kb-remote-publish with the same inputs to do it.")));
+            layout(pane);
+            List<String> checked = Words.of(pane);
+            url.setText("https://github.com/my-org/another.git");
+            layout(pane);
+            boolean hiddenAfterEdit = !shown(button(pane, "Add remote and push"));
+            url.setText("https://github.com/my-org/gene-kb.git");
+            layout(pane);
+            button(pane, "Add remote and push").fire();
+            pane.remoteAdded(gene, new KnowledgeBaseCreation.Outcome(0, List.of("[INFO] BUILD SUCCESS")));
+            layout(pane);
+            pane.select(PROJECTS.resolve("notes-kb"));
+            layout(pane);
+            boolean noneForOneWithARemote = all(pane, Button.class).stream().noneMatch(button -> "Add remote…".equals(button.getText()));
+            pane.select(gene);
+            layout(pane);
+            return List.of(asking, nothingToCheck, refused, notOffered, checked, hiddenAfterEdit, asked, Words.of(pane),
+                    noneForOneWithARemote);
+        });
+
+        assertThat(words(shown.getFirst())).as("what the remote is, said before a URL is typed")
+                .contains("Create the repository on your git host first, and leave it empty. This is the remote of the project"
+                        + " that builds the knowledge base, not of the knowledge base.");
+        assertThat(shown.get(1)).as("nothing to check until a URL is typed").isEqualTo(true);
+        assertThat(words(shown.get(2))).as("a remote that cannot be read: the reason, and no offer to add it")
+                .contains("Add remote: gene-kb\n  Remote:       https://github.com/my-org/gene-kb.git  (could not be read)",
+                        "The remote could not be read: fatal: repository not found.");
+        assertThat(shown.get(3)).isEqualTo(true);
+        assertThat(words(shown.get(4))).as("a remote that can be added: what adding it will do")
+                .contains("Add remote: gene-kb\n  Remote:       https://github.com/my-org/gene-kb.git  (empty)\n  origin:       added");
+        assertThat(shown.get(5)).as("adding is offered only for the URL as it was checked").isEqualTo(true);
+        assertThat(shown.get(6)).as("the check, then the adding, each with the URL trimmed")
+                .isEqualTo(List.of("check gene-kb https://github.com/my-org/gene-kb.git", "add gene-kb https://github.com/my-org/gene-kb.git"));
+        assertThat(words(shown.get(7))).contains("The remote is set and the project is pushed.");
+        assertThat(shown.get(8)).as("a project that has a remote is not offered another").isEqualTo(true);
+    }
+
+    /** Whether a node is shown: it and everything it is inside are visible. */
+    private static boolean shown(Node node) {
+        for (Node at = node; at != null; at = at.getParent()) {
+            if (!at.isVisible()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @SuppressWarnings("unchecked")
