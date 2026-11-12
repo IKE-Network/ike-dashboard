@@ -48,6 +48,10 @@ import java.util.Locale;
  * changes-remote &lt;folder&gt; &lt;git-url&gt;      give the change sets of a folder in ~/Solor their remote, with git:
  *                                       make the repository when there is none, set origin, and push only
  *                                       what adds to the remote
+ * preferences-remote-check &lt;folder&gt; &lt;git-url&gt;  what preferences-remote would do
+ * preferences-remote &lt;folder&gt; &lt;git-url&gt;  give your preferences for a folder in ~/Solor a remote of their own,
+ *                                       which should be private: commit them on a branch named for the
+ *                                       knowledge base, set origin, and push
  * ws-new &lt;name&gt; [groupId]                an empty working set in ~/knowledge-bases, to build projects together
  * ws-add &lt;working-set&gt; &lt;project&gt;        move a project into a working set, which then lists it as a member
  * ws-remove &lt;working-set&gt; &lt;member&gt;      stop listing a member, and move it back out into ~/knowledge-bases
@@ -107,11 +111,12 @@ public final class DashboardCommand {
                 download(out, settings, Coordinate.parse(args[1]), args[2]);
             }
             case "projects" -> projects(out, settings);
-            case "changes-remote-check", "changes-remote" -> {
+            case "changes-remote-check", "changes-remote", "preferences-remote-check", "preferences-remote" -> {
                 if (args.length != 3) {
                     throw new IllegalArgumentException(command + " <folder> <git-url>");
                 }
-                changesRemote(out, settings, command.equals("changes-remote"), args[1], args[2]);
+                repositoryRemote(out, settings, command.startsWith("preferences") ? RepositorySync.PREFERENCES : RepositorySync.CHANGE_SETS,
+                        !command.endsWith("-check"), args[1], args[2]);
             }
             case "ws-new", "ws-add", "ws-remove" -> workingSet(out, settings, command, List.of(args).subList(1, args.length));
             case "kb-remote-draft", "kb-remote" -> {
@@ -135,7 +140,8 @@ public final class DashboardCommand {
             case "self-update" -> selfUpdate(out, settings, args.length > 1 ? Optional.of(Path.of(args[1])) : Optional.empty());
             default -> throw new IllegalArgumentException("Unknown command " + command
                     + "; use list, check, notices, komets, heap, download, projects, kb-draft, kb-new, kb-remote-draft, kb-remote,"
-                    + " ws-new, ws-add, ws-remove, changes-remote-check, changes-remote,"
+                    + " ws-new, ws-add, ws-remove, changes-remote-check, changes-remote, preferences-remote-check,"
+                    + " preferences-remote,"
                     + " dashboard-latest or self-update");
         }
     }
@@ -364,17 +370,23 @@ public final class DashboardCommand {
         knowledgeBase.attributes().forEach((name, value) -> out.printf("  %s: %s%n", name, value));
     }
 
-    /** Checks what giving a knowledge base's change sets their remote would do, or does it, as the window does. */
-    private static void changesRemote(PrintStream out, DashboardSettings settings, boolean add, String folder, String address)
-            throws Exception {
+    /**
+     * Checks what giving a knowledge base's change sets or preferences their remote would do, or does it, as
+     * the window does.
+     */
+    private static void repositoryRemote(PrintStream out, DashboardSettings settings, String inside, boolean add, String folder,
+                                         String address) throws Exception {
         Path named = settings.solor().resolve(folder);
         Path store = java.nio.file.Files.isDirectory(named) ? named : Path.of(folder).toAbsolutePath().normalize();
-        Path changeSets = store.resolve(RepositorySync.CHANGE_SETS);
+        Path changeSets = store.resolve(inside);
         if (!java.nio.file.Files.isDirectory(changeSets)) {
-            throw new IllegalArgumentException(store + " has no " + RepositorySync.CHANGE_SETS + " folder");
+            throw new IllegalArgumentException(store + " has no " + inside + " folder");
         }
         RepositorySync.Git git = RepositorySync.Git.find().orElseThrow(() -> new IllegalStateException("git is not installed"));
-        RepositoryRemote.Check check = add ? RepositoryRemote.add(git, changeSets, address) : RepositoryRemote.check(git, changeSets, address);
+        // A person's preferences go on a branch named for the knowledge base, so one remote can keep them all.
+        String personal = KnowledgeBaseFamily.familyName(KnowledgeBaseScanner.inspect(store));
+        RepositoryRemote.Check check = add ? RepositoryRemote.add(git, changeSets, address, personal)
+                : RepositoryRemote.check(git, changeSets, address, personal);
         if (check.refusal().isPresent()) {
             throw new IllegalStateException(check.refusal().get());
         }

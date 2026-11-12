@@ -108,7 +108,7 @@ class DashboardViewRepositoriesTest {
         assertThat(words(shown.getFirst())).as("each repository in the folder, and the change-set folder that is none yet")
                 .contains("Repositories", "Change sets  ·  not a git repository yet",
                         "Preferences  ·  branch main  ·  3 files not committed  ·  no remote yet");
-        assertThat(shown.get(1)).as("only the change sets are offered a remote here").isEqualTo(1L);
+        assertThat(shown.get(1)).as("the change sets and the preferences are each offered a remote of their own").isEqualTo(2L);
         assertThat(words(shown.get(2))).as("a remote that cannot be read is refused, in words")
                 .contains("The remote could not be read: repository not found. Create the repository on your git host first,"
                         + " and check that you are signed in.");
@@ -120,6 +120,45 @@ class DashboardViewRepositoriesTest {
         assertThat(shown.get(6)).as("the check, then the adding, each with the address trimmed")
                 .isEqualTo(List.of("check changeSets " + ADDRESS, "add changeSets " + ADDRESS));
         assertThat(words(shown.get(7))).contains("The remote is set. Connect Komet's sync in Komet, with the same address.");
+    }
+
+    @Test
+    void preferencesAreOfferedARemoteWithTheReasonItShouldBePrivate() throws Exception {
+        List<Object> shown = onFx(() -> {
+            DashboardView view = view();
+            Path preferences = STORE.resolve("preferences");
+            List<String> asked = new ArrayList<>();
+            view.setOnRepositoryRemote((folder, address, add) -> asked.add((add ? "add " : "check ") + folder.getFileName() + " " + address));
+            view.setSync(STORE, List.of(new RepositorySync.Status(new RepositorySync.Repository(preferences, "preferences"), "", 0, 0,
+                    RepositorySync.Remote.NONE, 0, Optional.empty(), RepositorySync.NOT_YET)));
+            layout(view);
+            List<String> listed = Words.of(view);
+            button(view, "Add remote…").fire();
+            layout(view);
+            List<String> asking = Words.of(view);
+            TextField address = all(view, TextField.class).stream()
+                    .filter(field -> field.getPromptText() != null && field.getPromptText().endsWith("my-komet-preferences.git")).findFirst().orElseThrow();
+            address.setText("git@github.com:me/my-komet-preferences.git");
+            button(view, "Check").fire();
+            view.repositoryChecked(new RepositoryRemote.Check(preferences, "git@github.com:me/my-komet-preferences.git", List.of(
+                    "Make preferences a git repository, on the branch solor-kb.", "Commit what is in it now: 59 files."),
+                    Optional.empty(), true));
+            layout(view);
+            button(view, "Add remote and push").fire();
+            view.repositoryRemoteAdded(preferences, Optional.empty());
+            layout(view);
+            return List.of(listed, asking, asked, Words.of(view));
+        });
+
+        assertThat(words(shown.getFirst())).contains("Preferences  ·  not a git repository yet");
+        assertThat(words(shown.get(1))).as("why a private repository, said before an address is typed")
+                .contains("Your preferences for this knowledge base are yours alone: your window layout, your journals, and your"
+                        + " conversations with the assistant, which contain whatever you typed. Use a private repository, so only"
+                        + " you can read them. One private repository can keep the preferences of all your knowledge bases, each"
+                        + " on a branch of its own.");
+        assertThat(shown.get(2)).isEqualTo(List.of("check preferences git@github.com:me/my-komet-preferences.git",
+                "add preferences git@github.com:me/my-komet-preferences.git"));
+        assertThat(words(shown.get(3))).contains("The remote is set. Later changes are not sent by themselves yet.");
     }
 
     private static DashboardView view() {

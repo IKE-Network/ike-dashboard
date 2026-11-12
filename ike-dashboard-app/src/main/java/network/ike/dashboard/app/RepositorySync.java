@@ -64,6 +64,9 @@ public final class RepositorySync {
     /** The folder Komet keeps a store's change sets in, which its sync makes a repository. */
     static final String CHANGE_SETS = "changeSets";
 
+    /** The folder Komet keeps one person's preferences for a store in. */
+    static final String PREFERENCES = "preferences";
+
     private RepositorySync() {
     }
 
@@ -80,6 +83,22 @@ public final class RepositorySync {
             return Optional.empty();
         }
         return Optional.of(changeSetsNotYetIn(store));
+    }
+
+    /**
+     * The preferences folder of a store when it is there and is no repository yet, so the dashboard can
+     * say so and offer to make it one with a remote.
+     *
+     * @param store the store's folder
+     * @return the folder's state: no branch, nothing uncommitted, no remote, and {@link #NOT_YET} as its problem
+     */
+    public static Optional<Status> preferencesNotYet(Path store) {
+        Path folder = store.resolve(PREFERENCES);
+        if (!Files.isDirectory(folder) || Files.exists(folder.resolve(".git"))) {
+            return Optional.empty();
+        }
+        return Optional.of(new Status(new Repository(folder, label(store, folder)), "", 0, 0, Remote.NONE, 0,
+                Optional.empty(), NOT_YET));
     }
 
     /**

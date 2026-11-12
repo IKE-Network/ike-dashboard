@@ -137,6 +137,61 @@ class RepositoryRemoteTest {
         assertThat(changeSets.resolve(".git")).as("a refusal makes no repository").doesNotExist();
     }
 
+    @Test
+    void preferencesAreCommittedOnABranchNamedForTheirKnowledgeBaseSoOneRemoteKeepsThemAll(@TempDir Path temp) throws IOException {
+        Path solor = Files.createDirectories(temp.resolve("solor-kb/preferences"));
+        Files.writeString(solor.resolve("preferences.xml"), "<map/>");
+        Files.writeString(Files.createDirectories(solor.resolve("journals")).resolve("journal_1.xml"), "<map/>");
+        Path pizza = Files.createDirectories(temp.resolve("pizza-kb-authoring/preferences"));
+        Files.writeString(pizza.resolve("preferences.xml"), "<map/>");
+        Path bare = temp.resolve("host/my-komet-preferences.git");
+        String remote = bare(bare);
+
+        RepositoryRemote.Check check = RepositoryRemote.check(git, solor, remote, "solor-kb");
+        boolean untouched = Files.notExists(solor.resolve(".git"));
+        RepositoryRemote.add(git, solor, remote, "solor-kb");
+        RepositoryRemote.add(git, pizza, remote, "pizza-kb");
+
+        assertThat(check.steps()).containsExactly(
+                "Make preferences a git repository, on the branch solor-kb.",
+                "Commit what is in it now: 2 files.",
+                "Set its remote, origin, to " + remote + ".",
+                "Push the branch solor-kb, which then follows the remote.",
+                "Later changes are not sent by themselves yet. Commit and push them with git.");
+        assertThat(untouched).as("a check changes nothing").isTrue();
+        assertThat(out(solor, "log", "--format=%s")).as("named for the folder they are the preferences of").isEqualTo("Preferences of solor-kb");
+        assertThat(out(solor, "status", "--porcelain")).as("everything in the folder is committed").isEmpty();
+        assertThat(out(solor, "rev-parse", "--abbrev-ref", "solor-kb@{upstream}")).isEqualTo("origin/solor-kb");
+        assertThat(out(bare, "for-each-ref", "--format=%(refname:short)", "refs/heads")).as("one remote, a branch for each knowledge base")
+                .isEqualTo("pizza-kb\nsolor-kb");
+        assertThat(out(bare, "rev-parse", "refs/heads/solor-kb")).isEqualTo(out(solor, "rev-parse", "HEAD"));
+    }
+
+    @Test
+    void preferencesOnAnotherMachineAreNeverMergedAndAnEmptyFolderIsRefused(@TempDir Path temp) throws IOException {
+        Path other = Files.createDirectories(temp.resolve("other-machine/solor-kb/preferences"));
+        Files.writeString(other.resolve("preferences.xml"), "<map>theirs</map>");
+        String remote = bare(temp.resolve("host/my-komet-preferences.git"));
+        RepositoryRemote.add(git, other, remote, "solor-kb");
+        String theirs = out(temp.resolve("host/my-komet-preferences.git"), "rev-parse", "refs/heads/solor-kb");
+        Path mine = Files.createDirectories(temp.resolve("solor-kb/preferences"));
+        Files.writeString(mine.resolve("preferences.xml"), "<map>mine</map>");
+        Path empty = Files.createDirectories(temp.resolve("new-kb/preferences"));
+
+        RepositoryRemote.Check diverged = RepositoryRemote.add(git, mine, remote, "solor-kb");
+
+        assertThat(diverged.pushes()).isFalse();
+        assertThat(diverged.steps()).contains("Push nothing: the remote already has preferences on the branch solor-kb"
+                + " that this folder does not have. Nothing is merged.");
+        assertThat(out(mine, "log", "--format=%s")).as("this machine's are committed here all the same").isEqualTo("Preferences of solor-kb");
+        assertThat(out(mine, "remote", "get-url", "origin")).isEqualTo(remote);
+        assertThat(out(temp.resolve("host/my-komet-preferences.git"), "rev-parse", "refs/heads/solor-kb"))
+                .as("the other machine's are untouched on the remote").isEqualTo(theirs);
+        assertThat(RepositoryRemote.check(git, empty, remote, "new-kb").refusal())
+                .contains("There are no preferences in it yet. Open the knowledge base in Komet once first.");
+        assertThat(empty.resolve(".git")).doesNotExist();
+    }
+
     /** A repository with one commit and no remote, as a store's change-set folder is before it is connected. */
     private static Path repository(Path folder, String file) throws IOException {
         Files.createDirectories(folder);

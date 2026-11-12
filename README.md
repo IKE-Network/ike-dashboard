@@ -55,6 +55,7 @@ From then on it updates itself (see [Self-update](#self-update)). The links neve
   `kb-remote-draft <project> <git-url>`, `kb-remote <project> <git-url>`,
   `ws-new <name> [groupId]`, `ws-add <working-set> <project>`, `ws-remove <working-set> <member>`,
   `changes-remote-check <folder> <git-url>`, `changes-remote <folder> <git-url>`,
+  `preferences-remote-check <folder> <git-url>`, `preferences-remote <folder> <git-url>`,
   `dashboard-latest`, `self-update [application]`). The window has three views, one switch across its top:
   *Knowledge Bases*, the list and the chosen one's detail, and *Notices*, the first screen, across the
   window: one card per finding of its checks (newer builds, knowledge bases not yet downloaded, a newer
@@ -113,7 +114,7 @@ From then on it updates itself (see [Self-update](#self-update)). The links neve
 The Nexus check reads the `ike-restricted` login from `~/.m2/settings.xml`, filling `${env.…}`
 placeholders from the environment, so run it from a shell that has them.
 
-## A remote for a knowledge base's change sets
+## Remotes for a knowledge base's change sets and preferences
 
 On the *Knowledge Bases* tab, a folder's detail lists the git repositories inside it under
 *Repositories*: each one's branch, whether everything is committed, and whether it has a remote. The
@@ -128,11 +129,22 @@ only as it was checked. It is done with git alone:
    other change sets, nothing is pushed and nothing is merged: Komet's sync pulls them and loads them.
 
 Komet keeps its own record of the address and the login it syncs with, so its sync is still connected
-in Komet, with the same address. Preferences are not given a remote yet.
+in Komet, with the same address.
+
+Your preferences for a knowledge base are given a remote of their own in the same place. They are
+yours alone: your window layout, your journals, and your conversations with the assistant, which
+contain whatever you typed. So use a private repository, where only you can read them. One private
+repository can keep the preferences of all your knowledge bases: each is committed on a branch named
+for its knowledge base. Nothing else commits preferences, so the dashboard commits what is in the
+folder before it pushes. It does nothing while the knowledge base is open in Komet, which writes
+preferences as it runs, and it never merges with what another machine pushed. Later changes are not
+sent by themselves yet; commit and push them with git.
 
 ```bash
-DashboardCommand changes-remote-check solor-kb https://github.com/my-org/solor-changes.git
-DashboardCommand changes-remote       solor-kb https://github.com/my-org/solor-changes.git
+DashboardCommand changes-remote-check     solor-kb https://github.com/my-org/solor-changes.git
+DashboardCommand changes-remote           solor-kb https://github.com/my-org/solor-changes.git
+DashboardCommand preferences-remote-check solor-kb git@github.com:me/my-komet-preferences.git
+DashboardCommand preferences-remote       solor-kb git@github.com:me/my-komet-preferences.git
 ```
 
 ## New knowledge base

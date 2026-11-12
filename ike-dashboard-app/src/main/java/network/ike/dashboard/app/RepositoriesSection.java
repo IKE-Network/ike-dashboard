@@ -34,10 +34,11 @@ import java.util.Optional;
 /**
  * The git repositories inside a knowledge-base folder, in that folder's detail on the Knowledge Bases tab
  * (decision 21; KEC, 2026-11-12): each one's branch, whether everything is committed, and whether it has
- * a remote. The change-set repository, which is shared with other authors, is given a remote here: the
- * person types its address, Check shows what adding it will do, and adding is offered only for the
- * address just checked. A change-set folder that is no repository yet is offered the same, and is made
- * one. It does no IO of its own; {@link DashboardApp} runs git.
+ * a remote. Two of them are given a remote here, each its own: the change sets, which are shared with
+ * the other authors, and the preferences, which are one person's and belong in a private repository. The
+ * person types the address, Check shows what adding it will do, and adding is offered only for the
+ * address just checked. A folder that is no repository yet is offered the same, and is made one. It does
+ * no IO of its own; {@link DashboardApp} runs git.
  *
  * <p>What is typed and what was checked are kept here while the detail is drawn again around them.
  */
@@ -85,7 +86,6 @@ final class RepositoriesSection {
      */
     RepositoriesSection(Runnable redraw) {
         this.redraw = redraw;
-        url.setPromptText("https://github.com/my-org/my-change-sets.git");
         HBox.setHgrow(url, Priority.ALWAYS);
     }
 
@@ -99,7 +99,8 @@ final class RepositoriesSection {
     }
 
     /**
-     * Whether a repository is one the dashboard gives a remote: the change sets, with none yet.
+     * Whether a repository is one the dashboard gives a remote: the change sets or the preferences, with
+     * none yet.
      *
      * @param status the repository's state
      * @return whether Add remote is offered for it
@@ -107,7 +108,7 @@ final class RepositoriesSection {
     static boolean offersRemote(RepositorySync.Status status) {
         Path name = status.repository().folder().getFileName();
         return status.remote() == RepositorySync.Remote.NONE && name != null
-                && name.toString().equals(RepositorySync.CHANGE_SETS);
+                && (name.toString().equals(RepositorySync.CHANGE_SETS) || name.toString().equals(RepositorySync.PREFERENCES));
     }
 
     /**
@@ -130,6 +131,7 @@ final class RepositoriesSection {
                     add.setOnAction(event -> {
                         adding = Optional.of(folder);
                         checked = Optional.empty();
+                        url.clear();
                         redraw.run();
                     });
                     nodes.add(add);
@@ -168,9 +170,17 @@ final class RepositoriesSection {
     private Node box(RepositorySync.Status status) {
         Path folder = status.repository().folder();
         boolean busy = working.isPresent();
-        SelectableText what = SelectableText.of("The change sets are shared with the others who author this knowledge base."
+        boolean personal = RepositoryRemote.Kind.of(folder) == RepositoryRemote.Kind.PREFERENCES;
+        SelectableText what = SelectableText.of(personal
+                ? "Your preferences for this knowledge base are yours alone: your window layout, your journals, and your"
+                + " conversations with the assistant, which contain whatever you typed. Use a private repository, so only"
+                + " you can read them. One private repository can keep the preferences of all your knowledge bases, each"
+                + " on a branch of its own."
+                : "The change sets are shared with the others who author this knowledge base."
                 + " Give the address of the repository they share, or of an empty one made on your git host.");
         what.setStyle(MUTED);
+        url.setPromptText(personal ? "https://github.com/me/my-komet-preferences.git"
+                : "https://github.com/my-org/my-change-sets.git");
         Button check = new Button("Check");
         check.disableProperty().bind(url.textProperty().map(text -> busy || text.isBlank()).orElse(true));
         check.setOnAction(event -> onRemote.run(folder, url.getText().strip(), false));
@@ -247,7 +257,9 @@ final class RepositoriesSection {
         if (failure.isPresent()) {
             said.put(folder, new Said(failure.get(), true));
         } else {
-            said.put(folder, new Said("The remote is set. Connect Komet's sync in Komet, with the same address.", false));
+            said.put(folder, new Said(RepositoryRemote.Kind.of(folder) == RepositoryRemote.Kind.PREFERENCES
+                    ? "The remote is set. Later changes are not sent by themselves yet."
+                    : "The remote is set. Connect Komet's sync in Komet, with the same address.", false));
             adding = Optional.empty();
             checked = Optional.empty();
             url.clear();

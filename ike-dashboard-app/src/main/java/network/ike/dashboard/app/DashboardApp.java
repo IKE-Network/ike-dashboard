@@ -389,6 +389,7 @@ public final class DashboardApp extends Application {
                 }
                 // A change-set folder that is no repository yet is shown too, so it can be given a remote.
                 RepositorySync.changeSetsNotYet(store).ifPresent(local::add);
+                RepositorySync.preferencesNotYet(store).ifPresent(local::add);
                 List<RepositorySync.Status> shown = List.copyOf(local);
                 Platform.runLater(() -> view.setSync(store, shown));
                 List<RepositorySync.Status> checked = new ArrayList<>();
@@ -1155,17 +1156,20 @@ public final class DashboardApp extends Application {
             return;
         }
         view.repositoryWorking(folder);
+        // A person's preferences go on a branch named for the knowledge base, so one remote can keep them all.
+        String personal = view.selected().map(KnowledgeBaseFamily::name).orElse(folder.getParent().getFileName().toString());
         files.submit(() -> {
             if (!add) {
-                RepositoryRemote.Check check = RepositoryRemote.check(git.get(), folder, address);
+                RepositoryRemote.Check check = RepositoryRemote.check(git.get(), folder, address, personal);
                 Platform.runLater(() -> view.repositoryChecked(check));
                 return;
             }
             try {
-                RepositoryRemote.add(git.get(), folder, address);
+                RepositoryRemote.add(git.get(), folder, address, personal);
                 Platform.runLater(() -> {
                     view.repositoryRemoteAdded(folder, Optional.empty());
-                    view.setMessage("Added the remote of " + Names.of(folder.getParent().getFileName()) + "'s change sets");
+                    view.setMessage("Added the remote of " + Names.of(folder.getParent().getFileName()) + "'s "
+                            + (RepositoryRemote.Kind.of(folder) == RepositoryRemote.Kind.PREFERENCES ? "preferences" : "change sets"));
                 });
             } catch (IOException e) {
                 Platform.runLater(() -> view.repositoryRemoteAdded(folder, Optional.of(e.getMessage())));
