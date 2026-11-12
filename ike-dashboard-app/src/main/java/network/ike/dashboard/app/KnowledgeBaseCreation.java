@@ -79,6 +79,15 @@ public final class KnowledgeBaseCreation {
     /** The goal that sets a project's remote, commits its POM and pushes. */
     public static final String REMOTE_PUBLISH = "kb-remote-publish";
 
+    /** The plugin that makes working sets and changes their members, as {@code groupId:artifactId}. */
+    public static final String WORKING_SET_PLUGIN = "network.ike.platform:ike-workspace-maven-plugin";
+
+    /** The version of that plugin the dashboard runs. */
+    public static final String WORKING_SET_VERSION = "227";
+
+    /** The variable that names another version of the working-set plugin to run. */
+    public static final String WORKING_SET_OVERRIDE = "IKE_DASHBOARD_PLATFORM_VERSION";
+
     /** The JDK a knowledge base builds on, at least. */
     public static final int JDK = 27;
 
@@ -100,6 +109,7 @@ public final class KnowledgeBaseCreation {
     private final Prerequisites prerequisites;
     private final String toolingVersion;
     private final String remoteToolingVersion;
+    private final String workingSetVersion;
     private final Function<Path, List<String>> maven;
 
     /**
@@ -309,6 +319,8 @@ public final class KnowledgeBaseCreation {
         this.prerequisites = prerequisites;
         this.toolingVersion = toolingVersion;
         this.remoteToolingVersion = remoteToolingVersion;
+        this.workingSetVersion = Optional.ofNullable(System.getenv(WORKING_SET_OVERRIDE)).map(String::strip)
+                .filter(version -> !version.isEmpty()).orElse(WORKING_SET_VERSION);
         this.maven = maven;
     }
 
@@ -539,6 +551,117 @@ public final class KnowledgeBaseCreation {
         return run(folder, remoteArguments(REMOTE_PUBLISH, remote), line);
     }
 
+    /**
+     * Makes an empty working set: a folder in the projects folder with a POM that will list its members,
+     * in a git repository of its own with one commit and no remote. Maven is run from a wrapper written
+     * elsewhere, so nothing but the working set is left in the projects folder.
+     *
+     * @param projects the projects folder, made when it is not there
+     * @param name     the working set's name, which also names its folder
+     * @param groupId  its group
+     * @param line     given each line Maven writes, as it is written
+     * @return how it ended
+     * @throws IOException          if a folder of that name is already there, or Maven cannot be run
+     * @throws InterruptedException if interrupted, after Maven has been stopped
+     */
+    public Outcome newWorkingSet(Path projects, String name, String groupId, Consumer<String> line)
+            throws IOException, InterruptedException {
+        if (Files.exists(projects.resolve(name))) {
+            throw new IOException(projects.resolve(name) + " is already there. Choose another name.");
+        }
+        Files.createDirectories(projects);
+        Path work = Files.createTempDirectory("ike-ws-new-");
+        try {
+            writeWrapper(work);
+            return run(work, projects, workingSetArguments("scaffold-init", "-Dname=" + name, "-Dgroup=" + groupId), line);
+        } finally {
+            deleteTree(work);
+        }
+    }
+
+    /**
+     * Adds a project to a working set: its folder moves into the working set's folder, and the working
+     * set lists it as a member and commits that. A project must build on its own before it is added; it
+     * still does afterwards. When the working set refuses it, the folder is moved back.
+     *
+     * @param workingSet the working set's folder
+     * @param project    the project's folder, outside the working set
+     * @param line       given each line Maven writes, as it is written
+     * @return how it ended
+     * @throws IOException          if the working set already has a folder of the project's name, the folder
+     *                              cannot be moved, or Maven cannot be run
+     * @throws InterruptedException if interrupted, after Maven has been stopped
+     */
+    public Outcome addToWorkingSet(Path workingSet, Path project, Consumer<String> line)
+            throws IOException, InterruptedException {
+        Path member = workingSet.resolve(project.getFileName());
+        if (Files.exists(member)) {
+            throw new IOException(workingSet.getFileName() + " already has a folder named " + project.getFileName() + ".");
+        }
+        Files.move(project, member);
+        boolean added = false;
+        try {
+            Outcome outcome = run(workingSet, workingSetArguments("add", "-Drepo=" + memberAddress(member)), line);
+            added = outcome.succeeded();
+            return outcome;
+        } finally {
+            if (!added) {
+                Files.move(member, project);
+            }
+        }
+    }
+
+    /**
+     * Removes a member from a working set: the working set stops listing it and commits that, and the
+     * member's folder moves out into the projects folder, where it is a project on its own again.
+     *
+     * @param workingSet the working set's folder
+     * @param member     the member's name, which is its folder's
+     * @param projects   the projects folder
+     * @param line       given each line Maven writes, as it is written
+     * @return how it ended
+     * @throws IOException          if the projects folder already has a folder of that name, the folder
+     *                              cannot be moved, or Maven cannot be run
+     * @throws InterruptedException if interrupted, after Maven has been stopped
+     */
+    public Outcome removeFromWorkingSet(Path workingSet, String member, Path projects, Consumer<String> line)
+            throws IOException, InterruptedException {
+        Path target = projects.resolve(member);
+        if (Files.exists(target)) {
+            throw new IOException(projects + " already has a folder named " + member + ".");
+        }
+        Outcome outcome = run(workingSet, workingSetArguments("remove", "-Dsubproject=" + member), line);
+        if (outcome.succeeded()) {
+            Files.move(workingSet.resolve(member), target);
+        }
+        return outcome;
+    }
+
+    /**
+     * Where a working set says a member comes from: the member's remote when it has one, so the working
+     * set can be cloned elsewhere with its members, else the member's own folder. The working set names a
+     * member by the last part of the address, so a remote whose last part is not the folder's name is
+     * passed over for the folder.
+     */
+    private String memberAddress(Path member) {
+        String name = member.getFileName().toString();
+        // No closing slash: the last part of the address is the member's name.
+        String local = member.toUri().toString().replaceFirst("/$", "");
+        return prerequisites.git()
+                .map(git -> git.run(member, java.time.Duration.ofSeconds(20), "remote", "get-url", "origin"))
+                .filter(RepositorySync.Git.Result::ok).map(result -> result.out().strip())
+                .filter(origin -> origin.replaceFirst("\\.git$", "").replaceFirst("/$", "").endsWith("/" + name)
+                        || origin.replaceFirst("\\.git$", "").endsWith(":" + name))
+                .orElse(local);
+    }
+
+    private List<String> workingSetArguments(String goal, String... properties) {
+        List<String> arguments = new ArrayList<>(PLAIN);
+        arguments.add(WORKING_SET_PLUGIN + ":" + workingSetVersion + ":" + goal);
+        arguments.addAll(List.of(properties));
+        return arguments;
+    }
+
     private List<String> remoteArguments(String goal, String remote) {
         List<String> arguments = new ArrayList<>(PLAIN);
         arguments.add(PLUGIN + ":" + remoteToolingVersion + ":" + goal);
@@ -547,11 +670,17 @@ public final class KnowledgeBaseCreation {
     }
 
     private Outcome run(Path folder, List<String> arguments, Consumer<String> line) throws IOException, InterruptedException {
+        return run(folder, folder, arguments, line);
+    }
+
+    /** Runs the Maven of one folder, where its wrapper is, in another, where the work is done. */
+    private Outcome run(Path wrapper, Path folder, List<String> arguments, Consumer<String> line)
+            throws IOException, InterruptedException {
         List<String> missing = prerequisites.missing();
         if (!missing.isEmpty()) {
             throw new IOException(String.join(" ", missing));
         }
-        List<String> command = new ArrayList<>(maven.apply(folder));
+        List<String> command = new ArrayList<>(maven.apply(wrapper));
         command.addAll(arguments);
         ProcessBuilder builder = new ProcessBuilder(command).directory(folder.toFile()).redirectErrorStream(true);
         builder.environment().putAll(prerequisites.environment(builder.environment()));

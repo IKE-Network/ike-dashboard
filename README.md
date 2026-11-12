@@ -53,6 +53,7 @@ From then on it updates itself (see [Self-update](#self-update)). The links neve
   `DashboardCommand` (`list`, `check`, `notices`, `komets`, `download <g:a:v> <classifier>`,
   `projects`, `kb-draft <name> [property=value …]`, `kb-new <name> [property=value …]`,
   `kb-remote-draft <project> <git-url>`, `kb-remote <project> <git-url>`,
+  `ws-new <name> [groupId]`, `ws-add <working-set> <project>`, `ws-remove <working-set> <member>`,
   `dashboard-latest`, `self-update [application]`). The window has three views, one switch across its top:
   *Knowledge Bases*, the list and the chosen one's detail, and *Notices*, the first screen, across the
   window: one card per finding of its checks (newer builds, knowledge bases not yet downloaded, a newer
@@ -125,6 +126,14 @@ commits that change alone, and pushes. This is the remote of the project that bu
 base, not of the knowledge base. A remote that cannot be read, or that already has other commits on
 the branch, is refused before anything is changed.
 
+A working set builds several projects together, in order: a knowledge base and the source layers
+it is assembled from, for example. *New working set…* makes an empty one, in a folder of its own in
+`~/knowledge-bases` with its own git repository. A project joins a working set only once it builds
+on its own: its page offers *Add to working set*, which moves its folder into the working set's
+folder and has the working set list it as a member. *Remove from working set* moves it back out. The
+list shows each working set with its members beneath it. A working set is built, not deployed; each
+member is deployed from its own page.
+
 *New knowledge base…*, on that tab, creates a Maven 4 project for a knowledge base built from
 protobuf layers already on Nexus (IKE-Network/ike-issues#1370). The form asks for a name, the layers
 in load order, and a folder. *Draft* shows what will be created, with each layer at its exact version
@@ -142,6 +151,9 @@ DashboardCommand kb-new   my-kb layers=network.ike.data:ncbi-gene-kb:zip:unreaso
 DashboardCommand projects
 DashboardCommand kb-remote-draft my-kb https://github.com/my-org/my-kb.git
 DashboardCommand kb-remote       my-kb https://github.com/my-org/my-kb.git
+DashboardCommand ws-new    my-ws
+DashboardCommand ws-add    my-ws my-kb
+DashboardCommand ws-remove my-ws my-kb
 ```
 
 Each `property=value` is a property of the goals (`kind`, `collection`, `rocks`, and the others);
@@ -150,7 +162,8 @@ kept apart from the knowledge bases in `~/Solor`. A name must be new: one that a
 base in `~/Solor` or a knowledge base on Nexus already has is refused, and a free one is offered. The dashboard
 runs plugin version 280 to create a project and 281 to add a remote, the versions that first contain
 those goals. Set `IKE_DASHBOARD_TOOLING_VERSION` to run another for both, such as a snapshot under
-test.
+test. Working sets are made and changed by `ike-workspace-maven-plugin` 227; `IKE_DASHBOARD_PLATFORM_VERSION`
+names another.
 
 ## The application
 

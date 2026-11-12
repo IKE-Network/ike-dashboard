@@ -192,6 +192,8 @@ public final class DashboardApp extends Application {
         ProjectsPane projects = view.projects();
         projects.setOnBuild(this::buildProject);
         projects.setOnRemote(this::remoteProject);
+        projects.setOnNewWorkingSet(this::newWorkingSet);
+        projects.setOnMember(this::changeMember);
         projects.setOnReveal(path -> run(() -> Finder.reveal(path), "Could not show " + Names.of(path)));
         projects.setOnCancel(() -> Optional.ofNullable(mavenRun).ifPresent(run -> run.cancel(true)));
         view.setOnInstallKomet(this::installKomet);
@@ -304,7 +306,12 @@ public final class DashboardApp extends Application {
                 List<KnowledgeBaseProjectFolder> projects = KnowledgeBaseProjectFolder.scan(settings.projects());
                 Map<Path, RepositorySync.Status> projectGit = new java.util.HashMap<>();
                 if (git.isPresent()) {
+                    List<KnowledgeBaseProjectFolder> repositories = new ArrayList<>();
                     for (KnowledgeBaseProjectFolder project : projects) {
+                        repositories.add(project);
+                        repositories.addAll(project.members());     // each member has a repository of its own
+                    }
+                    for (KnowledgeBaseProjectFolder project : repositories) {
                         if (Files.exists(project.folder().resolve(".git"))) {
                             projectGit.put(project.folder(), RepositorySync.local(git.get(),
                                     new RepositorySync.Repository(project.folder(), "project")));
@@ -313,6 +320,7 @@ public final class DashboardApp extends Application {
                 }
                 Platform.runLater(() -> {
                     view.newKnowledgeBase().setNamesHere(names);
+                    view.projects().setNames(names);
                     view.projects().setProjects(settings.projects(), projects, projectGit, git.isPresent());
                     Path created = showProjectAfterRefresh;
                     if (created != null) {
@@ -1132,6 +1140,45 @@ public final class DashboardApp extends Application {
                             + Names.of(project.artifactId()));
                     refresh();                               // when it was last built, and what is uncommitted
                 }, reason -> projects.failed(folder, reason));
+    }
+
+    /** Makes an empty working set in the projects folder; projects are added to it afterwards. */
+    private void newWorkingSet(String name, String groupId) {
+        ProjectsPane projects = view.projects();
+        Path folder = settings.projects().resolve(name);
+        runMaven("ws-new-" + name, (creation, line) -> creation.newWorkingSet(settings.projects(), name, groupId, line),
+                () -> projects.working(folder, "Making " + name + " …"), projects::progress, outcome -> {
+                    projects.finished(folder, "Made " + name + ". Add a project to it from the project's own page.",
+                            name + " was not made", outcome);
+                    if (outcome.succeeded()) {
+                        view.setMessage("Made the working set " + Names.of(name));
+                        showProjectAfterRefresh = folder;
+                    }
+                    refresh();
+                }, reason -> projects.failed(folder, reason));
+    }
+
+    /**
+     * Adds a project to a working set, or removes a member from one. Either way its folder moves: into
+     * the working set's folder, or back out into the projects folder.
+     */
+    private void changeMember(KnowledgeBaseProjectFolder project, KnowledgeBaseProjectFolder workingSet, boolean add) {
+        ProjectsPane projects = view.projects();
+        Path from = project.folder();
+        String name = from.getFileName().toString();
+        Path to = add ? workingSet.folder().resolve(name) : settings.projects().resolve(name);
+        String set = workingSet.artifactId();
+        runMaven("ws-" + (add ? "add-" : "remove-") + name,
+                (creation, line) -> add ? creation.addToWorkingSet(workingSet.folder(), from, line)
+                        : creation.removeFromWorkingSet(workingSet.folder(), name, settings.projects(), line),
+                () -> projects.working(from, (add ? "Adding " + name + " to " : "Removing " + name + " from ") + set + " …"),
+                projects::progress, outcome -> {
+                    Path now = outcome.succeeded() ? to : from;
+                    projects.finished(now, add ? "Added to " + set + "." : "Removed from " + set + ".",
+                            add ? name + " was not added to " + set : name + " was not removed from " + set, outcome);
+                    showProjectAfterRefresh = now;
+                    refresh();                               // where its folder is now, and what the working set lists
+                }, reason -> projects.failed(from, reason));
     }
 
     /**

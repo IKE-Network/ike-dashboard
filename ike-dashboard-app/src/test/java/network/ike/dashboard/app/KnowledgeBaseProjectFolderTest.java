@@ -120,6 +120,45 @@ class KnowledgeBaseProjectFolderTest {
     }
 
     @Test
+    void aWorkingSetIsReadWithItsMembersInTheOrderItListsThem(@TempDir Path projects) throws Exception {
+        Path workingSet = Files.createDirectories(projects.resolve("gene-ws"));
+        Files.writeString(workingSet.resolve("workspace.yaml"), "subprojects:\n");
+        Files.writeString(workingSet.resolve("pom.xml"), """
+                <project xmlns="http://maven.apache.org/POM/4.1.0" root="true">
+                    <groupId>network.ike.data</groupId>
+                    <artifactId>gene-ws</artifactId>
+                    <version>1-SNAPSHOT</version>
+                    <subprojects>
+                        <subproject>source-kb</subproject>
+                        <subproject>gene-kb</subproject>
+                        <subproject>not-here-yet</subproject>
+                    </subprojects>
+                </project>
+                """);
+        Files.writeString(Files.createDirectories(workingSet.resolve("gene-kb")).resolve("pom.xml"), POM.formatted("1-SNAPSHOT"));
+        Files.writeString(Files.createDirectories(workingSet.resolve("source-kb")).resolve("pom.xml"),
+                POM.formatted("1-SNAPSHOT").replace("<artifactId>gene-kb</artifactId>", "<artifactId>source-kb</artifactId>"));
+        Files.writeString(Files.createDirectories(workingSet.resolve("stray")).resolve("pom.xml"), "<project/>");
+        Files.writeString(Files.createDirectories(projects.resolve("alone-kb")).resolve("pom.xml"),
+                POM.formatted("1-SNAPSHOT").replace("<artifactId>gene-kb</artifactId>", "<artifactId>alone-kb</artifactId>"));
+
+        List<KnowledgeBaseProjectFolder> found = KnowledgeBaseProjectFolder.scan(projects);
+        KnowledgeBaseProjectFolder read = found.getLast();
+
+        assertThat(found).extracting(KnowledgeBaseProjectFolder::artifactId).as("a working set is a project of the projects folder")
+                .containsExactly("alone-kb", "gene-ws");
+        assertThat(found.getFirst().workingSet()).isFalse();
+        assertThat(read.workingSet()).isTrue();
+        assertThat(read.members()).as("the members its POM lists that are there, in that order; a folder it does not list is none")
+                .extracting(KnowledgeBaseProjectFolder::artifactId).containsExactly("source-kb", "gene-kb");
+        assertThat(read.members().getLast().folder()).isEqualTo(workingSet.resolve("gene-kb"));
+        assertThat(read.members().getLast().workingSetAmong(found)).as("a member knows its working set").contains(read);
+        assertThat(found.getFirst().workingSetAmong(found)).as("a project on its own has none").isEmpty();
+        KnowledgeBaseProject.Names names = KnowledgeBaseProject.Names.read(projects, projects.resolve("no-solor"), java.util.Set.of());
+        assertThat(names.projects()).as("a member's name is in use, like any project's").contains("gene-ws", "source-kb", "gene-kb", "alone-kb");
+    }
+
+    @Test
     void everyFolderWithAPomIsAProjectAndOneThatCannotBeReadIsNamedByItsFolder(@TempDir Path projects) throws Exception {
         Path gene = Files.createDirectories(projects.resolve("gene-kb"));
         Files.writeString(gene.resolve("pom.xml"), POM.formatted("1-SNAPSHOT"));

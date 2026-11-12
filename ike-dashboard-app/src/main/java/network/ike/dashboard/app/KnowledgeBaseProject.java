@@ -337,6 +337,11 @@ public record KnowledgeBaseProject(String name, Path folder, Map<String, String>
             }
             for (KnowledgeBaseProjectFolder project : KnowledgeBaseProjectFolder.scan(projectsFolder)) {
                 projects.add(project.artifactId().toLowerCase(Locale.ROOT));
+                // A working set's members are projects too, each in a folder inside it.
+                for (KnowledgeBaseProjectFolder member : project.members()) {
+                    projects.add(member.artifactId().toLowerCase(Locale.ROOT));
+                    projects.add(member.folder().getFileName().toString().toLowerCase(Locale.ROOT));
+                }
             }
             Set<String> folders = new HashSet<>();
             if (java.nio.file.Files.isDirectory(solor)) {
@@ -389,15 +394,17 @@ public record KnowledgeBaseProject(String name, Path folder, Map<String, String>
 
         /**
          * A name like the one given that is free: the same name with the first number from 2 that makes
-         * it so, before a closing {@code -kb}.
+         * it so, before a closing {@code -kb} or {@code -ws}.
          *
          * @param name    the name that is taken
          * @param groupId the group
          * @return a free name
          */
         public String free(String name, String groupId) {
-            String stem = name.endsWith("-kb") && name.length() > 3 ? name.substring(0, name.length() - 3) : name;
-            String ending = stem.length() == name.length() ? "" : "-kb";
+            // A knowledge base's name ends in -kb and a working set's in -ws; the number goes before either.
+            String ending = java.util.stream.Stream.of("-kb", "-ws")
+                    .filter(suffix -> name.endsWith(suffix) && name.length() > suffix.length()).findFirst().orElse("");
+            String stem = name.substring(0, name.length() - ending.length());
             for (int number = 2; ; number++) {
                 String candidate = stem + "-" + number + ending;
                 if (taken(candidate, groupId).isEmpty()) {
@@ -484,13 +491,8 @@ public record KnowledgeBaseProject(String name, Path folder, Map<String, String>
         List<String> problems = new ArrayList<>();
         if (name.isEmpty()) {
             problems.add("Give the knowledge base a name.");
-        } else if (!ARTIFACT_ID.matcher(name).matches()) {
-            problems.add("The name is lower-case letters and digits joined by hyphens, such as my-kb.");
         }
-        String group = properties.getOrDefault("groupId", DEFAULT_GROUP);
-        if (!GROUP_ID.matcher(group).matches()) {
-            problems.add("The group is not a Maven groupId: " + group + ".");
-        }
+        problems.addAll(nameProblems(name, properties.getOrDefault("groupId", DEFAULT_GROUP)));
         Kind kind;
         List<Layer> layers;
         try {
@@ -527,6 +529,24 @@ public record KnowledgeBaseProject(String name, Path folder, Map<String, String>
         }
         if (kind == Kind.SOURCE_LAYER && "true".equals(properties.get(ROCKS))) {
             problems.add("A source layer builds no Rocks database.");
+        }
+        return problems;
+    }
+
+    /**
+     * What is wrong with a name and a group as Maven coordinates, for a knowledge base or a working set.
+     *
+     * @param name    the artifactId; a blank one is not judged here
+     * @param groupId the group
+     * @return each problem, a sentence; none when both can be used
+     */
+    public static List<String> nameProblems(String name, String groupId) {
+        List<String> problems = new ArrayList<>();
+        if (!name.isEmpty() && !ARTIFACT_ID.matcher(name).matches()) {
+            problems.add("The name is lower-case letters and digits joined by hyphens, such as my-kb.");
+        }
+        if (!GROUP_ID.matcher(groupId).matches()) {
+            problems.add("The group is not a Maven groupId: " + groupId + ".");
         }
         return problems;
     }

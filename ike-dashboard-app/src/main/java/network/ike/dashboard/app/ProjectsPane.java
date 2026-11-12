@@ -20,6 +20,7 @@ import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
+import javafx.scene.control.ChoiceBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
@@ -52,7 +53,8 @@ import java.util.function.Consumer;
  * chosen one's detail on the right, with what it is built from, where it deploys, the state of its git
  * repository, and Build and Deploy. A project with no remote yet is given one here: the remote of the
  * project that builds the knowledge base, not of the knowledge base. Listing every project also shows
- * which names are in use. It does no IO of its own; {@link DashboardApp} reads the projects and runs
+ * which names are in use. A working set is listed with its members beneath it: it builds several projects
+ * together, in order, and a project joins one only once it builds on its own. It does no IO of its own; {@link DashboardApp} reads the projects and runs
  * their builds.
  */
 public final class ProjectsPane extends SplitPane {
@@ -113,6 +115,31 @@ public final class ProjectsPane extends SplitPane {
         void run(KnowledgeBaseProjectFolder project, String url, boolean publish);
     }
 
+    /** The projects and working sets in the projects folder, without the members listed beneath them. */
+    private List<KnowledgeBaseProjectFolder> top = List.of();
+    private final Button newWorkingSet = new Button("New working set…");
+    /** Whether the detail shows where a new working set is named, in place of a project. */
+    private boolean namingWorkingSet;
+    private final TextField workingSetName = new TextField();
+    private final TextField workingSetGroup = new TextField(KnowledgeBaseProject.DEFAULT_GROUP);
+    private KnowledgeBaseProject.Names names = KnowledgeBaseProject.Names.NONE;
+    private BiConsumer<String, String> onNewWorkingSet = (name, groupId) -> { };
+    private MemberAction onMember = (project, workingSet, add) -> { };
+
+    /** What adding a project to a working set, or removing a member from one, does. */
+    @FunctionalInterface
+    public interface MemberAction {
+
+        /**
+         * Adds or removes a member.
+         *
+         * @param project    the project
+         * @param workingSet the working set
+         * @param add        {@code true} to add the project, {@code false} to remove the member
+         */
+        void run(KnowledgeBaseProjectFolder project, KnowledgeBaseProjectFolder workingSet, boolean add);
+    }
+
     private Runnable onNew = () -> { };
     private BiConsumer<KnowledgeBaseProjectFolder, String> onBuild = (project, phase) -> { };
     private Consumer<Path> onReveal = path -> { };
@@ -134,13 +161,28 @@ public final class ProjectsPane extends SplitPane {
         list.setPlaceholder(new Label("No projects yet"));
         list.getSelectionModel().selectedItemProperty().addListener((observable, was, now) -> {
             confirming = Optional.empty();
+            if (now != null) {
+                namingWorkingSet = false;
+            }
+            showDetail();
+        });
+        workingSetName.setPromptText("my-ws");
+        workingSetName.textProperty().addListener((observable, was, now) -> {
+            if (namingWorkingSet) {
+                showWorkingSetProblem();
+            }
+        });
+        newWorkingSet.setMinWidth(Region.USE_PREF_SIZE);
+        newWorkingSet.setOnAction(event -> {
+            namingWorkingSet = true;
+            list.getSelectionModel().clearSelection();
             showDetail();
         });
         remoteUrl.setPromptText("https://github.com/my-org/my-kb.git");
         HBox.setHgrow(remoteUrl, Priority.ALWAYS);
         newKnowledgeBase.setMinWidth(Region.USE_PREF_SIZE);
         newKnowledgeBase.setOnAction(event -> onNew.run());
-        HBox masterBottom = new HBox(newKnowledgeBase);
+        HBox masterBottom = new HBox(8, newKnowledgeBase, newWorkingSet);
         masterBottom.setPadding(new Insets(8));
         BorderPane master = new BorderPane(list);
         master.setBottom(masterBottom);
@@ -176,11 +218,20 @@ public final class ProjectsPane extends SplitPane {
         Optional<Path> chosen = selected().map(KnowledgeBaseProjectFolder::folder);
         git.clear();
         git.putAll(states);
-        list.getItems().setAll(projects);
+        top = List.copyOf(projects);
+        boolean naming = namingWorkingSet;
+        // Each working set, then its members beneath it.
+        List<KnowledgeBaseProjectFolder> listed = new ArrayList<>();
+        for (KnowledgeBaseProjectFolder project : projects) {
+            listed.add(project);
+            listed.addAll(project.members());
+        }
+        list.getItems().setAll(listed);
         chosen.ifPresent(this::select);
-        if (list.getSelectionModel().isEmpty() && !projects.isEmpty()) {
+        if (list.getSelectionModel().isEmpty() && !listed.isEmpty() && !naming) {
             list.getSelectionModel().selectFirst();
         }
+        namingWorkingSet = naming && list.getSelectionModel().isEmpty();
         showDetail();
     }
 
@@ -222,6 +273,33 @@ public final class ProjectsPane extends SplitPane {
      */
     public void setOnNew(Runnable action) {
         onNew = action;
+    }
+
+    /**
+     * The names already in use, which a new working set must not repeat.
+     *
+     * @param names the names in use
+     */
+    public void setNames(KnowledgeBaseProject.Names names) {
+        this.names = names;
+    }
+
+    /**
+     * What making a working set does, given its name and its group.
+     *
+     * @param action the action
+     */
+    public void setOnNewWorkingSet(BiConsumer<String, String> action) {
+        onNewWorkingSet = action;
+    }
+
+    /**
+     * What adding a project to a working set, and removing a member from one, do.
+     *
+     * @param action the action
+     */
+    public void setOnMember(MemberAction action) {
+        onMember = action;
     }
 
     /**
@@ -307,6 +385,25 @@ public final class ProjectsPane extends SplitPane {
     }
 
     /**
+     * Shows how a run of Maven that changed a working set ended: one made, a project added, or a member
+     * removed. What is said stays with the folder the work ended in.
+     *
+     * @param subject the folder said of: the working set made, or the project where it now is
+     * @param done    what to say when it succeeded
+     * @param failed  what to say when it did not, before Maven's reason
+     * @param outcome how it ended
+     */
+    public void finished(Path subject, String done, String failed, KnowledgeBaseCreation.Outcome outcome) {
+        working = Optional.empty();
+        outputOf = Optional.of(subject);
+        ended.put(subject, outcome.succeeded() ? new Ended(done, false)
+                : new Ended(failed + outcome.failure().map(reason -> ": " + reason.lines().findFirst().orElse(""))
+                        .orElse(". Maven's output is below."), true));
+        list.refresh();
+        showDetail();
+    }
+
+    /**
      * Shows what a check of a remote found: what adding it would do, or why it cannot be added.
      *
      * @param project the project's folder
@@ -364,6 +461,10 @@ public final class ProjectsPane extends SplitPane {
 
     private void showDetail() {
         detail.getChildren().clear();
+        if (namingWorkingSet) {
+            showWorkingSetForm();
+            return;
+        }
         Optional<KnowledgeBaseProjectFolder> chosen = selected();
         if (chosen.isEmpty()) {
             SelectableText none = muted(list.getItems().isEmpty()
@@ -376,12 +477,15 @@ public final class ProjectsPane extends SplitPane {
         KnowledgeBaseProjectFolder project = chosen.get();
         SelectableText title = SelectableText.of(project.title());
         title.setStyle("-fx-font-size: 20px; -fx-font-weight: bold;");
-        HBox heading = new HBox(12, tile(48), title);
+        HBox heading = new HBox(12, tile(project, 48), title);
         heading.setAlignment(Pos.CENTER_LEFT);
         detail.getChildren().add(heading);
         detail.getChildren().add(muted(project.coordinates()));
         detail.getChildren().add(muted("Folder  " + project.folder()));
-        if (!project.buildsKnowledgeBase()) {
+        Optional<KnowledgeBaseProjectFolder> memberOf = project.workingSetAmong(top);
+        if (project.workingSet()) {
+            detail.getChildren().add(muted("A working set. It builds its members together, in the order listed."));
+        } else if (!project.buildsKnowledgeBase()) {
             detail.getChildren().add(muted("This project builds no knowledge base: it is built from no protobuf layers."));
         }
 
@@ -401,28 +505,29 @@ public final class ProjectsPane extends SplitPane {
         Button reveal = new Button("Show in " + Finder.name());
         reveal.setOnAction(event -> onReveal.accept(project.folder()));
         HBox actions = new HBox(8, build, deploy, reveal);
+        if (project.workingSet()) {
+            // A working set's own POM names no repository: each member is deployed from its own page.
+            actions.getChildren().remove(deploy);
+        }
         actions.setAlignment(Pos.CENTER_LEFT);
         actions.setPadding(new Insets(6, 0, 0, 0));
         detail.getChildren().add(actions);
         if (confirming.filter(project.folder()::equals).isPresent() && !busy) {
             detail.getChildren().add(confirmDeploy(project));
         }
-        if (mine) {
-            Label running = new Label(workingOn);
-            running.setStyle(ATTENTION);
-            Button cancel = new Button("Cancel");
-            cancel.setOnAction(event -> onCancel.run());
-            HBox line = new HBox(10, running, cancel);
-            line.setAlignment(Pos.CENTER_LEFT);
-            detail.getChildren().add(line);
-        } else if (busy) {
-            detail.getChildren().add(muted("Another project is being built. One builds at a time."));
+        showRun(project.folder());
+
+        if (project.workingSet()) {
+            detail.getChildren().add(heading("Members"));
+            int position = 1;
+            for (KnowledgeBaseProjectFolder member : project.members()) {
+                detail.getChildren().add(SelectableText.of(position++ + ".  " + member.artifactId()
+                        + (member.title().equals(member.artifactId()) ? "" : "  ·  " + member.title())));
+            }
+            detail.getChildren().add(muted(project.members().isEmpty()
+                    ? "No members yet. Choose a project that is on its own, and add it to this working set."
+                    : "Deploy each member from its own page."));
         }
-        Optional.ofNullable(ended.get(project.folder())).ifPresent(end -> {
-            SelectableText said = SelectableText.of(end.text());
-            said.setStyle(end.problem() ? PROBLEM : "-fx-text-fill: #2e7d32;");
-            detail.getChildren().add(said);
-        });
 
         if (!project.layers().isEmpty()) {
             detail.getChildren().add(heading("Built from"));
@@ -433,10 +538,14 @@ public final class ProjectsPane extends SplitPane {
             }
             detail.getChildren().add(muted("Each layer stays at this version until the project is changed."));
         }
-        detail.getChildren().add(heading("Deploys to"));
-        detail.getChildren().add(project.deploysTo().map(repository -> SelectableText.of(repository.id() + "  ·  " + repository.url()))
-                .orElseGet(() -> muted("Its POM names no repository of its own.")));
-        project.collection().ifPresent(collection -> detail.getChildren().add(muted("Collection  " + collection)));
+        if (!project.workingSet()) {
+            detail.getChildren().add(heading("Deploys to"));
+            detail.getChildren().add(project.deploysTo().map(repository -> SelectableText.of(repository.id() + "  ·  " + repository.url()))
+                    .orElseGet(() -> muted("Its POM names no repository of its own.")));
+            project.collection().ifPresent(collection -> detail.getChildren().add(muted("Collection  " + collection)));
+            detail.getChildren().add(heading("Working set"));
+            detail.getChildren().add(membership(project, memberOf, busy));
+        }
         detail.getChildren().add(heading("Repository"));
         detail.getChildren().add(repository(project));
         RepositorySync.Status state = git.get(project.folder());
@@ -454,13 +563,143 @@ public final class ProjectsPane extends SplitPane {
                 detail.getChildren().add(add);
             }
         }
-        detail.getChildren().add(heading("Last build"));
-        detail.getChildren().add(project.built().map(when -> SelectableText.of("Built " + WHEN.format(when)))
-                .orElseGet(() -> muted("Not built yet.")));
+        if (!project.workingSet()) {
+            detail.getChildren().add(heading("Last build"));
+            detail.getChildren().add(project.built().map(when -> SelectableText.of("Built " + WHEN.format(when)))
+                    .orElseGet(() -> muted("Not built yet.")));
+        }
         if (outputOf.filter(project.folder()::equals).isPresent()) {
             detail.getChildren().add(heading(mine ? "Maven's output" : "Maven's output, from the last run"));
             detail.getChildren().add(output);
         }
+    }
+
+    /** Says what Maven is doing for a folder, or how its last run there ended. */
+    private void showRun(Path subject) {
+        if (working.filter(subject::equals).isPresent()) {
+            Label running = new Label(workingOn);
+            running.setStyle(ATTENTION);
+            Button cancel = new Button("Cancel");
+            cancel.setOnAction(event -> onCancel.run());
+            HBox line = new HBox(10, running, cancel);
+            line.setAlignment(Pos.CENTER_LEFT);
+            detail.getChildren().add(line);
+        } else if (working.isPresent()) {
+            detail.getChildren().add(muted("Another project is being built. One builds at a time."));
+        }
+        Optional.ofNullable(ended.get(subject)).ifPresent(end -> {
+            SelectableText said = SelectableText.of(end.text());
+            said.setStyle(end.problem() ? PROBLEM : "-fx-text-fill: #2e7d32;");
+            detail.getChildren().add(said);
+        });
+    }
+
+    /**
+     * A project's place among the working sets: the one it is a member of, with the way out of it, or
+     * the working sets it could join.
+     */
+    private Node membership(KnowledgeBaseProjectFolder project, Optional<KnowledgeBaseProjectFolder> memberOf, boolean busy) {
+        if (memberOf.isPresent()) {
+            Button remove = new Button("Remove from working set");
+            remove.setDisable(busy);
+            remove.setOnAction(event -> onMember.run(project, memberOf.get(), false));
+            return new VBox(6, SelectableText.of("A member of " + memberOf.get().artifactId() + "."), remove,
+                    muted("Its folder moves back to " + folder + ", where it is a project on its own again."));
+        }
+        List<KnowledgeBaseProjectFolder> workingSets = top.stream().filter(KnowledgeBaseProjectFolder::workingSet).toList();
+        if (workingSets.isEmpty()) {
+            return muted("On its own. A working set builds several projects together, in order. New working set makes one.");
+        }
+        ChoiceBox<KnowledgeBaseProjectFolder> which = new ChoiceBox<>();
+        which.getItems().setAll(workingSets);
+        which.setConverter(new javafx.util.StringConverter<>() {
+            @Override
+            public String toString(KnowledgeBaseProjectFolder workingSet) {
+                return workingSet == null ? "" : workingSet.artifactId();
+            }
+
+            @Override
+            public KnowledgeBaseProjectFolder fromString(String text) {
+                return null;
+            }
+        });
+        which.getSelectionModel().selectFirst();
+        Button add = new Button("Add to working set");
+        add.setDisable(busy);
+        add.setOnAction(event -> Optional.ofNullable(which.getValue()).ifPresent(workingSet -> onMember.run(project, workingSet, true)));
+        HBox line = new HBox(8, add, which);
+        line.setAlignment(Pos.CENTER_LEFT);
+        return new VBox(6, SelectableText.of("On its own."), line,
+                muted("A working set builds several projects together, in order. This project's folder moves into the"
+                        + " working set's folder. It still builds on its own there."));
+    }
+
+    /** Where a new working set is named; it is made empty, and projects are added to it afterwards. */
+    private void showWorkingSetForm() {
+        SelectableText title = SelectableText.of("New working set");
+        title.setStyle("-fx-font-size: 20px; -fx-font-weight: bold;");
+        detail.getChildren().add(title);
+        detail.getChildren().add(muted("A working set builds several projects together, in order: a knowledge base and the"
+                + " source layers it is assembled from, for example. It is made empty, in a folder of its own in " + folder
+                + ". A project is added once it builds on its own."));
+        HBox.setHgrow(workingSetName, Priority.ALWAYS);
+        HBox.setHgrow(workingSetGroup, Priority.ALWAYS);
+        Label nameLabel = new Label("Name");
+        nameLabel.setMinWidth(60);
+        Label groupLabel = new Label("Group");
+        groupLabel.setMinWidth(60);
+        HBox nameLine = new HBox(8, nameLabel, workingSetName);
+        nameLine.setAlignment(Pos.CENTER_LEFT);
+        HBox groupLine = new HBox(8, groupLabel, workingSetGroup);
+        groupLine.setAlignment(Pos.CENTER_LEFT);
+        Button create = new Button("Create working set");
+        create.setId("create-working-set");
+        create.setDefaultButton(true);
+        create.setOnAction(event -> onNewWorkingSet.accept(workingSetName.getText().strip(), workingSetGroup.getText().strip()));
+        Button close = new Button("Close");
+        close.setOnAction(event -> {
+            namingWorkingSet = false;
+            if (!list.getItems().isEmpty()) {
+                list.getSelectionModel().selectFirst();
+            }
+            showDetail();
+        });
+        HBox buttons = new HBox(8, create, close);
+        SelectableText problem = SelectableText.of("");
+        problem.setId("working-set-problem");
+        detail.getChildren().addAll(nameLine, muted("Names end in -ws by custom, such as solor-ws."), groupLine, problem, buttons);
+        showWorkingSetProblem();
+        showRun(folder.resolve(workingSetName.getText().strip().isEmpty() ? "-" : workingSetName.getText().strip()));
+        if (outputOf.filter(folder.resolve(workingSetName.getText().strip())::equals).isPresent()) {
+            detail.getChildren().add(heading("Maven's output"));
+            detail.getChildren().add(output);
+        }
+    }
+
+    /** Says what is wrong with the name typed for a working set, and offers Create only when nothing is. */
+    private void showWorkingSetProblem() {
+        Optional<String> problem = workingSetProblem();
+        detail.getChildren().stream().filter(node -> "working-set-problem".equals(node.getId())).findFirst()
+                .ifPresent(node -> {
+                    SelectableText said = (SelectableText) node;
+                    said.setText(problem.orElse(""));
+                    said.setStyle(problem.isPresent() && !workingSetName.getText().isBlank() ? PROBLEM : MUTED);
+                });
+        detail.lookupAll("#create-working-set").forEach(node -> node.setDisable(problem.isPresent() || working.isPresent()));
+    }
+
+    /** Why the name typed cannot name a working set, or empty when it can. */
+    private Optional<String> workingSetProblem() {
+        String name = workingSetName.getText() == null ? "" : workingSetName.getText().strip();
+        String groupId = workingSetGroup.getText() == null ? "" : workingSetGroup.getText().strip();
+        if (name.isEmpty()) {
+            return Optional.of("Give the working set a name.");
+        }
+        List<String> problems = KnowledgeBaseProject.nameProblems(name, groupId);
+        if (!problems.isEmpty()) {
+            return Optional.of(problems.getFirst());
+        }
+        return names.taken(name, groupId).map(taken -> taken + " " + names.free(name, groupId) + " is free.");
     }
 
     /** Asks before a deploy, which publishes the knowledge base where others take it from. */
@@ -567,15 +806,16 @@ public final class ProjectsPane extends SplitPane {
         return area;
     }
 
-    /** A project's tile: the same shape as a knowledge base's icon, so the lists read alike. */
-    private static Node tile(double size) {
-        Label letter = new Label("P");
+    /** A project's tile, a working set's with a W: the same shape as a knowledge base's icon, so the lists read alike. */
+    private static Node tile(KnowledgeBaseProjectFolder project, double size) {
+        Label letter = new Label(project.workingSet() ? "W" : "P");
         letter.setStyle("-fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: " + Math.round(size * 0.5) + "px;");
         StackPane tile = new StackPane(letter);
         tile.setMinSize(size, size);
         tile.setPrefSize(size, size);
         tile.setMaxSize(size, size);
-        tile.setStyle("-fx-background-color: #5a6b3c; -fx-background-radius: " + Math.round(size * 0.22) + ";");
+        tile.setStyle("-fx-background-color: " + (project.workingSet() ? "#6b4f3c" : "#5a6b3c") + "; -fx-background-radius: "
+                + Math.round(size * 0.22) + ";");
         return tile;
     }
 
@@ -595,7 +835,10 @@ public final class ProjectsPane extends SplitPane {
                     ? PROBLEM : MUTED));
             Region gap = new Region();
             HBox.setHgrow(gap, Priority.ALWAYS);
-            HBox line = new HBox(6, tile(20), name, gap, mark);
+            HBox line = new HBox(6, tile(project, 20), name, gap, mark);
+            if (project.workingSetAmong(top).isPresent()) {
+                line.setPadding(new Insets(0, 0, 0, 18));        // a member, beneath its working set
+            }
             line.setAlignment(Pos.CENTER_LEFT);
             line.setMinWidth(0);
             line.prefWidthProperty().bind(list.widthProperty().subtract(36));

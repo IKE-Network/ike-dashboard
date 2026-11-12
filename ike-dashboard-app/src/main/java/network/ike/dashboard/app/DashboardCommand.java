@@ -44,6 +44,9 @@ import java.util.Locale;
  * komet-install [folder] [repository-url] install it beside the others (default: the install location)
  * download &lt;g:a:v&gt; &lt;classifier&gt;          the newest deploy of a store, into ~/Solor/&lt;artifactId&gt;
  * projects                              the projects that build knowledge bases, in ~/knowledge-bases
+ * ws-new &lt;name&gt; [groupId]                an empty working set in ~/knowledge-bases, to build projects together
+ * ws-add &lt;working-set&gt; &lt;project&gt;        move a project into a working set, which then lists it as a member
+ * ws-remove &lt;working-set&gt; &lt;member&gt;      stop listing a member, and move it back out into ~/knowledge-bases
  * kb-remote-draft &lt;project&gt; &lt;git-url&gt;   what kb-remote would do; the remote is asked, nothing is changed
  * kb-remote &lt;project&gt; &lt;git-url&gt;         give a project its remote: origin, the POM's scm, a commit, the
  *                                       push; the project by its name in ~/knowledge-bases, or its folder
@@ -100,6 +103,7 @@ public final class DashboardCommand {
                 download(out, settings, Coordinate.parse(args[1]), args[2]);
             }
             case "projects" -> projects(out, settings);
+            case "ws-new", "ws-add", "ws-remove" -> workingSet(out, settings, command, List.of(args).subList(1, args.length));
             case "kb-remote-draft", "kb-remote" -> {
                 if (args.length != 3) {
                     throw new IllegalArgumentException(command + " <project> <git-url>");
@@ -121,6 +125,7 @@ public final class DashboardCommand {
             case "self-update" -> selfUpdate(out, settings, args.length > 1 ? Optional.of(Path.of(args[1])) : Optional.empty());
             default -> throw new IllegalArgumentException("Unknown command " + command
                     + "; use list, check, notices, komets, heap, download, projects, kb-draft, kb-new, kb-remote-draft, kb-remote,"
+                    + " ws-new, ws-add, ws-remove,"
                     + " dashboard-latest or self-update");
         }
     }
@@ -349,6 +354,63 @@ public final class DashboardCommand {
         knowledgeBase.attributes().forEach((name, value) -> out.printf("  %s: %s%n", name, value));
     }
 
+    /** Makes a working set, or adds or removes a member, as the Projects tab does. */
+    private static void workingSet(PrintStream out, DashboardSettings settings, String command, List<String> words) throws Exception {
+        KnowledgeBaseCreation.Prerequisites prerequisites = KnowledgeBaseCreation.prerequisites();
+        if (!prerequisites.missing().isEmpty()) {
+            throw new IllegalStateException(String.join(" ", prerequisites.missing()));
+        }
+        KnowledgeBaseCreation creation = new KnowledgeBaseCreation(prerequisites);
+        Path projects = settings.projects();
+        KnowledgeBaseCreation.Outcome outcome;
+        String done;
+        if (command.equals("ws-new")) {
+            if (words.isEmpty() || words.size() > 2) {
+                throw new IllegalArgumentException("ws-new <name> [groupId]");
+            }
+            String name = words.getFirst();
+            String groupId = words.size() == 2 ? words.get(1) : KnowledgeBaseProject.DEFAULT_GROUP;
+            List<String> problems = KnowledgeBaseProject.nameProblems(name, groupId);
+            if (!problems.isEmpty()) {
+                throw new IllegalArgumentException(String.join(" ", problems));
+            }
+            KnowledgeBaseProject.Names names = KnowledgeBaseProject.Names.read(projects, settings.solor(), java.util.Set.of());
+            Optional<String> taken = names.taken(name, groupId);
+            if (taken.isPresent()) {
+                throw new IllegalArgumentException(taken.get() + " " + names.free(name, groupId) + " is free.");
+            }
+            outcome = creation.newWorkingSet(projects, name, groupId, out::println);
+            done = "Made the working set " + projects.resolve(name);
+        } else {
+            if (words.size() != 2) {
+                throw new IllegalArgumentException(command + " <working-set> <" + (command.equals("ws-add") ? "project" : "member") + ">");
+            }
+            Path workingSet = projects.resolve(words.getFirst());
+            if (!java.nio.file.Files.isRegularFile(workingSet.resolve(KnowledgeBaseProjectFolder.MANIFEST))) {
+                throw new IllegalArgumentException(words.getFirst() + " is no working set in " + projects);
+            }
+            if (command.equals("ws-add")) {
+                Path project = projects.resolve(words.get(1));
+                if (!KnowledgeBaseProjectFolder.isProject(project)
+                        || java.nio.file.Files.isRegularFile(project.resolve(KnowledgeBaseProjectFolder.MANIFEST))) {
+                    throw new IllegalArgumentException(words.get(1) + " is no project on its own in " + projects);
+                }
+                outcome = creation.addToWorkingSet(workingSet, project, out::println);
+                done = words.get(1) + " is a member of " + words.getFirst() + ", in " + workingSet.resolve(words.get(1));
+            } else {
+                if (!KnowledgeBaseProjectFolder.isProject(workingSet.resolve(words.get(1)))) {
+                    throw new IllegalArgumentException(words.get(1) + " is no member of " + words.getFirst());
+                }
+                outcome = creation.removeFromWorkingSet(workingSet, words.get(1), projects, out::println);
+                done = words.get(1) + " is on its own again, in " + projects.resolve(words.get(1));
+            }
+        }
+        if (!outcome.succeeded()) {
+            throw new IllegalStateException(outcome.failure().orElse("Maven ended with " + outcome.exit()));
+        }
+        out.println(done);
+    }
+
     /** Checks what giving a project its remote would do, or does it, as the Projects tab does. */
     private static void remote(PrintStream out, DashboardSettings settings, boolean publish, String project, String url)
             throws Exception {
@@ -383,6 +445,9 @@ public final class DashboardCommand {
             out.printf("%-28s %-44s %s%n", project.artifactId(), project.coordinates(), repository);
             for (KnowledgeBaseProject.Layer layer : project.layers()) {
                 out.printf("    %-30s %-22s %s%n", layer.artifactId(), NexusCatalog.label(layer.classifier()), layer.version());
+            }
+            for (KnowledgeBaseProjectFolder member : project.members()) {
+                out.printf("    member %-23s %s%n", member.artifactId(), member.coordinates());
             }
         }
     }

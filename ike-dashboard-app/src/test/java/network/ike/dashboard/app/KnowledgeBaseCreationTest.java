@@ -276,6 +276,70 @@ class KnowledgeBaseCreationTest {
                 "-Dremote=https://github.com/my-org/my-kb.git");
     }
 
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void aWorkingSetIsMadeInTheProjectsFolderByAWrapperKeptElsewhere(@TempDir Path root) throws Exception {
+        Path jdk = jdk(root.resolve("jdk-27"), "27.0.1");
+        Path record = root.resolve("ran.txt");
+        Path projects = root.resolve("knowledge-bases");
+
+        KnowledgeBaseCreation.Outcome outcome = creation(jdk, standIn(root, record, true))
+                .newWorkingSet(projects, "gene-ws", "network.ike.data", line -> { });
+
+        List<String> ran = Files.readAllLines(record);
+        assertThat(outcome.succeeded()).isTrue();
+        assertThat(ran).as("the goal, by coordinates, run in the projects folder, which is made for it")
+                .contains("cwd=" + projects.toRealPath(), "network.ike.platform:ike-workspace-maven-plugin:227:scaffold-init",
+                        "-Dname=gene-ws", "-Dgroup=network.ike.data");
+        assertThat(ran).as("no wrapper is written into the projects folder").contains("wrapper=no");
+        try (var entries = Files.list(projects)) {
+            assertThat(entries).as("nothing of the dashboard's own is left there").isEmpty();
+        }
+        Files.createDirectories(projects.resolve("gene-ws"));
+        assertThatThrownBy(() -> creation(jdk, standIn(root, record, true)).newWorkingSet(projects, "gene-ws", "network.ike.data", line -> { }))
+                .isInstanceOf(IOException.class).hasMessageContaining("is already there");
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void aProjectMovesIntoAWorkingSetAndBackOutAndStaysWhereItWasWhenRefused(@TempDir Path root) throws Exception {
+        Path jdk = jdk(root.resolve("jdk-27"), "27.0.1");
+        Path record = root.resolve("ran.txt");
+        Path projects = Files.createDirectories(root.resolve("knowledge-bases"));
+        Path workingSet = Files.createDirectories(projects.resolve("gene-ws"));
+        Path project = Files.createDirectories(projects.resolve("gene-kb"));
+        Files.writeString(project.resolve("pom.xml"), "<project/>");
+        KnowledgeBaseCreation works = creation(jdk, standIn(root, record, true));
+        KnowledgeBaseCreation refuses = creation(jdk, standIn(root, record, false));
+
+        KnowledgeBaseCreation.Outcome refused = refuses.addToWorkingSet(workingSet, project, line -> { });
+        boolean stayed = Files.isRegularFile(project.resolve("pom.xml")) && Files.notExists(workingSet.resolve("gene-kb"));
+        KnowledgeBaseCreation.Outcome added = works.addToWorkingSet(workingSet, project, line -> { });
+        List<String> add = Files.readAllLines(record);
+        boolean moved = Files.isRegularFile(workingSet.resolve("gene-kb/pom.xml")) && Files.notExists(project);
+        KnowledgeBaseCreation.Outcome kept = refuses.removeFromWorkingSet(workingSet, "gene-kb", projects, line -> { });
+        boolean stillMember = Files.isRegularFile(workingSet.resolve("gene-kb/pom.xml")) && Files.notExists(project);
+        KnowledgeBaseCreation.Outcome removed = works.removeFromWorkingSet(workingSet, "gene-kb", projects, line -> { });
+        List<String> remove = Files.readAllLines(record);
+
+        assertThat(refused.succeeded()).isFalse();
+        assertThat(stayed).as("a project the working set refuses is moved back").isTrue();
+        assertThat(added.succeeded()).isTrue();
+        assertThat(moved).as("its folder is in the working set's folder").isTrue();
+        assertThat(add).as("the working set is told where the member is, with no closing slash, by its own wrapper")
+                .contains("cwd=" + workingSet.toRealPath(), "network.ike.platform:ike-workspace-maven-plugin:227:add",
+                        "-Drepo=" + workingSet.resolve("gene-kb").toUri().toString().replaceFirst("/$", ""));
+        assertThat(kept.succeeded()).isFalse();
+        assertThat(stillMember).as("a member the working set will not let go stays in it").isTrue();
+        assertThat(removed.succeeded()).isTrue();
+        assertThat(remove).contains("network.ike.platform:ike-workspace-maven-plugin:227:remove", "-Dsubproject=gene-kb");
+        assertThat(project.resolve("pom.xml")).as("and it is a project on its own again").exists();
+        assertThat(workingSet.resolve("gene-kb")).doesNotExist();
+        Files.createDirectories(workingSet.resolve("gene-kb"));
+        assertThatThrownBy(() -> works.addToWorkingSet(workingSet, project, line -> { }))
+                .isInstanceOf(IOException.class).hasMessageContaining("already has a folder named gene-kb");
+    }
+
     private static KnowledgeBaseCreation creation(Path jdk, Path maven) {
         KnowledgeBaseCreation.Prerequisites prerequisites = new KnowledgeBaseCreation.Prerequisites(Optional.of(jdk),
                 Optional.of(new RepositorySync.Git(Path.of("/usr/bin/git"))));

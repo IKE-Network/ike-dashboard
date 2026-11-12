@@ -243,6 +243,104 @@ class ProjectsPaneTest {
         assertThat(shown.get(8)).as("a project that has a remote is not offered another").isEqualTo(true);
     }
 
+    @Test
+    void aWorkingSetIsListedWithItsMembersAndAProjectJoinsOrLeavesFromItsOwnPage() throws Exception {
+        List<Object> shown = onFx(() -> {
+            ProjectsPane pane = new ProjectsPane();
+            new Scene(pane, 1080, 640);
+            KnowledgeBaseProjectFolder member = project(PROJECTS.resolve("gene-ws").resolve("source-kb"), "source-kb");
+            KnowledgeBaseProjectFolder workingSet = new KnowledgeBaseProjectFolder(PROJECTS.resolve("gene-ws"), "gene-ws",
+                    Optional.of("network.ike.data"), Optional.of("1-SNAPSHOT"), Optional.empty(), Optional.empty(), List.of(),
+                    Optional.empty(), Optional.empty(), true, List.of(member));
+            KnowledgeBaseProjectFolder alone = project(PROJECTS.resolve("gene-kb"), "gene-kb");
+            pane.setProjects(PROJECTS, List.of(alone, workingSet), Map.of(), true);
+            layout(pane);
+            List<String> asked = new ArrayList<>();
+            pane.setOnMember((project, set, add) -> asked.add((add ? "add " : "remove ") + project.artifactId() + " " + set.artifactId()));
+            List<String> listed = pane.projects().stream().map(KnowledgeBaseProjectFolder::artifactId).toList();
+            List<String> onItsOwn = Words.of(pane);
+            button(pane, "Add to working set").fire();
+            pane.select(workingSet.folder());
+            layout(pane);
+            List<String> set = Words.of(pane);
+            boolean noDeploy = all(pane, Button.class).stream().noneMatch(button -> "Deploy…".equals(button.getText()));
+            pane.select(member.folder());
+            layout(pane);
+            List<String> inside = Words.of(pane);
+            button(pane, "Remove from working set").fire();
+            pane.finished(member.folder(), "Added to gene-ws.", "source-kb was not added to gene-ws",
+                    new KnowledgeBaseCreation.Outcome(0, List.of("[INFO] BUILD SUCCESS")));
+            layout(pane);
+            return List.of(listed, onItsOwn, set, noDeploy, inside, asked, Words.of(pane));
+        });
+
+        assertThat(shown.getFirst()).as("a working set, then its members beneath it").isEqualTo(List.of("gene-kb", "gene-ws", "source-kb"));
+        assertThat(words(shown.get(1))).as("a project on its own can join a working set")
+                .contains("Working set", "On its own.", "A working set builds several projects together, in order. This project's"
+                        + " folder moves into the working set's folder. It still builds on its own there.");
+        assertThat(words(shown.get(2))).as("the working set: what it is, and its members in build order")
+                .contains("A working set. It builds its members together, in the order listed.", "Members", "1.  source-kb",
+                        "Deploy each member from its own page.")
+                .doesNotContain("Deploys to", "Last build");
+        assertThat(shown.get(3)).as("a working set is built, not deployed").isEqualTo(true);
+        assertThat(words(shown.get(4))).as("a member says which working set it is in, and how it leaves")
+                .contains("A member of gene-ws.", "Its folder moves back to " + PROJECTS + ", where it is a project on its own again.");
+        assertThat(shown.get(5)).isEqualTo(List.of("add gene-kb gene-ws", "remove source-kb gene-ws"));
+        assertThat(words(shown.get(6))).contains("Added to gene-ws.");
+    }
+
+    @Test
+    void aNewWorkingSetIsNamedBeforeItIsMadeAndANameInUseIsRefused() throws Exception {
+        List<Object> shown = onFx(() -> {
+            ProjectsPane pane = new ProjectsPane();
+            new Scene(pane, 1080, 640);
+            setProjects(pane);
+            pane.setNames(new KnowledgeBaseProject.Names(java.util.Set.of("gene-kb", "notes-kb", "gene-ws"), java.util.Set.of(),
+                    java.util.Set.of(), java.util.Set.of()));
+            layout(pane);
+            List<String> asked = new ArrayList<>();
+            pane.setOnNewWorkingSet((name, groupId) -> asked.add(name + " in " + groupId));
+            button(pane, "New working set…").fire();
+            layout(pane);
+            List<String> empty = Words.of(pane);
+            boolean nothingYet = button(pane, "Create working set").isDisable();
+            TextField name = all(pane, TextField.class).stream().filter(field -> "my-ws".equals(field.getPromptText())).findFirst().orElseThrow();
+            name.setText("Gene WS");
+            layout(pane);
+            List<String> malformed = Words.of(pane);
+            name.setText("gene-ws");
+            layout(pane);
+            List<String> taken = Words.of(pane);
+            boolean refused = button(pane, "Create working set").isDisable();
+            name.setText(" solor-ws ");
+            layout(pane);
+            boolean offered = !button(pane, "Create working set").isDisable();
+            button(pane, "Create working set").fire();
+            button(pane, "Close").fire();
+            layout(pane);
+            return List.of(empty, nothingYet, malformed, taken, refused, offered, asked,
+                    pane.selected().map(KnowledgeBaseProjectFolder::artifactId).orElse("none"));
+        });
+
+        assertThat(words(shown.getFirst())).as("what a working set is, before a name is typed")
+                .contains("New working set", "Names end in -ws by custom, such as solor-ws.")
+                .anyMatch(text -> text.startsWith("A working set builds several projects together, in order:"));
+        assertThat(shown.get(1)).isEqualTo(true);
+        assertThat(words(shown.get(2))).contains("The name is lower-case letters and digits joined by hyphens, such as my-kb.");
+        assertThat(words(shown.get(3))).contains("A project named gene-ws is already in your projects folder. gene-2-ws is free.");
+        assertThat(shown.get(4)).isEqualTo(true);
+        assertThat(shown.get(5)).as("a new name can be made").isEqualTo(true);
+        assertThat(shown.get(6)).as("with its name trimmed, in the group shown").isEqualTo(List.of("solor-ws in network.ike.data"));
+        assertThat(shown.get(7)).as("Close returns to the projects").isEqualTo("gene-kb");
+    }
+
+    private static KnowledgeBaseProjectFolder project(Path folder, String artifactId) {
+        return new KnowledgeBaseProjectFolder(folder, artifactId, Optional.of("network.ike.data"), Optional.of("1-SNAPSHOT"),
+                Optional.empty(), Optional.empty(),
+                List.of(KnowledgeBaseProject.Layer.parse("network.ike.data:ncbi-gene-kb:zip:unreasoned-pb:20261020.1-20261111.021538-1")),
+                Optional.empty(), Optional.empty());
+    }
+
     /** Whether a node is shown: it and everything it is inside are visible. */
     private static boolean shown(Node node) {
         for (Node at = node; at != null; at = at.getParent()) {

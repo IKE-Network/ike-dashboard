@@ -38,6 +38,10 @@ import java.util.stream.Stream;
  * in {@code ~/Solor} (KEC, 2026-11-12). Only the POM and the build's output folder are read; nothing is
  * run, and a POM that cannot be read still names a project, by its folder.
  *
+ * <p>A working set is a project too: a folder whose POM lists member projects, each in a folder of its
+ * own inside it, with a {@code workspace.yaml} beside the POM. It builds its members together, in order,
+ * so a knowledge base and the source layers it is assembled from build in one go.
+ *
  * @param folder      the project's folder
  * @param artifactId  the name its POM gives it, or the folder's name when the POM cannot be read
  * @param groupId     its group, its parent's when it names none
@@ -47,11 +51,17 @@ import java.util.stream.Stream;
  * @param layers      the protobuf layers it is built from, in load order, each at the version it is fixed to
  * @param deploysTo   the repository a deploy of its version goes to
  * @param built       when it last built the protobuf it publishes, when it has
+ * @param workingSet  whether it is a working set
+ * @param members     a working set's member projects, in the order its POM lists them
  */
 public record KnowledgeBaseProjectFolder(Path folder, String artifactId, Optional<String> groupId, Optional<String> version,
                                          Optional<String> displayName, Optional<String> collection,
                                          List<KnowledgeBaseProject.Layer> layers, Optional<Repository> deploysTo,
-                                         Optional<Instant> built) {
+                                         Optional<Instant> built, boolean workingSet,
+                                         List<KnowledgeBaseProjectFolder> members) {
+
+    /** The file beside a working set's POM that lists its members and where each comes from. */
+    public static final String MANIFEST = "workspace.yaml";
 
     /**
      * Where a deploy goes.
@@ -74,9 +84,32 @@ public record KnowledgeBaseProjectFolder(Path folder, String artifactId, Optiona
      * @param layers      the layers it is built from
      * @param deploysTo   where a deploy goes
      * @param built       when it last built
+     * @param workingSet  whether it is a working set
+     * @param members     a working set's members
      */
     public KnowledgeBaseProjectFolder {
         layers = List.copyOf(layers);
+        members = List.copyOf(members);
+    }
+
+    /**
+     * A project that is no working set.
+     *
+     * @param folder      the project's folder
+     * @param artifactId  its name
+     * @param groupId     its group
+     * @param version     its version
+     * @param displayName the name a person reads
+     * @param collection  its collection
+     * @param layers      the layers it is built from
+     * @param deploysTo   where a deploy goes
+     * @param built       when it last built
+     */
+    public KnowledgeBaseProjectFolder(Path folder, String artifactId, Optional<String> groupId, Optional<String> version,
+                                      Optional<String> displayName, Optional<String> collection,
+                                      List<KnowledgeBaseProject.Layer> layers, Optional<Repository> deploysTo,
+                                      Optional<Instant> built) {
+        this(folder, artifactId, groupId, version, displayName, collection, layers, deploysTo, built, false, List.of());
     }
 
     /**
@@ -124,7 +157,8 @@ public record KnowledgeBaseProjectFolder(Path folder, String artifactId, Optiona
             project = factory.newDocumentBuilder().parse(folder.resolve("pom.xml").toFile()).getDocumentElement();
         } catch (Exception unreadable) {
             return new KnowledgeBaseProjectFolder(folder, folderName, Optional.empty(), Optional.empty(), Optional.empty(),
-                    Optional.empty(), List.of(), Optional.empty(), Optional.empty());
+                    Optional.empty(), List.of(), Optional.empty(), Optional.empty(),
+                    Files.isRegularFile(folder.resolve(MANIFEST)), List.of());
         }
         Map<String, String> properties = new HashMap<>();
         child(project, "properties").ifPresent(element -> children(element)
@@ -148,9 +182,22 @@ public record KnowledgeBaseProjectFolder(Path folder, String artifactId, Optiona
         Optional<Repository> deploysTo = child(project, "distributionManagement")
                 .flatMap(management -> child(management, snapshot ? "snapshotRepository" : "repository"))
                 .flatMap(repository -> text(repository, "url").map(url -> new Repository(text(repository, "id").orElse(""), url)));
+        boolean workingSet = Files.isRegularFile(folder.resolve(MANIFEST));
+        List<KnowledgeBaseProjectFolder> members = new ArrayList<>();
+        if (workingSet) {
+            // Only the working set's own members are read: a member is a project, never a working set of its own.
+            child(project, "subprojects").ifPresent(subprojects -> {
+                for (Element subproject : children(subprojects)) {
+                    Path member = folder.resolve(subproject.getTextContent().strip());
+                    if ("subproject".equals(subproject.getNodeName()) && isProject(member)) {
+                        members.add(read(member));
+                    }
+                }
+            });
+        }
         return new KnowledgeBaseProjectFolder(folder, artifactId, groupId, version, text(project, "name"),
                 Optional.ofNullable(properties.get("ike.kbAssemble.collection")).filter(text -> !text.isEmpty()),
-                layers, deploysTo, version.flatMap(text -> built(folder, artifactId, text)));
+                layers, deploysTo, version.flatMap(text -> built(folder, artifactId, text)), workingSet, members);
     }
 
     /** When the protobuf the project publishes was last written by a build. */
@@ -201,6 +248,17 @@ public record KnowledgeBaseProjectFolder(Path folder, String artifactId, Optiona
      */
     public String title() {
         return displayName.orElse(artifactId);
+    }
+
+    /**
+     * The working set a project is a member of, among the projects of a projects folder.
+     *
+     * @param projects the projects in the projects folder
+     * @return the working set, or empty when the project is on its own
+     */
+    public Optional<KnowledgeBaseProjectFolder> workingSetAmong(List<KnowledgeBaseProjectFolder> projects) {
+        return projects.stream().filter(candidate -> candidate.members().stream()
+                .anyMatch(member -> member.folder().equals(folder))).findFirst();
     }
 
     /**

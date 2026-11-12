@@ -155,6 +155,7 @@ class KnowledgeBaseProjectTest {
         assertThat(names.free("snomedct-kb", "network.ike.data")).isEqualTo("snomedct-3-kb");
         assertThat(names.free("notes-kb", "network.ike.data")).as("a folder of that name counts too").isEqualTo("notes-3-kb");
         assertThat(names.free("solor", "network.ike.data")).isEqualTo("solor-2");
+        assertThat(names.free("gene-ws", "network.ike.data")).as("a working set keeps its -ws ending too").isEqualTo("gene-2-ws");
     }
 
     @Test
