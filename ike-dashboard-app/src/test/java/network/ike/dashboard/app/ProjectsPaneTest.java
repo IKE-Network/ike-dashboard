@@ -82,12 +82,12 @@ class ProjectsPaneTest {
         });
 
         assertThat(shown.getFirst()).as("before any project is made, what a project is and how to make one")
-                .contains("No projects yet", "No projects in " + System.getProperty("user.home") + "/knowledge-bases yet."
+                .contains("No projects yet", "No projects in " + Path.of(System.getProperty("user.home"), "knowledge-bases") + " yet."
                         + " A project builds a knowledge base from protobufs on Nexus. Choose New knowledge base to make one.");
         assertThat(shown.get(1)).as("the list: each project by its name, marked for what its repository lacks")
                 .containsSubsequence("gene-kb", "no remote", "notes-kb", "not committed");
         assertThat(shown.get(1)).as("the first project's detail")
-                .contains("Gene Knowledge Base", "network.ike.data:gene-kb:1-SNAPSHOT", "Folder  /home/knowledge-bases/gene-kb",
+                .contains("Gene Knowledge Base", "network.ike.data:gene-kb:1-SNAPSHOT", "Folder  " + PROJECTS.resolve("gene-kb"),
                         "Built from", "1.  ike-starter-set  ·  protobuf, unreasoned  ·  1-20261107.045844-2",
                         "2.  ncbi-gene-kb  ·  protobuf, unreasoned  ·  20261020.1-20261111.021538-1",
                         "Each layer stays at this version until the project is changed.",

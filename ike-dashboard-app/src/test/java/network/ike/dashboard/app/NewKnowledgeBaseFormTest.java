@@ -94,7 +94,7 @@ class NewKnowledgeBaseFormTest {
                         "A git repository in its folder, with one commit and no remote.",
                         "Draft it to see what will be created.");
         assertThat(project.name()).isEqualTo("solor-gene-kb");
-        assertThat(project.folder()).as("in the projects folder, following the name").isEqualTo(Path.of("/home/kb/solor-gene-kb"));
+        assertThat(project.folder()).as("in the projects folder, following the name").isEqualTo(Path.of("/home/kb/solor-gene-kb").toAbsolutePath());
         assertThat(project.properties()).as("only the layers: everything else is the goals' default").containsExactly(Map.entry("layers",
                 "network.ike.data:snomedct-kb:zip:unreasoned-pb:20260601.2-SNAPSHOT,"
                         + "network.ike.data:ncbi-gene-kb:zip:unreasoned-pb:20261020.1-SNAPSHOT,"
@@ -145,7 +145,7 @@ class NewKnowledgeBaseFormTest {
         assertThat(drafted).as("each layer at the deploy the draft pinned it to, the starter set among them")
                 .contains("protobuf, unreasoned  ·  1-20261107.045844-2  ·  0.9 MiB",
                         "protobuf, unreasoned  ·  20261020.1-20261111.021538-1  ·  0.1 MiB",
-                        "The draft shows what will be created in /home/kb/gene-try-kb.");
+                        "The draft shows what will be created in " + Path.of("/home/kb/gene-try-kb").toAbsolutePath() + ".");
         assertThat((String) shown.get(2)).as("the goals' report, without Maven's framing")
                 .startsWith("Knowledge base: Gene Try Knowledge Base (assembly)\n  Layers, in load order, pinned:")
                 .endsWith("  Build heap:   -Xmx8g (estimated)");
@@ -238,7 +238,7 @@ class NewKnowledgeBaseFormTest {
                 .isEqualTo("A knowledge base named snomedct-kb is already on Nexus. snomedct-2-kb is free.");
         assertThat(shown.get(3)).isEqualTo("Use snomedct-2-kb");
         assertThat(shown.get(4)).as("the link takes the free name").isEqualTo("snomedct-2-kb");
-        assertThat(shown.get(5)).as("and the folder follows it").isEqualTo(Path.of("/home/kb/snomedct-2-kb"));
+        assertThat(shown.get(5)).as("and the folder follows it").isEqualTo(Path.of("/home/kb/snomedct-2-kb").toAbsolutePath());
         assertThat(shown.get(6)).isEqualTo("Draft it to see what will be created.");
         assertThat(shown.get(7)).isEqualTo(false);
         assertThat(shown.get(8)).as("the offer is gone once the name is free").isEqualTo(false);

@@ -52,7 +52,7 @@ class KnowledgeBaseProjectTest {
 
         assertThat(project.arguments(KnowledgeBaseCreation.DRAFT, "280")).as("batch mode, no transfer progress, no colour, then the goal")
                 .containsExactly("-B", "-ntp", "-Dstyle.color=never", "network.ike.tooling:ike-maven-plugin:280:kb-create-draft",
-                        "-Dname=my-kb", "-DtargetDirectory=/work/my-kb", "-Dlayers=" + SNOMED + "," + GENE, "-Dcollection=TRY");
+                        "-Dname=my-kb", "-DtargetDirectory=" + Path.of("/work/my-kb"), "-Dlayers=" + SNOMED + "," + GENE, "-Dcollection=TRY");
         assertThat(project.properties()).as("a blank property is not said").doesNotContainKey("displayName");
         assertThat(project.kind()).as("an assembly unless another kind is named").isEqualTo(KnowledgeBaseProject.Kind.ASSEMBLY);
         assertThat(project.layers()).extracting(KnowledgeBaseProject.Layer::artifactId).containsExactly("snomedct-kb", "ncbi-gene-kb");
@@ -66,7 +66,7 @@ class KnowledgeBaseProjectTest {
                 Path.of("/home/knowledge-bases"));
         KnowledgeBaseProject unnamed = KnowledgeBaseProject.parse("my-kb", List.of("layers=" + GENE), Path.of("/home/knowledge-bases"));
 
-        assertThat(named.folder()).isEqualTo(Path.of("/elsewhere/kb"));
+        assertThat(named.folder()).as("as given, made absolute").isEqualTo(Path.of("/elsewhere/kb").toAbsolutePath());
         assertThat(named.kind()).isEqualTo(KnowledgeBaseProject.Kind.SOURCE_LAYER);
         assertThat(named.problems()).isEmpty();
         assertThat(unnamed.folder()).as("in the projects folder, named for the knowledge base")
