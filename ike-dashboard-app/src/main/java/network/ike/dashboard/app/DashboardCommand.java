@@ -43,6 +43,14 @@ import java.util.Locale;
  * komet-latest [repository-url]         the newest Komet build: Nexus's komet-app, else GitHub's
  * komet-install [folder] [repository-url] install it beside the others (default: the install location)
  * download &lt;g:a:v&gt; &lt;classifier&gt;          the newest deploy of a store, into ~/Solor/&lt;artifactId&gt;
+ * projects                              the projects that build knowledge bases, in ~/knowledge-bases
+ * kb-draft &lt;name&gt; [property=value …]    what kb-new would create, each layer pinned; nothing is written
+ * kb-new &lt;name&gt; [property=value …]      create a knowledge-base project in a local git repository:
+ *                                       layers=&lt;g:a:zip:classifier:v,…&gt; in load order, folder=&lt;path&gt;
+ *                                       (default: ~/knowledge-bases/&lt;name&gt;), and any other property of
+ *                                       ike:kb-create-publish, such as kind, collection, rocks; a name
+ *                                       already used by a project, in ~/Solor or on Nexus is refused,
+ *                                       with one that is free
  * dashboard-latest [repository-url]     the newest IKE Dashboard on Nexus
  * self-update [application]             replace a dashboard with the newest, once this command has
  *                                       ended, and open it (default: the application running this)
@@ -88,6 +96,14 @@ public final class DashboardCommand {
                 }
                 download(out, settings, Coordinate.parse(args[1]), args[2]);
             }
+            case "projects" -> projects(out, settings);
+            case "kb-draft", "kb-new" -> {
+                if (args.length < 2) {
+                    throw new IllegalArgumentException(command + " <name> [property=value …], such as layers=<g:a:zip:classifier:v,…>");
+                }
+                newKnowledgeBase(out, settings, command.equals("kb-new"),
+                        KnowledgeBaseProject.parse(args[1], List.of(args).subList(2, args.length), settings.projects()));
+            }
             case "dashboard-latest" -> SelfUpdate.newest(RepositoryHttpClients.newClient(),
                             args.length > 1 ? args[1] : KometReleases.PUBLIC_URL, KometReleases.platformClassifier())
                     .ifPresentOrElse(release -> out.printf("IKE Dashboard %s: %s (%s)%n", release.version(), release.uri(),
@@ -95,7 +111,7 @@ public final class DashboardCommand {
                             () -> out.println("No IKE Dashboard build found"));
             case "self-update" -> selfUpdate(out, settings, args.length > 1 ? Optional.of(Path.of(args[1])) : Optional.empty());
             default -> throw new IllegalArgumentException("Unknown command " + command
-                    + "; use list, check, notices, komets, heap, download, dashboard-latest or self-update");
+                    + "; use list, check, notices, komets, heap, download, projects, kb-draft, kb-new, dashboard-latest or self-update");
         }
     }
 
@@ -321,6 +337,62 @@ public final class DashboardCommand {
         out.printf("%s: %s, %s, %s%n", store, knowledgeBase.kind().label(), size(knowledgeBase.sizeBytes()),
                 knowledgeBase.coordinate().map(Coordinate::toString).orElse("unidentified"));
         knowledgeBase.attributes().forEach((name, value) -> out.printf("  %s: %s%n", name, value));
+    }
+
+    /** Lists the projects that build knowledge bases, each with what it is built from and its repository's state. */
+    private static void projects(PrintStream out, DashboardSettings settings) throws Exception {
+        List<KnowledgeBaseProjectFolder> projects = KnowledgeBaseProjectFolder.scan(settings.projects());
+        Optional<RepositorySync.Git> git = RepositorySync.Git.find();
+        out.printf("%d projects in %s%n", projects.size(), settings.projects());
+        for (KnowledgeBaseProjectFolder project : projects) {
+            String repository = git.isEmpty() || !java.nio.file.Files.exists(project.folder().resolve(".git")) ? "no git repository"
+                    : describe(RepositorySync.local(git.get(), new RepositorySync.Repository(project.folder(), "project")));
+            out.printf("%-28s %-44s %s%n", project.artifactId(), project.coordinates(), repository);
+            for (KnowledgeBaseProject.Layer layer : project.layers()) {
+                out.printf("    %-30s %-22s %s%n", layer.artifactId(), NexusCatalog.label(layer.classifier()), layer.version());
+            }
+        }
+    }
+
+    private static String describe(RepositorySync.Status status) {
+        return "branch " + status.branch() + ", " + (status.uncommitted() == 0 ? "everything committed"
+                : status.uncommitted() + " not committed") + (status.remote() == RepositorySync.Remote.NONE ? ", no remote" : "");
+    }
+
+    /**
+     * Drafts or creates a knowledge-base project, as the New knowledge base window does: the same checks,
+     * the same goals, Maven's output as it is written.
+     */
+    private static void newKnowledgeBase(PrintStream out, DashboardSettings settings, boolean create, KnowledgeBaseProject project)
+            throws Exception {
+        List<String> problems = project.problems();
+        if (!problems.isEmpty()) {
+            throw new IllegalArgumentException(String.join(" ", problems));
+        }
+        java.util.Set<String> onNexus = new java.util.HashSet<>();
+        try {
+            NexusCatalog.list(RepositoryHttpClients.newClient(), access(settings))
+                    .forEach(offer -> onNexus.add(offer.coordinate().groupId() + ":" + offer.coordinate().artifactId()));
+        } catch (Exception e) {
+            out.println("Could not ask Nexus which names are in use: " + e.getMessage());
+        }
+        String groupId = project.properties().getOrDefault("groupId", KnowledgeBaseProject.DEFAULT_GROUP);
+        KnowledgeBaseProject.Names names = KnowledgeBaseProject.Names.read(settings.projects(), settings.solor(), onNexus);
+        Optional<String> taken = names.taken(project.name(), groupId);
+        if (taken.isPresent()) {
+            throw new IllegalArgumentException(taken.get() + " " + names.free(project.name(), groupId) + " is free.");
+        }
+        KnowledgeBaseCreation.Prerequisites prerequisites = KnowledgeBaseCreation.prerequisites();
+        if (!prerequisites.missing().isEmpty()) {
+            throw new IllegalStateException(String.join(" ", prerequisites.missing()));
+        }
+        KnowledgeBaseCreation creation = new KnowledgeBaseCreation(prerequisites);
+        KnowledgeBaseCreation.Outcome outcome = create ? creation.create(project, out::println) : creation.draft(project, out::println);
+        if (!outcome.succeeded()) {
+            throw new IllegalStateException(outcome.failure().orElse("Maven ended with " + outcome.exit()));
+        }
+        out.println(create ? "Created " + project.name() + " in " + project.folder()
+                : "Draft only: kb-new with the same words creates it in " + project.folder());
     }
 
     static RepositoryAccess access(DashboardSettings settings) throws Exception {

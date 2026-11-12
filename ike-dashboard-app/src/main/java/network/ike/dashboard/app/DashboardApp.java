@@ -78,6 +78,10 @@ public final class DashboardApp extends Application {
     private final ExecutorService transfers = Executors.newFixedThreadPool(TRANSFERS_AT_ONCE, daemon("ike-dashboard-transfer"));
     /** Quick changes to stores and to the dashboard itself: restore, move to the Trash, clean up, move. */
     private final ExecutorService files = Executors.newSingleThreadExecutor(daemon("ike-dashboard-files"));
+    /** Maven, for a new knowledge base: its draft, its creation, its build. One at a time; the form waits on it. */
+    private final ExecutorService maven = Executors.newSingleThreadExecutor(daemon("ike-dashboard-maven"));
+    /** The Maven run under way, which Cancel stops. */
+    private volatile java.util.concurrent.Future<?> mavenRun;
     private final ScheduledExecutorService clock = Executors.newSingleThreadScheduledExecutor(daemon("ike-dashboard-clock"));
     /**
      * One upgrade's check in Komet at a time: each runs a Komet with the store's heap, and two side by side
@@ -107,6 +111,8 @@ public final class DashboardApp extends Application {
     private final Map<Path, Long> dataBytes = new ConcurrentHashMap<>();
     private DashboardView view;
     private volatile String selectAfterRefresh;
+    /** A project just created, which the Projects tab shows once it has been read. */
+    private volatile Path showProjectAfterRefresh;
     private Optional<SelfUpdate.Placement> placement = Optional.empty();
 
     /** Creates the application; JavaFX instantiates it. */
@@ -174,6 +180,16 @@ public final class DashboardApp extends Application {
         view.setOnOpenLink(uri -> getHostServices().showDocument(uri.toString()));
         view.setKometPins(KometPins.current());
         view.setOnBrowse(this::loadCatalog);
+        NewKnowledgeBaseForm form = view.newKnowledgeBase();
+        form.setProjectsFolder(settings.projects());
+        form.setPrerequisites(KnowledgeBaseCreation.prerequisites().missing());
+        form.setOnDraft(this::draftKnowledgeBase);
+        form.setOnCreate(this::createKnowledgeBase);
+        form.setOnCancel(() -> Optional.ofNullable(mavenRun).ifPresent(run -> run.cancel(true)));
+        ProjectsPane projects = view.projects();
+        projects.setOnBuild(this::buildProject);
+        projects.setOnReveal(path -> run(() -> Finder.reveal(path), "Could not show " + Names.of(path)));
+        projects.setOnCancel(() -> Optional.ofNullable(mavenRun).ifPresent(run -> run.cancel(true)));
         view.setOnInstallKomet(this::installKomet);
         view.setOnUpgrade(this::upgrade);
         view.setOnReinstall(this::reinstall);
@@ -210,6 +226,7 @@ public final class DashboardApp extends Application {
         checks.shutdownNow();
         transfers.shutdownNow();
         files.shutdownNow();
+        maven.shutdownNow();
     }
 
     /** Runs a transfer on the transfer threads, counted from now until it ends. */
@@ -277,7 +294,26 @@ public final class DashboardApp extends Application {
                 List<KnowledgeBase> unmanaged = KnowledgeBaseFamily.unmanaged(knowledgeBases);
                 dataBytes.clear();
                 this.komets = komets;
+                KnowledgeBaseProject.Names names = KnowledgeBaseProject.Names.read(settings.projects(), settings.solor(), Set.of());
+                List<KnowledgeBaseProjectFolder> projects = KnowledgeBaseProjectFolder.scan(settings.projects());
+                Map<Path, RepositorySync.Status> projectGit = new java.util.HashMap<>();
+                if (git.isPresent()) {
+                    for (KnowledgeBaseProjectFolder project : projects) {
+                        if (Files.exists(project.folder().resolve(".git"))) {
+                            projectGit.put(project.folder(), RepositorySync.local(git.get(),
+                                    new RepositorySync.Repository(project.folder(), "project")));
+                        }
+                    }
+                }
                 Platform.runLater(() -> {
+                    view.newKnowledgeBase().setNamesHere(names);
+                    view.projects().setProjects(settings.projects(), projects, projectGit, git.isPresent());
+                    Path created = showProjectAfterRefresh;
+                    if (created != null) {
+                        showProjectAfterRefresh = null;
+                        view.showProjects();
+                        view.projects().select(created);
+                    }
                     view.setKomets(komets);
                     view.setFamilies(found);
                     view.setUnmanaged(unmanaged);
@@ -1050,6 +1086,91 @@ public final class DashboardApp extends Application {
             view.setMessage(edit.override().map(need -> Names.of(knowledgeBase.name()) + " opens with " + need.text())
                     .orElse(Names.of(knowledgeBase.name()) + " opens with the memory the dashboard works out for it"));
         });
+    }
+
+    /** Shows what creating a knowledge base would do; Nexus is read to pin its layers, and nothing is written. */
+    private void draftKnowledgeBase(KnowledgeBaseProject project) {
+        NewKnowledgeBaseForm form = view.newKnowledgeBase();
+        runMaven("kb-draft-" + project.name(), (creation, line) -> creation.draft(project, line),
+                () -> form.working("Drafting " + project.name() + ": finding each layer's exact version on Nexus …"),
+                form::progress, outcome -> form.drafted(project, outcome), form::failed);
+    }
+
+    /**
+     * Creates the knowledge base the draft showed: its project, its git repository with one commit, and
+     * a validation that every layer resolves. The Projects tab then shows it.
+     */
+    private void createKnowledgeBase(KnowledgeBaseProject project) {
+        NewKnowledgeBaseForm form = view.newKnowledgeBase();
+        runMaven("kb-new-" + project.name(), (creation, line) -> creation.create(project, line),
+                () -> form.working("Creating " + project.name() + " in " + project.folder() + " …"),
+                form::progress, outcome -> {
+                    form.created(project, outcome);
+                    if (outcome.succeeded()) {
+                        view.setMessage("Created " + Names.of(project.name()) + " in " + project.folder());
+                        showProjectAfterRefresh = project.folder();
+                        refresh();                           // its name is now one in use
+                    }
+                }, form::failed);
+    }
+
+    /** Runs a phase of a project's own build, {@code verify} or {@code deploy}, shown on the Projects tab. */
+    private void buildProject(KnowledgeBaseProjectFolder project, String phase) {
+        ProjectsPane projects = view.projects();
+        Path folder = project.folder();
+        boolean deploy = "deploy".equals(phase);
+        runMaven("kb-" + phase + "-" + project.artifactId(), (creation, line) -> creation.build(folder, phase, line),
+                () -> projects.working(folder, (deploy ? "Deploying " : "Building ") + project.artifactId() + " …"),
+                projects::progress, outcome -> {
+                    projects.built(folder, phase, outcome);
+                    view.setMessage((outcome.succeeded() ? (deploy ? "Deployed " : "Built ") : "Could not " + (deploy ? "deploy " : "build "))
+                            + Names.of(project.artifactId()));
+                    refresh();                               // when it was last built, and what is uncommitted
+                }, reason -> projects.failed(folder, reason));
+    }
+
+    /**
+     * Runs Maven for a knowledge-base project, off the JavaFX thread: each line is shown as it is
+     * written, everything is kept in a log, and whoever asked is told how it ended. One runs at a time.
+     */
+    private void runMaven(String logName, MavenStep step, Runnable started, java.util.function.Consumer<String> progress,
+                          java.util.function.Consumer<KnowledgeBaseCreation.Outcome> ended, java.util.function.Consumer<String> failed) {
+        KnowledgeBaseCreation.Prerequisites prerequisites = KnowledgeBaseCreation.prerequisites();
+        view.newKnowledgeBase().setPrerequisites(prerequisites.missing());
+        if (!prerequisites.missing().isEmpty()) {
+            failed.accept(String.join(" ", prerequisites.missing()));
+            return;
+        }
+        java.util.concurrent.Future<?> running = mavenRun;
+        if (running != null && !running.isDone()) {
+            failed.accept("Maven is already running for another knowledge base. Try again once it has finished.");
+            return;
+        }
+        started.run();
+        mavenRun = maven.submit(() -> {
+            try {
+                KnowledgeBaseCreation.Outcome outcome = step.run(new KnowledgeBaseCreation(prerequisites),
+                        line -> Platform.runLater(() -> progress.accept(line)));
+                Path log = settings.logFolder().resolve(logName + "-"
+                        + java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")) + ".log");
+                Files.createDirectories(log.getParent());
+                Files.write(log, outcome.lines());
+                Platform.runLater(() -> {
+                    view.setLastLog(log);
+                    ended.accept(outcome);
+                });
+            } catch (InterruptedException e) {
+                Platform.runLater(() -> failed.accept("Cancelled."));
+            } catch (Exception e) {
+                Platform.runLater(() -> failed.accept(e.getMessage() == null ? e.toString() : e.getMessage()));
+            }
+        });
+    }
+
+    /** One run of Maven for a knowledge-base project. */
+    @FunctionalInterface
+    private interface MavenStep {
+        KnowledgeBaseCreation.Outcome run(KnowledgeBaseCreation creation, java.util.function.Consumer<String> line) throws Exception;
     }
 
     private void run(Action action, String failure) {

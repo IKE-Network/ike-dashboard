@@ -99,6 +99,7 @@ import java.util.stream.Collectors;
  * a Not managed section at the foot of the list, offering only Show in Finder and Move to Trash. The pane on the right is the selected one: its facts,
  * one Open, a newer build to download, and the older copies and change sets folded into sections, with
  * the space they take. What is not yet here is found in a window of its own, the {@link NexusBrowser}.
+ * The projects that build knowledge bases are kept apart, on a tab of their own, the {@link ProjectsPane}.
  * It holds no IO of its own; {@link DashboardApp} supplies the data and the actions.
  *
  * <p>Above the list, Notices is the landing page and the first screen (the IKE Dashboard design,
@@ -138,6 +139,12 @@ public final class DashboardView extends BorderPane {
     private final Button fromNexus = new Button("Get from Nexus…");
     private final NexusBrowser browser = new NexusBrowser();
     private Stage browserWindow;
+    /** The Projects tab: the projects that build knowledge bases, apart from the knowledge bases themselves. */
+    private final ProjectsPane projects = new ProjectsPane();
+    private final ToggleButton projectsTab = new ToggleButton("Projects");
+    private boolean showingProjects;
+    private final NewKnowledgeBaseForm newKnowledgeBaseForm = new NewKnowledgeBaseForm();
+    private Stage newKnowledgeBaseWindow;
     private final VBox detail = new VBox(10);
     private final SelectableText message = SelectableText.of("");
     private final Hyperlink showLog = new Hyperlink("Show last log");
@@ -257,6 +264,9 @@ public final class DashboardView extends BorderPane {
         knowledgeBasesTab.setToggleGroup(views);
         noticesTab.setToggleGroup(views);
         kometsTab.setToggleGroup(views);
+        projectsTab.setToggleGroup(views);
+        projectsTab.getStyleClass().add("center-pill");
+        projectsTab.setMinWidth(Region.USE_PREF_SIZE);
         knowledgeBasesTab.getStyleClass().add("left-pill");
         kometsTab.getStyleClass().add("center-pill");
         noticesTab.getStyleClass().add("right-pill");
@@ -271,13 +281,15 @@ public final class DashboardView extends BorderPane {
             }
             if (now == noticesTab) {
                 showNotices();
+            } else if (now == projectsTab) {
+                showProjects();
             } else if (now == kometsTab) {
                 showKomets();
             } else {
                 showKnowledgeBases();
             }
         });
-        HBox views3 = new HBox(knowledgeBasesTab, kometsTab, noticesTab);
+        HBox views3 = new HBox(knowledgeBasesTab, projectsTab, kometsTab, noticesTab);
         views3.setAlignment(Pos.CENTER);
         views3.setMaxWidth(Region.USE_PREF_SIZE);
         // Refresh is at the top right on every view, whichever is shown (KEC, 2026-11-08).
@@ -292,6 +304,7 @@ public final class DashboardView extends BorderPane {
 
         fromNexus.setOnAction(event -> openBrowser());
         browser.setOnDownload((coordinate, classifier) -> onDownload.accept(coordinate, classifier));
+        projects.setOnNew(this::openNewKnowledgeBase);
         HBox masterBottom = new HBox(fromNexus);
         masterBottom.setPadding(new Insets(8));
 
@@ -301,6 +314,7 @@ public final class DashboardView extends BorderPane {
             if (now != null) {
                 showingNotices = false;
                 showingKomets = false;
+                showingProjects = false;
                 knowledgeBasesTab.setSelected(true);
             }
             showDetail();
@@ -316,6 +330,7 @@ public final class DashboardView extends BorderPane {
             if (now != null) {
                 showingNotices = false;
                 showingKomets = false;
+                showingProjects = false;
                 knowledgeBasesTab.setSelected(true);
                 list.getSelectionModel().clearSelection();
             }
@@ -445,6 +460,7 @@ public final class DashboardView extends BorderPane {
         this.catalog = catalog;
         catalogLoaded = true;
         browser.setCatalog(catalog, here());
+        newKnowledgeBaseForm.setCatalog(catalog);
         refreshNotices();
     }
 
@@ -464,6 +480,15 @@ public final class DashboardView extends BorderPane {
      */
     public NexusBrowser browser() {
         return browser;
+    }
+
+    /**
+     * The New knowledge base window's content.
+     *
+     * @return the form
+     */
+    public NewKnowledgeBaseForm newKnowledgeBase() {
+        return newKnowledgeBaseForm;
     }
 
     /**
@@ -783,6 +808,7 @@ public final class DashboardView extends BorderPane {
         lastChosen = selected().map(KnowledgeBaseFamily::name).orElse(lastChosen);
         showingNotices = true;
         showingKomets = false;
+        showingProjects = false;
         noticesTab.setSelected(true);
         list.getSelectionModel().clearSelection();
         unmanagedList.getSelectionModel().clearSelection();
@@ -795,6 +821,7 @@ public final class DashboardView extends BorderPane {
     public void showKnowledgeBases() {
         showingNotices = false;
         showingKomets = false;
+        showingProjects = false;
         knowledgeBasesTab.setSelected(true);
         if (list.getSelectionModel().isEmpty() && unmanagedList.getSelectionModel().isEmpty()) {
             String last = lastChosen;
@@ -817,10 +844,44 @@ public final class DashboardView extends BorderPane {
         lastChosen = selected().map(KnowledgeBaseFamily::name).orElse(lastChosen);
         showingKomets = true;
         showingNotices = false;
+        showingProjects = false;
         kometsTab.setSelected(true);
         list.getSelectionModel().clearSelection();
         unmanagedList.getSelectionModel().clearSelection();
         showDetail();
+    }
+
+    /**
+     * Shows the projects that build knowledge bases, across the window (decision 21; KEC, 2026-11-12). The
+     * knowledge base chosen stays chosen.
+     */
+    public void showProjects() {
+        lastChosen = selected().map(KnowledgeBaseFamily::name).orElse(lastChosen);
+        showingProjects = true;
+        showingKomets = false;
+        showingNotices = false;
+        projectsTab.setSelected(true);
+        list.getSelectionModel().clearSelection();
+        unmanagedList.getSelectionModel().clearSelection();
+        showDetail();
+    }
+
+    /**
+     * Whether the projects are shown.
+     *
+     * @return {@code true} when they are
+     */
+    public boolean showingProjects() {
+        return showingProjects;
+    }
+
+    /**
+     * The Projects tab's content.
+     *
+     * @return the pane
+     */
+    public ProjectsPane projects() {
+        return projects;
     }
 
     /**
@@ -1780,7 +1841,7 @@ public final class DashboardView extends BorderPane {
     }
 
     /**
-     * What Get from Nexus does before its window shows, such as asking Nexus again.
+     * What Get from Nexus and New knowledge base do before their windows show, such as asking Nexus again.
      *
      * @param action the action
      */
@@ -1806,6 +1867,21 @@ public final class DashboardView extends BorderPane {
         browserWindow.toFront();
     }
 
+    /** Opens the form that creates a knowledge base, asking Nexus again for the layers to pick from. */
+    void openNewKnowledgeBase() {
+        if (newKnowledgeBaseWindow == null) {
+            newKnowledgeBaseWindow = new Stage();
+            newKnowledgeBaseWindow.setTitle("New knowledge base");
+            newKnowledgeBaseWindow.setScene(new Scene(newKnowledgeBaseForm, 760, 780));
+            if (getScene() != null) {
+                newKnowledgeBaseWindow.initOwner(getScene().getWindow());
+            }
+        }
+        onBrowse.run();
+        newKnowledgeBaseWindow.show();
+        newKnowledgeBaseWindow.toFront();
+    }
+
     private List<KnowledgeBaseFamily> newerBuilds() {
         return families.stream().filter(family -> status(family.name()).state() == BuildStatus.State.NEWER).toList();
     }
@@ -1826,7 +1902,7 @@ public final class DashboardView extends BorderPane {
         listings.setAll(families.stream().sorted(order).toList());
         updateBanner();
         refreshNotices();
-        if ((showingNotices || showingKomets) && keep == null) {
+        if ((showingNotices || showingKomets || showingProjects) && keep == null) {
             return;
         }
         Optional<KnowledgeBaseFamily> again = shown.stream().filter(family -> family.name().equals(keep)).findFirst()
@@ -1839,6 +1915,10 @@ public final class DashboardView extends BorderPane {
     }
 
     private void showDetail() {
+        if (showingProjects) {
+            setCenter(projects);
+            return;
+        }
         if (showingKomets) {
             setCenter(kometsView);
             showKometsPane();

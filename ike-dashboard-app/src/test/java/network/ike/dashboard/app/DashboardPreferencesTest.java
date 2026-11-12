@@ -39,6 +39,7 @@ class DashboardPreferencesTest {
                 Map.entry(DashboardPreferences.Key.LOCAL_REPOSITORY, "localRepository"),
                 Map.entry(DashboardPreferences.Key.LOG_FOLDER, "logFolder"),
                 Map.entry(DashboardPreferences.Key.COLLECTIONS, "collections"),
+                Map.entry(DashboardPreferences.Key.PROJECTS, "projects"),
                 Map.entry(DashboardPreferences.Key.HEAP_SPINED64_SHARE, "spined64Share"),
                 Map.entry(DashboardPreferences.Key.HEAP_ROCKS_SHARE, "rocksShare"),
                 Map.entry(DashboardPreferences.Key.HEAP_CACHE_SHARE, "cacheShare"),

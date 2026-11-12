@@ -55,6 +55,8 @@ class DashboardSettingsTest {
             DashboardSettings mac = DashboardSettings.read(empty, home, OperatingSystem.MAC, Map.of());
             assertThat(mac.installLocation()).isEqualTo(home.resolve("Applications/IKE/Komet"));
             assertThat(mac.logFolder()).isEqualTo(home.resolve("Library/Logs/IKE Dashboard"));
+            assertThat(mac.projects()).as("the projects that build knowledge bases, apart from the knowledge bases in Solor")
+                    .isEqualTo(home.resolve("knowledge-bases"));
         } finally {
             empty.removeNode();
         }

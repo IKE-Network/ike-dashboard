@@ -84,6 +84,8 @@ public final class DashboardPreferences {
         LOG_FOLDER(Node.DASHBOARD, "logFolder"),
         /** The collections whose knowledge bases the dashboard keeps at hand. */
         COLLECTIONS(Node.DASHBOARD, "collections"),
+        /** The folder new knowledge-base projects are made in. */
+        PROJECTS(Node.DASHBOARD, "projects"),
         /** Heap, as a share of a spined store's size. */
         HEAP_SPINED64_SHARE(Node.HEAP, "spined64Share"),
         /** Heap, as a share of a Rocks store's size. */

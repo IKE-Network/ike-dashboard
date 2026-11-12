@@ -36,9 +36,11 @@ import java.util.stream.Collectors;
  * @param logFolder       where the dashboard and the Komets it starts log
  * @param collections     the collections whose knowledge bases are kept at hand, downloaded or not
  *                        (decision 17): {@value #DEFAULT_COLLECTIONS} unless the person names others
+ * @param projects        the folder new knowledge-base projects are made in, each in a folder of its own,
+ *                        apart from the knowledge bases themselves
  */
 public record DashboardSettings(Path solor, Path installLocation, String repositoryUrl, String serverId,
-                                Path localRepository, Path logFolder, Set<String> collections) {
+                                Path localRepository, Path logFolder, Set<String> collections, Path projects) {
 
     /**
      * The collections tracked when the person has named none: the SOLOR pipeline's, every knowledge base
@@ -57,6 +59,7 @@ public record DashboardSettings(Path solor, Path installLocation, String reposit
      * @param localRepository the local Maven repository downloads are cached in
      * @param logFolder       where the dashboard and the Komets it starts log
      * @param collections     the collections tracked
+     * @param projects        the folder new knowledge-base projects are made in
      */
     public DashboardSettings {
         collections = Set.copyOf(collections);
@@ -114,7 +117,8 @@ public record DashboardSettings(Path solor, Path installLocation, String reposit
                 preferences.get(DashboardPreferences.Key.SERVER_ID.stored(), RepositoryAccess.RESTRICTED_SERVER_ID),
                 Path.of(preferences.get(DashboardPreferences.Key.LOCAL_REPOSITORY.stored(), home.resolve(".m2/repository").toString())),
                 Path.of(preferences.get(DashboardPreferences.Key.LOG_FOLDER.stored(), logFolder.toString())),
-                collections(preferences.get(DashboardPreferences.Key.COLLECTIONS.stored(), DEFAULT_COLLECTIONS)));
+                collections(preferences.get(DashboardPreferences.Key.COLLECTIONS.stored(), DEFAULT_COLLECTIONS)),
+                Path.of(preferences.get(DashboardPreferences.Key.PROJECTS.stored(), home.resolve("knowledge-bases").toString())));
     }
 
     /**
