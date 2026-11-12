@@ -57,14 +57,18 @@ import java.util.prefs.Preferences;
  *
  * <p>It uses the network whenever it can and fails gracefully without it (decision 14): what needs the
  * network, Nexus and the remotes of the repositories inside stores, is checked on start and every
- * {@link #NETWORK_CHECK_INTERVAL} after; a check that fails keeps what the last one found, shown as of
- * then.
+ * {@link #REFRESH_INTERVAL} after; a check that fails keeps what the last one found, shown as of
+ * then. Each of those checks first reads {@code ~/Solor} and the installed Komets again, as Refresh does,
+ * so a notice never outlasts a change made outside the window by more than that interval.
  */
 public final class DashboardApp extends Application {
 
 
-    /** How often what needs the network is checked again while the dashboard runs. */
-    static final Duration NETWORK_CHECK_INTERVAL = Duration.ofHours(1);
+    /**
+     * How often the dashboard refreshes by itself while it runs: {@code ~/Solor} and the installed Komets
+     * read again, then everything that needs the network.
+     */
+    static final Duration REFRESH_INTERVAL = Duration.ofHours(1);
 
     /** Transfers under way at once; the next waits its turn, saying so. */
     static final int TRANSFERS_AT_ONCE = 3;
@@ -96,7 +100,6 @@ public final class DashboardApp extends Application {
     private final AtomicInteger pendingTransfers = new AtomicInteger();
     private final Optional<RepositorySync.Git> git = RepositorySync.Git.find();
     private final Map<Path, Notice.Freshness> remoteChecked = new ConcurrentHashMap<>();
-    private volatile List<KnowledgeBaseFamily> current = List.of();
     private volatile Instant nexusChecked;
     private final Map<String, BuildStatus> lastStatuses = new ConcurrentHashMap<>();
     private DashboardSettings settings;
@@ -217,8 +220,10 @@ public final class DashboardApp extends Application {
             }
         }));
         refresh();
-        long interval = NETWORK_CHECK_INTERVAL.toMinutes();
-        clock.scheduleAtFixedRate(() -> checks.submit(() -> checkNetwork(current)), interval, interval, TimeUnit.MINUTES);
+        // The whole refresh, not the network alone: what changed on disk outside the window since the last
+        // one would otherwise keep its notices until Refresh was clicked (KEC, 2026-11-12).
+        long interval = REFRESH_INTERVAL.toMinutes();
+        clock.scheduleAtFixedRate(() -> Platform.runLater(this::refresh), interval, interval, TimeUnit.MINUTES);
     }
 
     @Override
@@ -329,7 +334,6 @@ public final class DashboardApp extends Application {
                 Platform.runLater(() -> view.setMessage("Could not read " + settings.solor() + ": " + e.getMessage()));
                 return;
             }
-            current = families;
             checkNetwork(families);
         });
     }
