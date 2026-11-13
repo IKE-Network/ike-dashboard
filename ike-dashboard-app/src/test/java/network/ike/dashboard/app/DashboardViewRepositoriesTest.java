@@ -68,7 +68,8 @@ class DashboardViewRepositoriesTest {
             DashboardView view = view();
             Path changeSets = STORE.resolve("changeSets");
             List<String> asked = new ArrayList<>();
-            view.setOnRepositoryRemote((folder, address, add) -> asked.add((add ? "add " : "check ") + folder.getFileName() + " " + address));
+            view.setOnRepositoryRemote((folder, address, add, send) -> asked.add((add ? "add " : "check ") + folder.getFileName() + " " + address
+                    + (RepositoryRemote.Kind.of(folder) == RepositoryRemote.Kind.PREFERENCES ? (send ? " and send" : " and send nothing") : "")));
             view.setSync(STORE, List.of(
                     RepositorySync.changeSetsNotYetIn(STORE),
                     new RepositorySync.Status(new RepositorySync.Repository(STORE.resolve("preferences"), "preferences"), "main", 3, 0,
@@ -128,7 +129,8 @@ class DashboardViewRepositoriesTest {
             DashboardView view = view();
             Path preferences = STORE.resolve("preferences");
             List<String> asked = new ArrayList<>();
-            view.setOnRepositoryRemote((folder, address, add) -> asked.add((add ? "add " : "check ") + folder.getFileName() + " " + address));
+            view.setOnRepositoryRemote((folder, address, add, send) -> asked.add((add ? "add " : "check ") + folder.getFileName() + " " + address
+                    + (RepositoryRemote.Kind.of(folder) == RepositoryRemote.Kind.PREFERENCES ? (send ? " and send" : " and send nothing") : "")));
             view.setSync(STORE, List.of(new RepositorySync.Status(new RepositorySync.Repository(preferences, "preferences"), "", 0, 0,
                     RepositorySync.Remote.NONE, 0, Optional.empty(), RepositorySync.NOT_YET)));
             layout(view);
@@ -139,6 +141,13 @@ class DashboardViewRepositoriesTest {
             TextField address = all(view, TextField.class).stream()
                     .filter(field -> field.getPromptText() != null && field.getPromptText().endsWith("my-komet-preferences.git")).findFirst().orElseThrow();
             address.setText("git@github.com:me/my-komet-preferences.git");
+            javafx.scene.control.CheckBox sendNow = all(view, javafx.scene.control.CheckBox.class).stream()
+                    .filter(box -> "Commit and push what is there now".equals(box.getText())).findFirst().orElseThrow();
+            boolean onUnlessCleared = sendNow.isSelected();
+            sendNow.setSelected(false);
+            button(view, "Check").fire();
+            sendNow.setSelected(true);
+            layout(view);
             button(view, "Check").fire();
             view.repositoryChecked(new RepositoryRemote.Check(preferences, "git@github.com:me/my-komet-preferences.git", List.of(
                     "Make preferences a git repository, on the branch solor-kb.", "Commit what is in it now: 59 files."),
@@ -147,7 +156,21 @@ class DashboardViewRepositoriesTest {
             button(view, "Add remote and push").fire();
             view.repositoryRemoteAdded(preferences, Optional.empty());
             layout(view);
-            return List.of(listed, asking, asked, Words.of(view));
+            List<String> added = Words.of(view);
+            List<String> sent = new ArrayList<>();
+            view.setOnRepositorySend(folder -> sent.add("send " + folder.getFileName()));
+            view.setSync(STORE, List.of(new RepositorySync.Status(new RepositorySync.Repository(preferences, "preferences"), "solor-kb", 4, 0,
+                    RepositorySync.Remote.CURRENT, 0, Optional.empty(), "")));
+            layout(view);
+            button(view, "Commit and push").fire();
+            view.repositorySent(preferences, "Committed 4 files and pushed.", Optional.empty());
+            layout(view);
+            List<String> afterSend = Words.of(view);
+            view.setSync(STORE, List.of(new RepositorySync.Status(new RepositorySync.Repository(preferences, "preferences"), "solor-kb", 0, 0,
+                    RepositorySync.Remote.CURRENT, 0, Optional.empty(), "")));
+            layout(view);
+            boolean nothingToSend = all(view, Button.class).stream().noneMatch(button -> "Commit and push".equals(button.getText()));
+            return List.of(listed, asking, asked, added, onUnlessCleared, sent, afterSend, nothingToSend);
         });
 
         assertThat(words(shown.getFirst())).contains("Preferences  ·  not a git repository yet");
@@ -156,9 +179,16 @@ class DashboardViewRepositoriesTest {
                         + " conversations with the assistant, which contain whatever you typed. Use a private repository, so only"
                         + " you can read them. One private repository can keep the preferences of all your knowledge bases, each"
                         + " on a branch of its own.");
-        assertThat(shown.get(2)).isEqualTo(List.of("check preferences git@github.com:me/my-komet-preferences.git",
-                "add preferences git@github.com:me/my-komet-preferences.git"));
-        assertThat(words(shown.get(3))).contains("The remote is set. Later changes are not sent by themselves yet.");
+        assertThat(shown.get(2)).as("whether to send now is the person's choice, and what is added is what was checked")
+                .isEqualTo(List.of("check preferences git@github.com:me/my-komet-preferences.git and send nothing",
+                        "check preferences git@github.com:me/my-komet-preferences.git and send",
+                        "add preferences git@github.com:me/my-komet-preferences.git and send"));
+        assertThat(words(shown.get(3))).contains("The remote is set. Your preferences are sent only when you choose Commit and push.");
+        assertThat(shown.get(4)).as("sending now is chosen unless the person clears it").isEqualTo(true);
+        assertThat(shown.get(5)).as("later, Commit and push is offered when there is something to send").isEqualTo(List.of("send preferences"));
+        assertThat(words(shown.get(6))).contains("Preferences  ·  branch solor-kb  ·  4 files not committed  ·  has a remote",
+                "Committed 4 files and pushed.");
+        assertThat(shown.get(7)).as("and not when there is nothing to send").isEqualTo(true);
     }
 
     private static DashboardView view() {

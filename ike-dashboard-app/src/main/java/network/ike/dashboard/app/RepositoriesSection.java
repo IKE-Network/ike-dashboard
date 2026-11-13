@@ -19,6 +19,7 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -54,7 +55,10 @@ final class RepositoriesSection {
     private Optional<RepositoryRemote.Check> checked = Optional.empty();
     private Optional<Path> working = Optional.empty();
     private final Map<Path, Said> said = new HashMap<>();
-    private RemoteAction onRemote = (folder, address, add) -> { };
+    /** Whether a person's preferences are committed and pushed when their remote is added: their choice, on unless cleared. */
+    private final CheckBox sendNow = new CheckBox("Commit and push what is there now");
+    private RemoteAction onRemote = (folder, address, add, send) -> { };
+    private java.util.function.Consumer<Path> onSend = folder -> { };
 
     /**
      * What is said of a repository after a check or an adding.
@@ -75,8 +79,9 @@ final class RepositoriesSection {
          * @param folder  the repository's folder
          * @param address the remote's git address
          * @param add     {@code false} to check what adding it would do, {@code true} to add it
+         * @param send    for preferences, whether what is in the folder is committed and pushed as well
          */
-        void run(Path folder, String address, boolean add);
+        void run(Path folder, String address, boolean add, boolean send);
     }
 
     /**
@@ -87,6 +92,14 @@ final class RepositoriesSection {
     RepositoriesSection(Runnable redraw) {
         this.redraw = redraw;
         HBox.setHgrow(url, Priority.ALWAYS);
+        sendNow.setSelected(true);
+        // What was checked was for the choice as it stood: a change asks for another check.
+        sendNow.selectedProperty().addListener((observable, was, now) -> {
+            if (checked.isPresent()) {
+                checked = Optional.empty();
+                redraw.run();
+            }
+        });
     }
 
     /**
@@ -96,6 +109,28 @@ final class RepositoriesSection {
      */
     void setOnRemote(RemoteAction action) {
         onRemote = action;
+    }
+
+    /**
+     * What Commit and push does for a person's preferences that have a remote.
+     *
+     * @param action given the preferences folder
+     */
+    void setOnSend(java.util.function.Consumer<Path> action) {
+        onSend = action;
+    }
+
+    /**
+     * Whether a repository is a person's preferences with a remote and something not yet sent to it:
+     * files not committed, or commits not pushed. Sending is offered, and left to the person.
+     *
+     * @param status the repository's state
+     * @return whether Commit and push is offered for it
+     */
+    static boolean offersSend(RepositorySync.Status status) {
+        return status.isRepository() && status.remote() != RepositorySync.Remote.NONE
+                && RepositoryRemote.Kind.of(status.repository().folder()) == RepositoryRemote.Kind.PREFERENCES
+                && (status.uncommitted() > 0 || status.ahead() > 0);
     }
 
     /**
@@ -136,6 +171,12 @@ final class RepositoriesSection {
                     });
                     nodes.add(add);
                 }
+            }
+            if (offersSend(status)) {
+                Button send = new Button("Commit and push");
+                send.setDisable(working.isPresent());
+                send.setOnAction(event -> onSend.accept(folder));
+                nodes.add(send);
             }
             Optional.ofNullable(said.get(folder)).ifPresent(words -> {
                 SelectableText text = SelectableText.of(words.text());
@@ -183,7 +224,7 @@ final class RepositoriesSection {
                 : "https://github.com/my-org/my-change-sets.git");
         Button check = new Button("Check");
         check.disableProperty().bind(url.textProperty().map(text -> busy || text.isBlank()).orElse(true));
-        check.setOnAction(event -> onRemote.run(folder, url.getText().strip(), false));
+        check.setOnAction(event -> onRemote.run(folder, url.getText().strip(), false, sendNow.isSelected()));
         Button close = new Button("Close");
         close.setOnAction(event -> {
             adding = Optional.empty();
@@ -193,6 +234,9 @@ final class RepositoriesSection {
         HBox line = new HBox(8, url, check, close);
         line.setAlignment(Pos.CENTER_LEFT);
         VBox box = new VBox(8, what, line);
+        if (personal) {
+            box.getChildren().add(sendNow);
+        }
         if (working.filter(folder::equals).isPresent()) {
             SelectableText running = SelectableText.of("Asking git …");
             running.setStyle(MUTED);
@@ -211,7 +255,7 @@ final class RepositoriesSection {
                 }
                 Button add = new Button(found.pushes() ? "Add remote and push" : "Add remote");
                 add.setDisable(busy);
-                add.setOnAction(event -> onRemote.run(folder, found.url(), true));
+                add.setOnAction(event -> onRemote.run(folder, found.url(), true, sendNow.isSelected()));
                 result.getChildren().add(add);
             }
             // What was checked is offered only while the address stays as it was checked.
@@ -222,6 +266,19 @@ final class RepositoriesSection {
         box.setPadding(new Insets(10));
         box.setStyle("-fx-background-color: white; -fx-background-radius: 6; -fx-border-color: #d9d9d9; -fx-border-radius: 6;");
         return box;
+    }
+
+    /**
+     * Shows how committing and pushing a person's preferences ended.
+     *
+     * @param folder  the preferences folder
+     * @param done    what was done, when it worked
+     * @param failure why it failed, or empty
+     */
+    void sent(Path folder, String done, Optional<String> failure) {
+        working = Optional.empty();
+        said.put(folder, failure.map(why -> new Said(why, true)).orElseGet(() -> new Said(done, false)));
+        redraw.run();
     }
 
     /**
@@ -258,7 +315,7 @@ final class RepositoriesSection {
             said.put(folder, new Said(failure.get(), true));
         } else {
             said.put(folder, new Said(RepositoryRemote.Kind.of(folder) == RepositoryRemote.Kind.PREFERENCES
-                    ? "The remote is set. Later changes are not sent by themselves yet."
+                    ? "The remote is set. Your preferences are sent only when you choose Commit and push."
                     : "The remote is set. Connect Komet's sync in Komet, with the same address.", false));
             adding = Optional.empty();
             checked = Optional.empty();

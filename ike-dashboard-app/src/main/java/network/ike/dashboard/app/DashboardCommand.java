@@ -52,6 +52,7 @@ import java.util.Locale;
  * preferences-remote &lt;folder&gt; &lt;git-url&gt;  give your preferences for a folder in ~/Solor a remote of their own,
  *                                       which should be private: commit them on a branch named for the
  *                                       knowledge base, set origin, and push
+ * preferences-send &lt;folder&gt;             commit your preferences for a folder in ~/Solor and push them to their remote
  * ws-new &lt;name&gt; [groupId]                an empty working set in ~/knowledge-bases, to build projects together
  * ws-add &lt;working-set&gt; &lt;project&gt;        move a project into a working set, which then lists it as a member
  * ws-remove &lt;working-set&gt; &lt;member&gt;      stop listing a member, and move it back out into ~/knowledge-bases
@@ -111,6 +112,15 @@ public final class DashboardCommand {
                 download(out, settings, Coordinate.parse(args[1]), args[2]);
             }
             case "projects" -> projects(out, settings);
+            case "preferences-send" -> {
+                if (args.length != 2) {
+                    throw new IllegalArgumentException("preferences-send <folder>");
+                }
+                Path named = settings.solor().resolve(args[1]);
+                Path store = java.nio.file.Files.isDirectory(named) ? named : Path.of(args[1]).toAbsolutePath().normalize();
+                out.println(RepositoryRemote.send(RepositorySync.Git.find().orElseThrow(() -> new IllegalStateException("git is not installed")),
+                        store.resolve(RepositorySync.PREFERENCES)));
+            }
             case "changes-remote-check", "changes-remote", "preferences-remote-check", "preferences-remote" -> {
                 if (args.length != 3) {
                     throw new IllegalArgumentException(command + " <folder> <git-url>");
@@ -141,7 +151,7 @@ public final class DashboardCommand {
             default -> throw new IllegalArgumentException("Unknown command " + command
                     + "; use list, check, notices, komets, heap, download, projects, kb-draft, kb-new, kb-remote-draft, kb-remote,"
                     + " ws-new, ws-add, ws-remove, changes-remote-check, changes-remote, preferences-remote-check,"
-                    + " preferences-remote,"
+                    + " preferences-remote, preferences-send,"
                     + " dashboard-latest or self-update");
         }
     }
@@ -385,8 +395,8 @@ public final class DashboardCommand {
         RepositorySync.Git git = RepositorySync.Git.find().orElseThrow(() -> new IllegalStateException("git is not installed"));
         // A person's preferences go on a branch named for the knowledge base, so one remote can keep them all.
         String personal = KnowledgeBaseFamily.familyName(KnowledgeBaseScanner.inspect(store));
-        RepositoryRemote.Check check = add ? RepositoryRemote.add(git, changeSets, address, personal)
-                : RepositoryRemote.check(git, changeSets, address, personal);
+        RepositoryRemote.Check check = add ? RepositoryRemote.add(git, changeSets, address, personal, true)
+                : RepositoryRemote.check(git, changeSets, address, personal, true);
         if (check.refusal().isPresent()) {
             throw new IllegalStateException(check.refusal().get());
         }

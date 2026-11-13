@@ -56,6 +56,7 @@ From then on it updates itself (see [Self-update](#self-update)). The links neve
   `ws-new <name> [groupId]`, `ws-add <working-set> <project>`, `ws-remove <working-set> <member>`,
   `changes-remote-check <folder> <git-url>`, `changes-remote <folder> <git-url>`,
   `preferences-remote-check <folder> <git-url>`, `preferences-remote <folder> <git-url>`,
+  `preferences-send <folder>`,
   `dashboard-latest`, `self-update [application]`). The window has three views, one switch across its top:
   *Knowledge Bases*, the list and the chosen one's detail, and *Notices*, the first screen, across the
   window: one card per finding of its checks (newer builds, knowledge bases not yet downloaded, a newer
@@ -135,16 +136,18 @@ Your preferences for a knowledge base are given a remote of their own in the sam
 yours alone: your window layout, your journals, and your conversations with the assistant, which
 contain whatever you typed. So use a private repository, where only you can read them. One private
 repository can keep the preferences of all your knowledge bases: each is committed on a branch named
-for its knowledge base. Nothing else commits preferences, so the dashboard commits what is in the
-folder before it pushes. It does nothing while the knowledge base is open in Komet, which writes
-preferences as it runs, and it never merges with what another machine pushed. Later changes are not
-sent by themselves yet; commit and push them with git.
+for its knowledge base. Sending them is your choice. When the remote is added, *Commit and push what
+is there now* is ticked, and you can clear it to set the remote alone. Afterwards the folder's
+*Repositories* offer *Commit and push* whenever there is something not yet sent. Nothing is sent by
+itself. The dashboard does nothing while the knowledge base is open in Komet, which writes
+preferences as it runs, and it never merges with what another machine pushed.
 
 ```bash
 DashboardCommand changes-remote-check     solor-kb https://github.com/my-org/solor-changes.git
 DashboardCommand changes-remote           solor-kb https://github.com/my-org/solor-changes.git
 DashboardCommand preferences-remote-check solor-kb git@github.com:me/my-komet-preferences.git
 DashboardCommand preferences-remote       solor-kb git@github.com:me/my-komet-preferences.git
+DashboardCommand preferences-send         solor-kb
 ```
 
 ## New knowledge base

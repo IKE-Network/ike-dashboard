@@ -152,11 +152,18 @@ public final class Notices {
         }
     }
 
-    /** Komet's sync keeps the change sets; any other repository in a store is synced with git itself, for now. */
+    /**
+     * Komet's sync keeps the change sets; a person's preferences are sent when they choose Commit and push
+     * in the knowledge base's detail; any other repository in a store is synced with git itself.
+     */
     private static String howToSync(RepositorySync.Status status) {
-        return status.repository().folder().getFileName() != null
-                && status.repository().folder().getFileName().toString().equals("changeSets")
-                ? "Komet's sync does this." : "Use git in " + status.repository().folder() + ".";
+        String folder = status.repository().folder().getFileName() == null ? ""
+                : status.repository().folder().getFileName().toString();
+        return switch (folder) {
+            case RepositorySync.CHANGE_SETS -> "Komet's sync does this.";
+            case RepositorySync.PREFERENCES -> "Commit and push, in this knowledge base's Repositories, does this when you choose it.";
+            default -> "Use git in " + status.repository().folder() + ".";
+        };
     }
 
     private static void noKomet(List<Notice> notices, KnowledgeBaseFamily family, KnowledgeBase copy, Inputs inputs) {

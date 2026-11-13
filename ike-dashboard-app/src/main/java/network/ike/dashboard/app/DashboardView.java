@@ -896,6 +896,26 @@ public final class DashboardView extends BorderPane {
     }
 
     /**
+     * What Commit and push does for a person's preferences that have a remote.
+     *
+     * @param action given the preferences folder
+     */
+    public void setOnRepositorySend(Consumer<Path> action) {
+        repositories.setOnSend(action);
+    }
+
+    /**
+     * Shows how committing and pushing a person's preferences ended.
+     *
+     * @param folder  the preferences folder
+     * @param done    what was done, when it worked
+     * @param failure why it failed, or empty
+     */
+    public void repositorySent(Path folder, String done, Optional<String> failure) {
+        repositories.sent(folder, done, failure);
+    }
+
+    /**
      * Says that git is being asked about a repository inside a knowledge base.
      *
      * @param folder the repository's folder

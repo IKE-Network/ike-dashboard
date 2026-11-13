@@ -123,7 +123,7 @@ public final class RepositoryRemote {
      * @return what was found
      */
     public static Check check(RepositorySync.Git git, Path folder, String url) {
-        return check(git, folder, url, BRANCH);
+        return check(git, folder, url, BRANCH, true);
     }
 
     /**
@@ -133,9 +133,11 @@ public final class RepositoryRemote {
      * @param folder   the repository's folder, or a folder that is to become one
      * @param url      the remote's address
      * @param personal the branch a new preferences repository is made on, the knowledge base's name
+     * @param send     for preferences, whether what is in the folder is committed and pushed now; that is
+     *                 the person's choice, and the remote can be set without it
      * @return what was found
      */
-    public static Check check(RepositorySync.Git git, Path folder, String url, String personal) {
+    public static Check check(RepositorySync.Git git, Path folder, String url, String personal, boolean send) {
         Kind kind = Kind.of(folder);
         String remote = url == null ? "" : url.strip();
         if (!URL.matcher(remote).matches() && !SCP.matcher(remote).matches()) {
@@ -157,8 +159,8 @@ public final class RepositoryRemote {
         }
         boolean commits = repository && git.run(folder, LOCAL, "rev-parse", "-q", "--verify", "HEAD").ok();
         String branch = commits ? branch(git, folder) : kind == Kind.PREFERENCES ? personal : BRANCH;
-        int uncommitted = kind == Kind.PREFERENCES ? uncommitted(git, folder, repository) : 0;
-        if (kind == Kind.PREFERENCES && !commits && uncommitted == 0) {
+        int uncommitted = kind == Kind.PREFERENCES && send ? uncommitted(git, folder, repository) : 0;
+        if (kind == Kind.PREFERENCES && send && !commits && uncommitted == 0) {
             return Check.refused(folder, remote, "There are no preferences in it yet. Open the knowledge base in Komet once first.");
         }
         Optional<String> theirs = heads.out().lines().filter(line -> line.endsWith("refs/heads/" + branch))
@@ -175,11 +177,15 @@ public final class RepositoryRemote {
         steps.add("Set its remote, origin, to " + remote + ".");
         // A local history that will exist once the commit above is made contains nothing of the remote's.
         boolean pushes = theirs.isEmpty() || contained;
+        if (kind == Kind.PREFERENCES && !send) {
+            steps.add("Commit and push nothing now, as you chose. Commit and push sends them when you want.");
+            return new Check(folder, remote, steps, Optional.empty(), false);
+        }
         if (kind == Kind.PREFERENCES) {
             steps.add(pushes ? "Push the branch " + branch + ", which then follows the remote."
                     : "Push nothing: the remote already has preferences on the branch " + branch
                     + " that this folder does not have. Nothing is merged.");
-            steps.add("Later changes are not sent by themselves yet. Commit and push them with git.");
+            steps.add("Later changes are sent only when you choose Commit and push.");
         } else {
             if (theirs.isEmpty() && !commits) {
                 steps.add("Commit a " + README + ", since neither side has anything yet, and push it. Komet does the same when it connects.");
@@ -206,7 +212,7 @@ public final class RepositoryRemote {
      *                     remote is set, and the message says so
      */
     public static Check add(RepositorySync.Git git, Path folder, String url) throws IOException {
-        return add(git, folder, url, BRANCH);
+        return add(git, folder, url, BRANCH, true);
     }
 
     /**
@@ -217,13 +223,14 @@ public final class RepositoryRemote {
      * @param folder   the repository's folder, or a folder that is to become one
      * @param url      the remote's address
      * @param personal the branch a new preferences repository is made on, the knowledge base's name
+     * @param send     for preferences, whether what is in the folder is committed and pushed now
      * @return what was done, as the check worded it
      * @throws IOException if the remote cannot be added as it stands, or git fails; when the push fails the
      *                     remote is set, and the message says so
      */
-    public static Check add(RepositorySync.Git git, Path folder, String url, String personal) throws IOException {
+    public static Check add(RepositorySync.Git git, Path folder, String url, String personal, boolean send) throws IOException {
         Kind kind = Kind.of(folder);
-        Check check = check(git, folder, url, personal);
+        Check check = check(git, folder, url, personal, send);
         if (check.refusal().isPresent()) {
             throw new IOException(check.refusal().get());
         }
@@ -231,7 +238,7 @@ public final class RepositoryRemote {
             must(git.run(folder, LOCAL, "init", "-q", "-b", kind == Kind.PREFERENCES ? personal : BRANCH),
                     "git could not make the repository");
         }
-        if (kind == Kind.PREFERENCES && uncommitted(git, folder, true) > 0) {
+        if (kind == Kind.PREFERENCES && send && uncommitted(git, folder, true) > 0) {
             must(git.run(folder, LOCAL, "add", "-A"), "git could not add the preferences");
             must(git.run(folder, LOCAL, commit("Preferences of " + folder.getParent().getFileName(), git, folder)),
                     "git could not commit the preferences");
@@ -257,6 +264,56 @@ public final class RepositoryRemote {
                     + ". Push again with git, or with Komet's sync, once the cause is dealt with.");
         }
         return check;
+    }
+
+    /**
+     * Commits a person's preferences and pushes them to the remote they already have. It is done only when
+     * the person chooses it. Nothing is done while the knowledge base is open in Komet, and nothing is
+     * merged: when the remote has preferences from another machine that this folder does not have, what is
+     * here is committed and nothing is pushed.
+     *
+     * @param git    the git command
+     * @param folder the preferences folder, a repository with a remote
+     * @return what was done, a sentence
+     * @throws IOException if the knowledge base is open, there is nothing to send, the remote cannot be read
+     *                     or has other commits, or git fails; the message says what was done before it failed
+     */
+    public static String send(RepositorySync.Git git, Path folder) throws IOException {
+        if (StoreLock.openInKomet(folder.getParent())) {
+            throw new IOException("This knowledge base is open in Komet, which writes its preferences while it runs."
+                    + " Quit Komet, then try again.");
+        }
+        if (!Files.exists(folder.resolve(".git")) || !git.run(folder, LOCAL, "remote", "get-url", "origin").ok()) {
+            throw new IOException("It has no remote yet. Add one first.");
+        }
+        int files = uncommitted(git, folder, true);
+        if (files > 0) {
+            must(git.run(folder, LOCAL, "add", "-A"), "git could not add the preferences");
+            must(git.run(folder, LOCAL, commit("Preferences of " + folder.getParent().getFileName(), git, folder)),
+                    "git could not commit the preferences");
+        }
+        String committed = files == 0 ? "" : "Committed " + files + (files == 1 ? " file" : " files") + " here. ";
+        if (!git.run(folder, LOCAL, "rev-parse", "-q", "--verify", "HEAD").ok()) {
+            throw new IOException("There are no preferences in it yet. Open the knowledge base in Komet once first.");
+        }
+        String branch = branch(git, folder);
+        RepositorySync.Git.Result heads = git.run(folder, REMOTE, "ls-remote", "--heads", "origin", branch);
+        if (!heads.ok()) {
+            throw new IOException(committed + "Nothing was pushed: the remote could not be read: " + reason(heads) + ".");
+        }
+        Optional<String> theirs = heads.out().lines().map(line -> line.split("\\s+")[0]).filter(sha -> !sha.isBlank()).findFirst();
+        if (theirs.isPresent() && theirs.get().equals(git.run(folder, LOCAL, "rev-parse", "HEAD").out().strip())) {
+            return "Nothing has changed since the last push.";
+        }
+        if (theirs.isPresent() && !git.run(folder, LOCAL, "merge-base", "--is-ancestor", theirs.get(), "HEAD").ok()) {
+            throw new IOException(committed + "Nothing was pushed: the remote has preferences from another machine that"
+                    + " this folder does not have, and the dashboard does not merge them.");
+        }
+        RepositorySync.Git.Result push = git.run(folder, PUSH, "push", "-u", "origin", branch);
+        if (!push.ok()) {
+            throw new IOException(committed + "The push failed: " + reason(push) + ".");
+        }
+        return files == 0 ? "Pushed." : "Committed " + files + (files == 1 ? " file" : " files") + " and pushed.";
     }
 
     /** The words of a commit that never asks for a signature, and is the dashboard's own when git has been told no name. */

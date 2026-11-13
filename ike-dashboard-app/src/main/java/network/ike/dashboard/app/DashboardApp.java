@@ -184,6 +184,7 @@ public final class DashboardApp extends Application {
         view.setKometPins(KometPins.current());
         view.setOnBrowse(this::loadCatalog);
         view.setOnRepositoryRemote(this::repositoryRemote);
+        view.setOnRepositorySend(this::repositorySend);
         NewKnowledgeBaseForm form = view.newKnowledgeBase();
         form.setProjectsFolder(settings.projects());
         form.setPrerequisites(KnowledgeBaseCreation.prerequisites().missing());
@@ -1150,7 +1151,7 @@ public final class DashboardApp extends Application {
      * Checks what giving a repository inside a knowledge base its remote would do, or does it, with git
      * alone. The sync state is read again afterwards, so the folder's detail shows the remote.
      */
-    private void repositoryRemote(Path folder, String address, boolean add) {
+    private void repositoryRemote(Path folder, String address, boolean add, boolean send) {
         if (git.isEmpty()) {
             view.repositoryRemoteAdded(folder, Optional.of("git is not installed, so the remote cannot be added."));
             return;
@@ -1160,12 +1161,12 @@ public final class DashboardApp extends Application {
         String personal = view.selected().map(KnowledgeBaseFamily::name).orElse(folder.getParent().getFileName().toString());
         files.submit(() -> {
             if (!add) {
-                RepositoryRemote.Check check = RepositoryRemote.check(git.get(), folder, address, personal);
+                RepositoryRemote.Check check = RepositoryRemote.check(git.get(), folder, address, personal, send);
                 Platform.runLater(() -> view.repositoryChecked(check));
                 return;
             }
             try {
-                RepositoryRemote.add(git.get(), folder, address, personal);
+                RepositoryRemote.add(git.get(), folder, address, personal, send);
                 Platform.runLater(() -> {
                     view.repositoryRemoteAdded(folder, Optional.empty());
                     view.setMessage("Added the remote of " + Names.of(folder.getParent().getFileName()) + "'s "
@@ -1175,6 +1176,24 @@ public final class DashboardApp extends Application {
                 Platform.runLater(() -> view.repositoryRemoteAdded(folder, Optional.of(e.getMessage())));
             }
             Platform.runLater(this::refresh);               // the folder's repositories are read again
+        });
+    }
+
+    /** Commits a person's preferences and pushes them to their remote, because the person chose to. */
+    private void repositorySend(Path folder) {
+        if (git.isEmpty()) {
+            view.repositorySent(folder, "", Optional.of("git is not installed, so nothing was sent."));
+            return;
+        }
+        view.repositoryWorking(folder);
+        files.submit(() -> {
+            try {
+                String done = RepositoryRemote.send(git.get(), folder);
+                Platform.runLater(() -> view.repositorySent(folder, done, Optional.empty()));
+            } catch (IOException e) {
+                Platform.runLater(() -> view.repositorySent(folder, "", Optional.of(e.getMessage())));
+            }
+            Platform.runLater(this::refresh);               // what is uncommitted and unpushed is read again
         });
     }
 

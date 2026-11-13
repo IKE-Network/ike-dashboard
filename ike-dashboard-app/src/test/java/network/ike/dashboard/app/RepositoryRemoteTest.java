@@ -147,17 +147,17 @@ class RepositoryRemoteTest {
         Path bare = temp.resolve("host/my-komet-preferences.git");
         String remote = bare(bare);
 
-        RepositoryRemote.Check check = RepositoryRemote.check(git, solor, remote, "solor-kb");
+        RepositoryRemote.Check check = RepositoryRemote.check(git, solor, remote, "solor-kb", true);
         boolean untouched = Files.notExists(solor.resolve(".git"));
-        RepositoryRemote.add(git, solor, remote, "solor-kb");
-        RepositoryRemote.add(git, pizza, remote, "pizza-kb");
+        RepositoryRemote.add(git, solor, remote, "solor-kb", true);
+        RepositoryRemote.add(git, pizza, remote, "pizza-kb", true);
 
         assertThat(check.steps()).containsExactly(
                 "Make preferences a git repository, on the branch solor-kb.",
                 "Commit what is in it now: 2 files.",
                 "Set its remote, origin, to " + remote + ".",
                 "Push the branch solor-kb, which then follows the remote.",
-                "Later changes are not sent by themselves yet. Commit and push them with git.");
+                "Later changes are sent only when you choose Commit and push.");
         assertThat(untouched).as("a check changes nothing").isTrue();
         assertThat(out(solor, "log", "--format=%s")).as("named for the folder they are the preferences of").isEqualTo("Preferences of solor-kb");
         assertThat(out(solor, "status", "--porcelain")).as("everything in the folder is committed").isEmpty();
@@ -172,13 +172,13 @@ class RepositoryRemoteTest {
         Path other = Files.createDirectories(temp.resolve("other-machine/solor-kb/preferences"));
         Files.writeString(other.resolve("preferences.xml"), "<map>theirs</map>");
         String remote = bare(temp.resolve("host/my-komet-preferences.git"));
-        RepositoryRemote.add(git, other, remote, "solor-kb");
+        RepositoryRemote.add(git, other, remote, "solor-kb", true);
         String theirs = out(temp.resolve("host/my-komet-preferences.git"), "rev-parse", "refs/heads/solor-kb");
         Path mine = Files.createDirectories(temp.resolve("solor-kb/preferences"));
         Files.writeString(mine.resolve("preferences.xml"), "<map>mine</map>");
         Path empty = Files.createDirectories(temp.resolve("new-kb/preferences"));
 
-        RepositoryRemote.Check diverged = RepositoryRemote.add(git, mine, remote, "solor-kb");
+        RepositoryRemote.Check diverged = RepositoryRemote.add(git, mine, remote, "solor-kb", true);
 
         assertThat(diverged.pushes()).isFalse();
         assertThat(diverged.steps()).contains("Push nothing: the remote already has preferences on the branch solor-kb"
@@ -187,9 +187,60 @@ class RepositoryRemoteTest {
         assertThat(out(mine, "remote", "get-url", "origin")).isEqualTo(remote);
         assertThat(out(temp.resolve("host/my-komet-preferences.git"), "rev-parse", "refs/heads/solor-kb"))
                 .as("the other machine's are untouched on the remote").isEqualTo(theirs);
-        assertThat(RepositoryRemote.check(git, empty, remote, "new-kb").refusal())
+        assertThat(RepositoryRemote.check(git, empty, remote, "new-kb", true).refusal())
                 .contains("There are no preferences in it yet. Open the knowledge base in Komet once first.");
         assertThat(empty.resolve(".git")).doesNotExist();
+    }
+
+    @Test
+    void sendingPreferencesIsThePersonsChoiceWhenTheRemoteIsAddedAndAfterwards(@TempDir Path temp) throws IOException {
+        Path preferences = Files.createDirectories(temp.resolve("solor-kb/preferences"));
+        Files.writeString(preferences.resolve("preferences.xml"), "<map/>");
+        Path bare = temp.resolve("host/my-komet-preferences.git");
+        String remote = bare(bare);
+
+        RepositoryRemote.Check notNow = RepositoryRemote.add(git, preferences, remote, "solor-kb", false);
+        String afterAdd = out(preferences, "status", "--porcelain");
+        String branchesAfterAdd = out(bare, "for-each-ref", "--format=%(refname:short)", "refs/heads");
+        String first = RepositoryRemote.send(git, preferences);
+        String again = RepositoryRemote.send(git, preferences);
+        Files.writeString(preferences.resolve("preferences.xml"), "<map>a window moved</map>");
+        Files.writeString(preferences.resolve("journal.xml"), "<map/>");
+        String later = RepositoryRemote.send(git, preferences);
+
+        assertThat(notNow.steps()).as("the remote is set, and nothing is sent, when the person clears the choice").containsExactly(
+                "Make preferences a git repository, on the branch solor-kb.",
+                "Set its remote, origin, to " + remote + ".",
+                "Commit and push nothing now, as you chose. Commit and push sends them when you want.");
+        assertThat(afterAdd).as("nothing was committed").isEqualTo("?? preferences.xml");
+        assertThat(branchesAfterAdd).as("and nothing pushed").isEmpty();
+        assertThat(first).isEqualTo("Committed 1 file and pushed.");
+        assertThat(again).isEqualTo("Nothing has changed since the last push.");
+        assertThat(later).isEqualTo("Committed 2 files and pushed.");
+        assertThat(out(bare, "rev-parse", "refs/heads/solor-kb")).isEqualTo(out(preferences, "rev-parse", "HEAD"));
+        assertThat(out(preferences, "log", "--format=%s").lines()).hasSize(2);
+    }
+
+    @Test
+    void sendingNeverMergesWithWhatAnotherMachinePushed(@TempDir Path temp) throws IOException {
+        Path other = Files.createDirectories(temp.resolve("other-machine/solor-kb/preferences"));
+        Files.writeString(other.resolve("preferences.xml"), "<map>theirs</map>");
+        Path bare = temp.resolve("host/my-komet-preferences.git");
+        String remote = bare(bare);
+        RepositoryRemote.add(git, other, remote, "solor-kb", true);
+        String theirs = out(bare, "rev-parse", "refs/heads/solor-kb");
+        Path mine = Files.createDirectories(temp.resolve("solor-kb/preferences"));
+        Files.writeString(mine.resolve("preferences.xml"), "<map>mine</map>");
+        RepositoryRemote.add(git, mine, remote, "solor-kb", false);
+        Path none = Files.createDirectories(temp.resolve("new-kb/preferences"));
+
+        assertThatThrownBy(() -> RepositoryRemote.send(git, mine)).isInstanceOf(IOException.class)
+                .hasMessage("Committed 1 file here. Nothing was pushed: the remote has preferences from another machine that"
+                        + " this folder does not have, and the dashboard does not merge them.");
+        assertThat(out(bare, "rev-parse", "refs/heads/solor-kb")).as("theirs are untouched").isEqualTo(theirs);
+        assertThat(out(mine, "log", "--format=%s")).as("mine are committed here, so nothing is lost").isEqualTo("Preferences of solor-kb");
+        assertThatThrownBy(() -> RepositoryRemote.send(git, none)).isInstanceOf(IOException.class)
+                .hasMessage("It has no remote yet. Add one first.");
     }
 
     /** A repository with one commit and no remote, as a store's change-set folder is before it is connected. */
