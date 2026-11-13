@@ -203,7 +203,7 @@ public final class KnowledgeBaseTree {
 
     /**
      * How an input is described beside its name: its role and classifier, such as
-     * {@code protobuf, unreasoned} or {@code source, read by snomed-rf2}.
+     * {@code protobuf, unreasoned} or {@code release, read by snomed-rf2}.
      *
      * @param input the input
      * @return the description
@@ -212,7 +212,7 @@ public final class KnowledgeBaseTree {
         return switch (input.role()) {
             case "PB", "STORE_SEED" -> input.classifier().map(NexusCatalog::label).orElse("protobuf");
             case "CHANGESET" -> "change sets";
-            case "SOURCE" -> "source" + input.importer().map(importer -> ", read by " + importer).orElse("");
+            case "SOURCE" -> "release" + input.importer().map(importer -> ", read by " + importer).orElse("");
             default -> input.role().toLowerCase(Locale.ROOT);
         };
     }

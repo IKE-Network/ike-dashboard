@@ -28,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * A project that builds a knowledge base is read from its POM alone (IKE-Network/ike-issues#1370): what
- * it is, the layers it is built from at the versions it fixes them to, where it deploys, and when it
+ * it is, the knowledge sources it is built from at the versions it fixes them to, where it deploys, and when it
  * last built. The POM here has the shape {@code ike:kb-create-publish} writes.
  */
 class KnowledgeBaseProjectFolderTest {
@@ -97,8 +97,8 @@ class KnowledgeBaseProjectFolderTest {
 
         assertThat(project.title()).isEqualTo("Gene Knowledge Base");
         assertThat(project.coordinates()).as("its own coordinates, not its parent's").isEqualTo("network.ike.data:gene-kb:1-SNAPSHOT");
-        assertThat(project.layers()).as("each protobuf layer, in load order, at the version the POM fixes it to")
-                .extracting(KnowledgeBaseProject.Layer::toString)
+        assertThat(project.knowledgeSources()).as("each protobuf knowledge source, in load order, at the version the POM fixes it to")
+                .extracting(KnowledgeBaseProject.KnowledgeSource::toString)
                 .containsExactly("network.ike.foundation:ike-starter-set:zip:unreasoned-pb:1-20261107.045844-2",
                         "network.ike.data:ncbi-gene-kb:zip:unreasoned-pb:20261020.1-20261111.021538-1");
         assertThat(project.buildsKnowledgeBase()).isTrue();

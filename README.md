@@ -154,7 +154,7 @@ DashboardCommand preferences-send         solor-kb
 
 The *Projects* tab lists the projects that build knowledge bases. They are kept in
 `~/knowledge-bases`, apart from the knowledge bases Komet opens, which are in `~/Solor`. Each project
-shows the layers it is built from, where it deploys, the state of its git repository, and when it was
+shows the knowledge sources it is built from, where it deploys, the state of its git repository, and when it was
 last built. *Build* runs `./mvnw verify` in it. *Deploy…* asks first, then runs `./mvnw deploy`.
 
 A project with no remote offers *Add remote…*. Create the repository on your git host first, and
@@ -164,7 +164,7 @@ commits that change alone, and pushes. This is the remote of the project that bu
 base, not of the knowledge base. A remote that cannot be read, or that already has other commits on
 the branch, is refused before anything is changed.
 
-A working set builds several projects together, in order: a knowledge base and the source layers
+A working set builds several projects together, in order: a knowledge base and the sources
 it is assembled from, for example. *New working set…* makes an empty one, in a folder of its own in
 `~/knowledge-bases` with its own git repository. A project joins a working set only once it builds
 on its own: its page offers *Add to working set*, which moves its folder into the working set's
@@ -173,13 +173,14 @@ list shows each working set with its members beneath it. A working set is built,
 member is deployed from its own page.
 
 *New knowledge base…*, on that tab, creates a Maven 4 project for a knowledge base built from
-protobuf layers already on Nexus (IKE-Network/ike-issues#1370). The form asks for a name, the layers
-in load order, and a folder. *Choose layers…* lists every protobuf on Nexus with a checkbox and, under
-its name, what it is: one source or a whole knowledge base, its coordinates, version, size and deploy
-date, and the release it was read from or the knowledge bases it contains. Sources and whole knowledge
-bases are listed apart, because they cannot be combined yet. *Draft* shows what will be created, with each layer at its exact version
-on Nexus, and writes nothing. *Create knowledge base* then makes the project in a local git repository
-with one commit and no remote, and the Projects tab shows it.
+knowledge sources already on Nexus (IKE-Network/ike-issues#1370). The form asks for a name, the
+knowledge sources in the order they are loaded, and a folder. *Choose knowledge sources…* lists every
+protobuf on Nexus with a checkbox and, under its name, what it is: a single source or a whole
+knowledge base, its coordinates, version, size and deploy date, and the release it was read from or
+the knowledge bases it contains. Single sources and whole knowledge bases are listed apart, because
+they cannot be combined yet. *Draft* shows what will be created, with each knowledge source at its
+exact version on Nexus, and writes nothing. *Create knowledge base* then makes the project in a local
+git repository with one commit and no remote, and the Projects tab shows it.
 
 The work is done by two goals of `ike-maven-plugin`, `kb-create-draft` and `kb-create-publish`, run
 by their full coordinates through a Maven wrapper the dashboard writes first, so no installed Maven is
@@ -187,8 +188,8 @@ needed. The build needs JDK 27 or later and git; the form says which is missing.
 from a shell:
 
 ```bash
-DashboardCommand kb-draft my-kb layers=network.ike.data:ncbi-gene-kb:zip:unreasoned-pb:20261020.1-SNAPSHOT
-DashboardCommand kb-new   my-kb layers=network.ike.data:ncbi-gene-kb:zip:unreasoned-pb:20261020.1-SNAPSHOT
+DashboardCommand kb-draft my-kb knowledgeSources=network.ike.data:ncbi-gene-kb:zip:unreasoned-pb:20261020.1-SNAPSHOT
+DashboardCommand kb-new   my-kb knowledgeSources=network.ike.data:ncbi-gene-kb:zip:unreasoned-pb:20261020.1-SNAPSHOT
 DashboardCommand projects
 DashboardCommand kb-remote-draft my-kb https://github.com/my-org/my-kb.git
 DashboardCommand kb-remote       my-kb https://github.com/my-org/my-kb.git
@@ -201,8 +202,8 @@ Each `property=value` is a property of the goals (`kind`, `collection`, `rocks`,
 `folder=<path>` names the project's folder, `~/knowledge-bases/<name>` unless given. Projects are
 kept apart from the knowledge bases in `~/Solor`. A name must be new: one that a project, a knowledge
 base in `~/Solor` or a knowledge base on Nexus already has is refused, and a free one is offered. The dashboard
-runs plugin version 280 to create a project and 281 to add a remote, the versions that first contain
-those goals. Set `IKE_DASHBOARD_TOOLING_VERSION` to run another for both, such as a snapshot under
+runs plugin version 282 to create a project, the first whose goals say `knowledgeSources` where 280
+and 281 said `layers`, and 281 to add a remote. Set `IKE_DASHBOARD_TOOLING_VERSION` to run another for both, such as a snapshot under
 test. Working sets are made and changed by `ike-workspace-maven-plugin` 227; `IKE_DASHBOARD_PLATFORM_VERSION`
 names another.
 

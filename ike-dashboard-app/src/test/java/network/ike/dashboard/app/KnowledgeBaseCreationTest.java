@@ -51,11 +51,11 @@ class KnowledgeBaseCreationTest {
             "[INFO] Pinning network.ike.data:ncbi-gene-kb:zip:unreasoned-pb:20261020.1-SNAPSHOT …",
             "[INFO] Knowledge base: Gene Try Knowledge Base (assembly)",
             "[INFO]   Coordinates:  network.ike.data:gene-try-kb:1-SNAPSHOT",
-            "[INFO]   Layers, in load order, pinned:",
+            "[INFO]   Knowledge sources, in load order, pinned:",
             "[INFO]     network.ike.foundation:ike-starter-set:zip:unreasoned-pb:1-20261107.045844-2, 0.9 MiB",
             "[INFO]     network.ike.data:ncbi-gene-kb:zip:unreasoned-pb:20261020.1-20261111.021538-1, 0.1 MiB",
-            "[INFO]   Layers total: 1.0 MiB; estimated loaded heap 4.0 MiB",
-            "[INFO]   Rocks store:  no — the layers total 1.0 MiB, below 2 GiB",
+            "[INFO]   Knowledge sources total: 1.0 MiB; estimated loaded heap 4.0 MiB",
+            "[INFO]   Rocks store:  no — the knowledge sources total 1.0 MiB, below 2 GiB",
             "[INFO]   Files:",
             "[INFO]     pom.xml",
             "[INFO]     .gitignore (standards scaffold)",
@@ -63,14 +63,14 @@ class KnowledgeBaseCreationTest {
             "[INFO] ------------------------------------------------------------------------",
             "[INFO] BUILD SUCCESS");
 
-    /** What Maven wrote when the goal refused a layer Nexus does not hold. */
+    /** What Maven wrote when the goal refused a knowledge source Nexus does not hold. */
     private static final List<String> REFUSED = List.of(
             "[INFO] Pinning network.ike.data:no-such-kb:zip:unreasoned-pb:1-SNAPSHOT …",
             "[INFO] ------------------------------------------------------------------------",
             "[ERROR] BUILD FAILURE",
             "[INFO] ------------------------------------------------------------------------",
             "[ERROR] Failed to execute goal network.ike.tooling:ike-maven-plugin:280:kb-create-draft (default-cli) on project"
-                    + " standalone-pom: Cannot pin the layers: network.ike.data:no-such-kb:zip:unreasoned-pb:1-SNAPSHOT has never"
+                    + " standalone-pom: Cannot pin the knowledge sources: network.ike.data:no-such-kb:zip:unreasoned-pb:1-SNAPSHOT has never"
                     + " been deployed to https://nexus.tinkar.org/repository/ike-restricted/",
             "[ERROR] ",
             "[ERROR] To see the full stack trace of the errors, re-run Maven with the '-e' switch");
@@ -118,7 +118,7 @@ class KnowledgeBaseCreationTest {
 
     @Test
     void thePluginVersionIsTheDashboardsOwnUnlessTheEnvironmentNamesAnother() {
-        assertThat(KnowledgeBaseCreation.toolingVersion(Map.of(), KnowledgeBaseCreation.TOOLING_VERSION)).isEqualTo("280");
+        assertThat(KnowledgeBaseCreation.toolingVersion(Map.of(), KnowledgeBaseCreation.TOOLING_VERSION)).isEqualTo("282");
         assertThat(KnowledgeBaseCreation.toolingVersion(Map.of(), KnowledgeBaseCreation.REMOTE_TOOLING_VERSION))
                 .as("the remote goals came a version later").isEqualTo("281");
         assertThat(KnowledgeBaseCreation.toolingVersion(Map.of(KnowledgeBaseCreation.TOOLING_OVERRIDE, " 282-SNAPSHOT "),
@@ -144,7 +144,7 @@ class KnowledgeBaseCreationTest {
     }
 
     @Test
-    void aDraftsReportIsReadWithEachLayerAsItWasPinned() {
+    void aDraftsReportIsReadWithEachKnowledgeSourceAsItWasPinned() {
         KnowledgeBaseCreation.Outcome outcome = new KnowledgeBaseCreation.Outcome(0, DRAFT);
 
         assertThat(outcome.succeeded()).isTrue();
@@ -152,9 +152,9 @@ class KnowledgeBaseCreationTest {
                 .startsWith("Knowledge base: Gene Try Knowledge Base (assembly)", "  Coordinates:  network.ike.data:gene-try-kb:1-SNAPSHOT")
                 .endsWith("    .gitignore (standards scaffold)").hasSize(10);
         assertThat(outcome.pinned()).containsExactly(
-                Map.entry(KnowledgeBaseProject.Layer.parse(
+                Map.entry(KnowledgeBaseProject.KnowledgeSource.parse(
                         "network.ike.foundation:ike-starter-set:zip:unreasoned-pb:1-20261107.045844-2"), "0.9 MiB"),
-                Map.entry(KnowledgeBaseProject.Layer.parse(
+                Map.entry(KnowledgeBaseProject.KnowledgeSource.parse(
                         "network.ike.data:ncbi-gene-kb:zip:unreasoned-pb:20261020.1-20261111.021538-1"), "0.1 MiB"));
         assertThat(outcome.failure()).isEmpty();
     }
@@ -165,7 +165,7 @@ class KnowledgeBaseCreationTest {
 
         assertThat(outcome.succeeded()).isFalse();
         assertThat(outcome.report()).isEmpty();
-        assertThat(outcome.failure()).contains("Cannot pin the layers: network.ike.data:no-such-kb:zip:unreasoned-pb:1-SNAPSHOT"
+        assertThat(outcome.failure()).contains("Cannot pin the knowledge sources: network.ike.data:no-such-kb:zip:unreasoned-pb:1-SNAPSHOT"
                 + " has never been deployed to https://nexus.tinkar.org/repository/ike-restricted/");
     }
 
@@ -185,7 +185,7 @@ class KnowledgeBaseCreationTest {
         assertThat(heard).as("each line as it is written").isEqualTo(outcome.lines()).contains("[INFO] Knowledge base: my-kb");
         assertThat(ran).as("the draft goal, by coordinates, for the project's folder")
                 .contains("-B", "-ntp", "network.ike.tooling:ike-maven-plugin:280:kb-create-draft", "-Dname=my-kb",
-                        "-DtargetDirectory=" + project.folder(), "-Dlayers=" + GENE, "JAVA_HOME=" + jdk);
+                        "-DtargetDirectory=" + project.folder(), "-DknowledgeSources=" + GENE, "JAVA_HOME=" + jdk);
         assertThat(ran).as("run where a wrapper was written, apart from the project").anyMatch(line -> line.startsWith("wrapper=yes"));
         assertThat(Path.of(ran.getFirst().substring("cwd=".length()))).as("and that folder is gone again").doesNotExist();
         assertThat(root.resolve("projects")).as("nothing where the project will be").doesNotExist();
@@ -224,7 +224,7 @@ class KnowledgeBaseCreationTest {
                 .create(project(there), line -> { });
 
         assertThat(first.succeeded()).as("the stand-in writes no project and fails").isFalse();
-        assertThat(first.failure()).contains("Cannot pin the layers");
+        assertThat(first.failure()).contains("Cannot pin the knowledge sources");
         assertThat(made).as("a folder the creation made is removed").doesNotExist();
         assertThat(second.succeeded()).isFalse();
         try (var entries = Files.list(there)) {
@@ -347,7 +347,7 @@ class KnowledgeBaseCreationTest {
     }
 
     private static KnowledgeBaseProject project(Path folder) {
-        return new KnowledgeBaseProject("my-kb", folder, Map.of("layers", GENE));
+        return new KnowledgeBaseProject("my-kb", folder, Map.of("knowledgeSources", GENE));
     }
 
     /** A folder that looks like a JDK: its release file and a compiler. */
@@ -386,7 +386,7 @@ class KnowledgeBaseCreationTest {
         // A draft succeeds either way: only the publish of the refusing stand-in fails.
         body += """
                 case "$*" in *kb-create-draft*) exit 0;; esac
-                echo "[ERROR] Failed to execute goal a:b:1:kb-create-publish (default-cli) on project standalone-pom: Cannot pin the layers"
+                echo "[ERROR] Failed to execute goal a:b:1:kb-create-publish (default-cli) on project standalone-pom: Cannot pin the knowledge sources"
                 echo "[ERROR] "
                 exit 1
                 """;

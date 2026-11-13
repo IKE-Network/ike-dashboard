@@ -45,66 +45,71 @@ class KnowledgeBaseProjectTest {
     @Test
     void theGoalIsNamedByItsFullCoordinatesAndGivenTheNameTheFolderAndEachProperty() {
         Map<String, String> properties = new LinkedHashMap<>();
-        properties.put("layers", SNOMED + "," + GENE);
+        properties.put("knowledgeSources", SNOMED + "," + GENE);
         properties.put("collection", "TRY");
         properties.put("displayName", "  ");
         KnowledgeBaseProject project = new KnowledgeBaseProject("my-kb", Path.of("/work/my-kb"), properties);
 
         assertThat(project.arguments(KnowledgeBaseCreation.DRAFT, "280")).as("batch mode, no transfer progress, no colour, then the goal")
                 .containsExactly("-B", "-ntp", "-Dstyle.color=never", "network.ike.tooling:ike-maven-plugin:280:kb-create-draft",
-                        "-Dname=my-kb", "-DtargetDirectory=" + Path.of("/work/my-kb"), "-Dlayers=" + SNOMED + "," + GENE, "-Dcollection=TRY");
+                        "-Dname=my-kb", "-DtargetDirectory=" + Path.of("/work/my-kb"), "-DknowledgeSources=" + SNOMED + "," + GENE, "-Dcollection=TRY");
         assertThat(project.properties()).as("a blank property is not said").doesNotContainKey("displayName");
         assertThat(project.kind()).as("an assembly unless another kind is named").isEqualTo(KnowledgeBaseProject.Kind.ASSEMBLY);
-        assertThat(project.layers()).extracting(KnowledgeBaseProject.Layer::artifactId).containsExactly("snomedct-kb", "ncbi-gene-kb");
+        assertThat(project.knowledgeSources()).extracting(KnowledgeBaseProject.KnowledgeSource::artifactId).containsExactly("snomedct-kb", "ncbi-gene-kb");
         assertThat(project.problems()).isEmpty();
     }
 
     @Test
     void aCommandLineNamesPropertiesAndTheFolder() {
         KnowledgeBaseProject named = KnowledgeBaseProject.parse("my-kb",
-                List.of("layers=" + GENE, "kind=source-layer", "importer=nuva", "release=/releases/nuva.zip", "folder=/elsewhere/kb"),
+                List.of("knowledgeSources=" + GENE, "kind=source", "importer=nuva", "release=/releases/nuva.zip", "folder=/elsewhere/kb"),
                 Path.of("/home/knowledge-bases"));
-        KnowledgeBaseProject unnamed = KnowledgeBaseProject.parse("my-kb", List.of("layers=" + GENE), Path.of("/home/knowledge-bases"));
+        KnowledgeBaseProject unnamed = KnowledgeBaseProject.parse("my-kb", List.of("knowledgeSources=" + GENE), Path.of("/home/knowledge-bases"));
 
         assertThat(named.folder()).as("as given, made absolute").isEqualTo(Path.of("/elsewhere/kb").toAbsolutePath());
-        assertThat(named.kind()).isEqualTo(KnowledgeBaseProject.Kind.SOURCE_LAYER);
+        assertThat(named.kind()).isEqualTo(KnowledgeBaseProject.Kind.SOURCE);
         assertThat(named.problems()).isEmpty();
         assertThat(unnamed.folder()).as("in the projects folder, named for the knowledge base")
                 .isEqualTo(Path.of("/home/knowledge-bases/my-kb"));
-        assertThatThrownBy(() -> KnowledgeBaseProject.parse("my-kb", List.of("layer=" + GENE), Path.of("/home")))
+        assertThatThrownBy(() -> KnowledgeBaseProject.parse("my-kb", List.of("knowledgeSource=" + GENE), Path.of("/home")))
                 .as("a property the goals do not take").isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Unknown property layer").hasMessageContaining("layers");
-        assertThatThrownBy(() -> KnowledgeBaseProject.parse("my-kb", List.of("layers"), Path.of("/home")))
+                .hasMessageContaining("Unknown property knowledgeSource").hasMessageContaining("knowledgeSources");
+        assertThatThrownBy(() -> KnowledgeBaseProject.parse("my-kb", List.of("layers=" + GENE), Path.of("/home")))
+                .as("the word before 282 says which word replaced it").isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("layers is now knowledgeSources. The knowledge sources were called layers before.");
+        assertThatThrownBy(() -> KnowledgeBaseProject.parse("my-kb", List.of("layerRepository=https://repo/"), Path.of("/home")))
+                .hasMessageStartingWith("layerRepository is now knowledgeSourceRepository.");
+        assertThatThrownBy(() -> KnowledgeBaseProject.parse("my-kb", List.of("knowledgeSources"), Path.of("/home")))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("property=value");
     }
 
     @Test
     void whatTheGoalsWouldRefuseIsCaughtBeforeTheyRun() {
-        assertThat(project("My_KB", Map.of("layers", GENE)).problems()).as("a name that is no artifactId")
+        assertThat(project("My_KB", Map.of("knowledgeSources", GENE)).problems()).as("a name that is no artifactId")
                 .containsExactly("The name is lower-case letters and digits joined by hyphens, such as my-kb.");
         assertThat(project("", Map.of()).problems()).as("nothing said yet")
-                .containsExactly("Give the knowledge base a name.", "Add at least one protobuf layer.");
-        assertThat(project("my-kb", Map.of("layers", GENE + "," + GENE.replace("20261020.1", "20251020.1"))).problems())
+                .containsExactly("Give the knowledge base a name.", "Add at least one knowledge source.");
+        assertThat(project("my-kb", Map.of("knowledgeSources", GENE + "," + GENE.replace("20261020.1", "20251020.1"))).problems())
                 .as("one artifact at two versions").containsExactly("ncbi-gene-kb is listed twice.");
-        assertThat(project("my-kb", Map.of("layers", SOLOR + "," + GENE)).problems()).as("decision 10")
+        assertThat(project("my-kb", Map.of("knowledgeSources", SOLOR + "," + GENE)).problems()).as("decision 10")
                 .containsExactly("Reasoned and unreasoned protobufs cannot be combined yet.");
-        assertThat(project("my-kb", Map.of("layers", GENE + ",network.ike.foundation:ike-starter-set:zip:unreasoned-pb:1-SNAPSHOT"))
+        assertThat(project("my-kb", Map.of("knowledgeSources", GENE + ",network.ike.foundation:ike-starter-set:zip:unreasoned-pb:1-SNAPSHOT"))
                 .problems()).containsExactly("The starter set must be first. It is at position 2.");
-        assertThat(project("my-kb", Map.of("layers", SNOMED, "kind", "source-layer")).problems())
-                .containsExactly("A source layer needs its importer and the release it reads.");
-        assertThat(project("my-kb", Map.of("layers", SNOMED, "importer", "nuva", "release", "/r.zip")).problems())
-                .containsExactly("An assembly imports no release. An importer and a release belong to a source layer.");
-        assertThat(project("my-kb", Map.of("layers", "snomedct-kb")).problems()).as("a layer that is no coordinate")
+        assertThat(project("my-kb", Map.of("knowledgeSources", SNOMED, "kind", "source")).problems())
+                .containsExactly("A source needs its importer and the release it reads.");
+        assertThat(project("my-kb", Map.of("knowledgeSources", SNOMED, "importer", "nuva", "release", "/r.zip")).problems())
+                .containsExactly("An assembly imports no release. An importer and a release belong to a source.");
+        assertThat(project("my-kb", Map.of("knowledgeSources", "snomedct-kb")).problems()).as("a knowledge source that is no coordinate")
                 .containsExactly("Expected groupId:artifactId:zip:classifier:version, got snomedct-kb.");
     }
 
     @Test
     void theStarterSetIsPutFirstUnlessItIsListedOrAReasonedProtobufIsTheBase() {
-        assertThat(KnowledgeBaseProject.starterSetFirst(project("a", Map.of("layers", SNOMED + "," + GENE)).layers())).isTrue();
-        assertThat(KnowledgeBaseProject.starterSetFirst(project("a", Map.of("layers", SOLOR)).layers()))
+        assertThat(KnowledgeBaseProject.starterSetFirst(project("a", Map.of("knowledgeSources", SNOMED + "," + GENE)).knowledgeSources())).isTrue();
+        assertThat(KnowledgeBaseProject.starterSetFirst(project("a", Map.of("knowledgeSources", SOLOR)).knowledgeSources()))
                 .as("a reasoned protobuf already carries it").isFalse();
         assertThat(KnowledgeBaseProject.starterSetFirst(project("a",
-                Map.of("layers", "network.ike.foundation:ike-starter-set:zip:unreasoned-pb:1-SNAPSHOT," + GENE)).layers())).isFalse();
+                Map.of("knowledgeSources", "network.ike.foundation:ike-starter-set:zip:unreasoned-pb:1-SNAPSHOT," + GENE)).knowledgeSources())).isFalse();
     }
 
     @Test
@@ -115,20 +120,20 @@ class KnowledgeBaseProjectTest {
         long gudid = (long) (3.28 * GIB);
         KnowledgeBaseProject.Estimate large = KnowledgeBaseProject.estimate(KnowledgeBaseProject.Kind.ASSEMBLY,
                 List.of(gudid, -1L), Optional.empty());
-        KnowledgeBaseProject.Estimate source = KnowledgeBaseProject.estimate(KnowledgeBaseProject.Kind.SOURCE_LAYER,
+        KnowledgeBaseProject.Estimate source = KnowledgeBaseProject.estimate(KnowledgeBaseProject.Kind.SOURCE,
                 List.of(gudid), Optional.empty());
         KnowledgeBaseProject.Estimate never = KnowledgeBaseProject.estimate(KnowledgeBaseProject.Kind.ASSEMBLY,
                 List.of(gudid), Optional.of(false));
 
         assertThat(small.heapGib()).as("never under 8 GiB").isEqualTo(8);
         assertThat(small.rocks()).isFalse();
-        assertThat(small.rocksReason()).isEqualTo("the layers total 1.0 MiB, below 2 GiB");
+        assertThat(small.rocksReason()).isEqualTo("the knowledge sources total 1.0 MiB, below 2 GiB");
         assertThat(large.loadedBytes()).isEqualTo((long) Math.ceil(4.0 * gudid));
         assertThat(large.heapGib()).as("1.35 x (1 + 3.2) x 4 x 3.28 GiB, rounded up").isEqualTo(75);
-        assertThat(large.rocks()).as("2 GiB of layers or more builds a Rocks store (decision 6)").isTrue();
-        assertThat(large.rocksReason()).isEqualTo("the layers total 3.28 GiB (1 not known), at or above 2 GiB");
+        assertThat(large.rocks()).as("2 GiB of knowledge sources or more builds a Rocks store (decision 6)").isTrue();
+        assertThat(large.rocksReason()).isEqualTo("the knowledge sources total 3.28 GiB (1 not known), at or above 2 GiB");
         assertThat(source.heapGib()).as("an import adds 1 x where the reasoner adds 3.2 x").isEqualTo(36);
-        assertThat(source.rocks()).as("a source layer builds no store").isFalse();
+        assertThat(source.rocks()).as("a source builds no store").isFalse();
         assertThat(never.rocks()).isFalse();
         assertThat(never.rocksReason()).isEqualTo("never, as chosen");
     }

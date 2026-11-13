@@ -37,7 +37,7 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The New knowledge base form (IKE-Network/ike-issues#1370): layers picked from what Nexus offers, in
+ * The New knowledge base form (IKE-Network/ike-issues#1370): knowledge sources picked from what Nexus offers, in
  * load order, behind the starter set; the project said in the goals' words; Create offered only for what
  * the last draft showed. Drawn headless with Monocle; the drafted form is written to
  * {@code target/dashboard-new-knowledge-base.png}.
@@ -62,17 +62,17 @@ class NewKnowledgeBaseFormTest {
     }
 
     @Test
-    void layersArePickedInLoadOrderBehindTheStarterSetAndTheProjectIsSaidInTheGoalsWords() throws Exception {
+    void knowledgeSourcesArePickedInLoadOrderBehindTheStarterSetAndTheProjectIsSaidInTheGoalsWords() throws Exception {
         List<Object> shown = onFx(() -> {
             NewKnowledgeBaseForm form = form();
             List<String> untouched = List.of(form.message(), String.valueOf(button(form, "Draft").isDisable()));
             field(form, "my-kb").setText("solor-gene-kb");
-            form.addLayer(offer("snomedct-kb", "20260601.2-SNAPSHOT", "unreasoned-pb", (long) (0.45 * GIB)));
-            form.addLayer(offer("gudid-kb", "20261001.2-SNAPSHOT", "unreasoned-pb", (long) (2.74 * GIB)));
-            form.addLayer(offer("ncbi-gene-kb", "20261020.1-SNAPSHOT", "unreasoned-pb", 100_000));
+            form.addKnowledgeSource(offer("snomedct-kb", "20260601.2-SNAPSHOT", "unreasoned-pb", (long) (0.45 * GIB)));
+            form.addKnowledgeSource(offer("gudid-kb", "20261001.2-SNAPSHOT", "unreasoned-pb", (long) (2.74 * GIB)));
+            form.addKnowledgeSource(offer("ncbi-gene-kb", "20261020.1-SNAPSHOT", "unreasoned-pb", 100_000));
             accessible(form, "Load NCBI Gene earlier").fire();
             accessible(form, "Remove GUDID").fire();
-            form.addLayer(offer("gudid-kb", "20261001.2-SNAPSHOT", "unreasoned-pb", (long) (2.74 * GIB)));
+            form.addKnowledgeSource(offer("gudid-kb", "20261001.2-SNAPSHOT", "unreasoned-pb", (long) (2.74 * GIB)));
             layout(form);
             return List.of(untouched, Words.of(form), form.project(), button(form, "Draft").isDisable(), form.canCreate());
         });
@@ -82,20 +82,20 @@ class NewKnowledgeBaseFormTest {
         KnowledgeBaseProject project = (KnowledgeBaseProject) shown.get(2);
         assertThat(shown.getFirst()).as("an untouched form says what to do first, and cannot be drafted")
                 .isEqualTo(List.of("Give the knowledge base a name.", "true"));
-        assertThat(words).as("the starter set first, locked, then each layer with what Nexus says of it")
-                .containsSubsequence("1.", "IKE Starter Set", "Always loaded first. Every other layer depends on it.",
+        assertThat(words).as("the starter set first, locked, then each knowledge source with what Nexus says of it")
+                .containsSubsequence("1.", "IKE Starter Set", "Always loaded first. Every other source depends on it.",
                         "2.", "SNOMED CT", "protobuf, unreasoned  ·  20260601.2-SNAPSHOT, deployed 2026-11-10  ·  460.8 MiB",
-                        "Built from snomedct-origin SnomedCT_InternationalRF2_20260601+1.0.0 (source, read by snomed-rf2)",
+                        "Built from snomedct-origin SnomedCT_InternationalRF2_20260601+1.0.0 (release, read by snomed-rf2)",
                         "3.", "NCBI Gene", "4.", "GUDID");
-        assertThat(words).as("the sizes, by the goals' rule: 2 GiB of layers or more builds a Rocks store")
-                .contains("Layers total 3.19 GiB  ·  about 12.76 GiB of memory once loaded  ·  the build is given 73 GiB",
-                        "Built: the layers total 3.19 GiB, at or above 2 GiB.",
+        assertThat(words).as("the sizes, by the goals' rule: 2 GiB of knowledge sources or more builds a Rocks store")
+                .contains("The knowledge sources total 3.19 GiB  ·  about 12.76 GiB of memory once loaded  ·  the build is given 73 GiB",
+                        "Built: the knowledge sources total 3.19 GiB, at or above 2 GiB.",
                         "ike-restricted  ·  https://nexus.tinkar.org/repository/ike-restricted-snapshots/",
                         "A git repository in its folder, with one commit and no remote.",
                         "Draft it to see what will be created.");
         assertThat(project.name()).isEqualTo("solor-gene-kb");
         assertThat(project.folder()).as("in the projects folder, following the name").isEqualTo(Path.of("/home/kb/solor-gene-kb").toAbsolutePath());
-        assertThat(project.properties()).as("only the layers: everything else is the goals' default").containsExactly(Map.entry("layers",
+        assertThat(project.properties()).as("only the knowledge sources: everything else is the goals' default").containsExactly(Map.entry("knowledgeSources",
                 "network.ike.data:snomedct-kb:zip:unreasoned-pb:20260601.2-SNAPSHOT,"
                         + "network.ike.data:ncbi-gene-kb:zip:unreasoned-pb:20261020.1-SNAPSHOT,"
                         + "network.ike.data:gudid-kb:zip:unreasoned-pb:20261001.2-SNAPSHOT"));
@@ -111,13 +111,13 @@ class NewKnowledgeBaseFormTest {
             form.setOnDraft(asked::add);
             form.setOnCreate(asked::add);
             field(form, "my-kb").setText("gene-try-kb");
-            form.addLayer(offer("ncbi-gene-kb", "20261020.1-SNAPSHOT", "unreasoned-pb", 100_000));
+            form.addKnowledgeSource(offer("ncbi-gene-kb", "20261020.1-SNAPSHOT", "unreasoned-pb", 100_000));
             button(form, "Draft").fire();
             form.working("Drafting gene-try-kb …");
             boolean waiting = button(form, "Draft").isDisable() && button(form, "Cancel").isVisible();
             form.drafted(asked.getFirst(), new KnowledgeBaseCreation.Outcome(0, List.of(
                     "[INFO] Knowledge base: Gene Try Knowledge Base (assembly)",
-                    "[INFO]   Layers, in load order, pinned:",
+                    "[INFO]   Knowledge sources, in load order, pinned:",
                     "[INFO]     network.ike.foundation:ike-starter-set:zip:unreasoned-pb:1-20261107.045844-2, 0.9 MiB",
                     "[INFO]     network.ike.data:ncbi-gene-kb:zip:unreasoned-pb:20261020.1-20261111.021538-1, 0.1 MiB",
                     "[INFO]   Build heap:   -Xmx8g (estimated)",
@@ -132,7 +132,7 @@ class NewKnowledgeBaseFormTest {
             boolean afterChange = form.canCreate();
             form.drafted(form.project(), new KnowledgeBaseCreation.Outcome(1, List.of(
                     "[ERROR] Failed to execute goal a:b:280:kb-create-draft (default-cli) on project standalone-pom:"
-                            + " Cannot pin the layers: it has never been deployed",
+                            + " Cannot pin the knowledge sources: it has never been deployed",
                     "[ERROR] ")));
             return List.of(waiting, drafted, draft, offered, asked, afterChange, form.draftText(), form.message(), form.canCreate());
         });
@@ -142,30 +142,30 @@ class NewKnowledgeBaseFormTest {
         @SuppressWarnings("unchecked")
         List<KnowledgeBaseProject> asked = (List<KnowledgeBaseProject>) shown.get(4);
         assertThat(shown.getFirst()).as("while Maven runs the form waits, and offers Cancel").isEqualTo(true);
-        assertThat(drafted).as("each layer at the deploy the draft pinned it to, the starter set among them")
+        assertThat(drafted).as("each knowledge source at the deploy the draft pinned it to, the starter set among them")
                 .contains("protobuf, unreasoned  ·  1-20261107.045844-2  ·  0.9 MiB",
                         "protobuf, unreasoned  ·  20261020.1-20261111.021538-1  ·  0.1 MiB",
                         "The draft shows what will be created in " + Path.of("/home/kb/gene-try-kb").toAbsolutePath() + ".");
         assertThat((String) shown.get(2)).as("the goals' report, without Maven's framing")
-                .startsWith("Knowledge base: Gene Try Knowledge Base (assembly)\n  Layers, in load order, pinned:")
+                .startsWith("Knowledge base: Gene Try Knowledge Base (assembly)\n  Knowledge sources, in load order, pinned:")
                 .endsWith("  Build heap:   -Xmx8g (estimated)");
         assertThat(shown.get(3)).as("the draft succeeded: Create is offered").isEqualTo(true);
         assertThat(asked).as("Draft and Create are given the same project").hasSize(2);
         assertThat(asked.getLast()).isEqualTo(asked.getFirst());
         assertThat(shown.get(5)).as("a change sets the draft aside").isEqualTo(false);
-        assertThat(shown.get(6)).as("a refusal, in the goals' words").isEqualTo("Cannot pin the layers: it has never been deployed");
-        assertThat(shown.get(7)).isEqualTo("The draft was refused: Cannot pin the layers: it has never been deployed");
+        assertThat(shown.get(6)).as("a refusal, in the goals' words").isEqualTo("Cannot pin the knowledge sources: it has never been deployed");
+        assertThat(shown.get(7)).isEqualTo("The draft was refused: Cannot pin the knowledge sources: it has never been deployed");
         assertThat(shown.get(8)).isEqualTo(false);
     }
 
     @Test
-    void aSourceLayerAsksForItsImporterAndReleaseAndBuildsNoRocksStore() throws Exception {
+    void aSourceKnowledgeSourceAsksForItsImporterAndReleaseAndBuildsNoRocksStore() throws Exception {
         List<Object> shown = onFx(() -> {
             NewKnowledgeBaseForm form = form();
             field(form, "my-kb").setText("nuva-try-kb");
-            form.addLayer(offer("snomedct-kb", "20260601.2-SNAPSHOT", "unreasoned-pb", (long) (0.45 * GIB)));
+            form.addKnowledgeSource(offer("snomedct-kb", "20260601.2-SNAPSHOT", "unreasoned-pb", (long) (0.45 * GIB)));
             boolean importerHidden = !shown(field(form, "Such as snomed-rf2"));
-            toggle(form, "Source layer").setSelected(true);
+            toggle(form, "Source").setSelected(true);
             String missing = form.message();
             field(form, "Such as snomed-rf2").setText("nuva");
             field(form, "The release's coordinate, or its path").setText("/releases/nuva.zip");
@@ -177,9 +177,9 @@ class NewKnowledgeBaseFormTest {
 
         KnowledgeBaseProject project = (KnowledgeBaseProject) shown.get(2);
         assertThat(shown.getFirst()).as("an assembly has no importer").isEqualTo(true);
-        assertThat(shown.get(1)).isEqualTo("A source layer needs its importer and the release it reads.");
-        assertThat(project.properties()).containsExactly(Map.entry("kind", "source-layer"),
-                Map.entry("layers", "network.ike.data:snomedct-kb:zip:unreasoned-pb:20260601.2-SNAPSHOT"),
+        assertThat(shown.get(1)).isEqualTo("A source needs its importer and the release it reads.");
+        assertThat(project.properties()).containsExactly(Map.entry("kind", "source"),
+                Map.entry("knowledgeSources", "network.ike.data:snomedct-kb:zip:unreasoned-pb:20260601.2-SNAPSHOT"),
                 Map.entry("importer", "nuva"), Map.entry("release", "/releases/nuva.zip"));
         assertThat(shown.get(3)).as("the Rocks choice is gone").isEqualTo(false);
         assertThat(shown.get(4)).as("and the importer is asked for").isEqualTo(true);
@@ -191,7 +191,7 @@ class NewKnowledgeBaseFormTest {
         List<Object> shown = onFx(() -> {
             NewKnowledgeBaseForm form = form();
             field(form, "my-kb").setText("solor-copy-kb");
-            form.addLayer(offer("ncbi-gene-kb", "20261020.1-SNAPSHOT", "unreasoned-pb", 100_000));
+            form.addKnowledgeSource(offer("ncbi-gene-kb", "20261020.1-SNAPSHOT", "unreasoned-pb", 100_000));
             form.copyInputs(coordinate("solor-gudid-kb", "1-SNAPSHOT"));
             List<NewKnowledgeBaseForm.Row> rows = form.rows();
             form.setPrerequisites(List.of("JDK 27 or later is not installed. Install one, or set JAVA_HOME to one."));
@@ -201,7 +201,7 @@ class NewKnowledgeBaseFormTest {
         @SuppressWarnings("unchecked")
         List<NewKnowledgeBaseForm.Row> rows = (List<NewKnowledgeBaseForm.Row>) shown.getFirst();
         assertThat(rows).as("its protobufs, in its load order, in place of what was listed; the starter set is put first anyway")
-                .extracting(row -> row.layer().toString())
+                .extracting(row -> row.knowledgeSource().toString())
                 .containsExactly("network.ike.data:snomedct-kb:zip:unreasoned-pb:20260601.2-SNAPSHOT",
                         "network.ike.data:gudid-kb:zip:unreasoned-pb:20261001.2-SNAPSHOT");
         assertThat(rows).extracting(NewKnowledgeBaseForm.Row::name).containsExactly("SNOMED CT", "GUDID");
@@ -217,7 +217,7 @@ class NewKnowledgeBaseFormTest {
             NewKnowledgeBaseForm form = form();
             form.setNamesHere(new KnowledgeBaseProject.Names(java.util.Set.of("gene-kb"), java.util.Set.of(), java.util.Set.of(),
                     java.util.Set.of()));
-            form.addLayer(offer("ncbi-gene-kb", "20261020.1-SNAPSHOT", "unreasoned-pb", 100_000));
+            form.addKnowledgeSource(offer("ncbi-gene-kb", "20261020.1-SNAPSHOT", "unreasoned-pb", 100_000));
             field(form, "my-kb").setText("gene-kb");
             String here = form.message();
             boolean stopped = button(form, "Draft").isDisable();
@@ -245,20 +245,20 @@ class NewKnowledgeBaseFormTest {
     }
 
     @Test
-    void whatIsCheckedBecomesTheLayersKeepingTheLoadOrderOfThoseThatStay() throws Exception {
+    void whatIsCheckedBecomesTheKnowledgeSourcesKeepingTheLoadOrderOfThoseThatStay() throws Exception {
         List<List<String>> shown = onFx(() -> {
             NewKnowledgeBaseForm form = form();
             NexusCatalog.Offer snomed = offer("snomedct-kb", "20260601.2-SNAPSHOT", "unreasoned-pb", (long) (0.45 * GIB));
             NexusCatalog.Offer gene = offer("ncbi-gene-kb", "20261020.1-SNAPSHOT", "unreasoned-pb", 100_000);
-            form.addLayer(gene);
-            form.addLayer(snomed);
+            form.addKnowledgeSource(gene);
+            form.addKnowledgeSource(snomed);
             form.copyInputs(coordinate("solor-gudid-kb", "1-SNAPSHOT"));       // SNOMED CT, then GUDID, which Nexus offers no protobuf of here
             List<String> copied = form.rows().stream().map(NewKnowledgeBaseForm.Row::name).toList();
-            form.setLayers(List.of(gene, snomed));
+            form.setKnowledgeSources(List.of(gene, snomed));
             List<String> added = form.rows().stream().map(NewKnowledgeBaseForm.Row::name).toList();
-            form.setLayers(List.of(gene));
+            form.setKnowledgeSources(List.of(gene));
             return List.of(copied, added, form.rows().stream().map(NewKnowledgeBaseForm.Row::name).toList(),
-                    List.of(all(form, Button.class).stream().anyMatch(button -> "Choose layers…".equals(button.getText())) ? "offered" : "missing"));
+                    List.of(all(form, Button.class).stream().anyMatch(button -> "Choose knowledge sources…".equals(button.getText())) ? "offered" : "missing"));
         });
 
         assertThat(shown.getFirst()).containsExactly("SNOMED CT", "GUDID");

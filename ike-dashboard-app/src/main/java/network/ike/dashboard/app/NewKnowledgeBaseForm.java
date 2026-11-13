@@ -56,10 +56,10 @@ import java.util.function.Function;
 
 /**
  * The form in front of {@code ike:kb-create-draft} and {@code ike:kb-create-publish}
- * (IKE-Network/ike-issues#1370): a person names a new knowledge base, picks the protobuf layers on
+ * (IKE-Network/ike-issues#1370): a person names a new knowledge base, picks the knowledge sources on
  * Nexus it is built from, in load order, reads the draft, and creates it. The form says what the goals
  * will be given, a {@link KnowledgeBaseProject}, and shows what they answer; it works nothing out that
- * the goals decide, beyond an estimate of the sizes while the layers are picked. Once the project is
+ * the goals decide, beyond an estimate of the sizes while the knowledge sources are picked. Once the project is
  * created it is the Projects tab's, where it is built and deployed. It does no IO of its
  * own; {@link DashboardApp} supplies the catalog and runs the goals.
  *
@@ -76,15 +76,15 @@ public final class NewKnowledgeBaseForm extends BorderPane {
     private static final double LABELS = 120;
 
     /**
-     * One layer of the list.
+     * One knowledge source of the list.
      *
-     * @param layer     the layer, at the version Nexus lists it under
+     * @param knowledge source     the knowledge source, at the version Nexus lists it under
      * @param sizeBytes its size, negative when not known
      * @param deployed  when it was deployed, when known
      * @param name      the name a person reads
      * @param builtFrom what its own descriptor says it was built from, blank when it says nothing
      */
-    record Row(KnowledgeBaseProject.Layer layer, long sizeBytes, Optional<Instant> deployed, String name, String builtFrom) {
+    record Row(KnowledgeBaseProject.KnowledgeSource knowledgeSource, long sizeBytes, Optional<Instant> deployed, String name, String builtFrom) {
     }
 
     private final TextField name = new TextField();
@@ -92,15 +92,15 @@ public final class NewKnowledgeBaseForm extends BorderPane {
     private final TextField group = new TextField(KnowledgeBaseProject.DEFAULT_GROUP);
     private final TextField version = new TextField(KnowledgeBaseProject.DEFAULT_VERSION);
     private final ToggleButton assembly = new ToggleButton(KnowledgeBaseProject.Kind.ASSEMBLY.label());
-    private final ToggleButton sourceLayer = new ToggleButton(KnowledgeBaseProject.Kind.SOURCE_LAYER.label());
+    private final ToggleButton sourceKnowledgeSource = new ToggleButton(KnowledgeBaseProject.Kind.SOURCE.label());
     private final TextField collection = new TextField();
     private final TextField folder = new TextField();
     private final TextField importer = new TextField();
     private final TextField release = new TextField();
     private final TextField importerOptions = new TextField();
     private final TextField editModule = new TextField();
-    private final VBox layerBox = new VBox(6);
-    private final Button addProtobuf = new Button("Choose layers…");
+    private final VBox knowledgeSourceBox = new VBox(6);
+    private final Button addProtobuf = new Button("Choose knowledge sources…");
     private final Button copyInputs = new Button("Copy inputs from KB…");
     private final Label sizes = new Label();
     private final ToggleButton rocksBySize = new ToggleButton("By size");
@@ -120,7 +120,7 @@ public final class NewKnowledgeBaseForm extends BorderPane {
     private final Button cancel = new Button("Cancel");
     private final Button another = new Button("New knowledge base");
     private final List<Node> assemblyOnly = new ArrayList<>();
-    private final List<Node> sourceLayerOnly = new ArrayList<>();
+    private final List<Node> sourceKnowledgeSourceOnly = new ArrayList<>();
     /** Everything a person fills in; the draft beneath it stays readable while this waits. */
     private final VBox fields = new VBox(14);
 
@@ -136,7 +136,7 @@ public final class NewKnowledgeBaseForm extends BorderPane {
     private List<String> missing = List.of();
     private boolean working;
     private Optional<KnowledgeBaseProject> drafted = Optional.empty();
-    private Map<KnowledgeBaseProject.Layer, String> pinned = Map.of();
+    private Map<KnowledgeBaseProject.KnowledgeSource, String> pinned = Map.of();
     /** The last draft, whose sizes are the goals' own and replace the estimate while it stands. */
     private Optional<KnowledgeBaseCreation.Outcome> draftOutcome = Optional.empty();
     private final ScrollPane scroll = new ScrollPane();
@@ -147,7 +147,7 @@ public final class NewKnowledgeBaseForm extends BorderPane {
     private Consumer<KnowledgeBaseProject> onCreate = project -> { };
     private Runnable onCancel = () -> { };
 
-    /** Builds the form, with no layers and nothing on Nexus to pick from until a catalog is set. */
+    /** Builds the form, with no knowledge sources and nothing on Nexus to pick from until a catalog is set. */
     public NewKnowledgeBaseForm() {
         name.setPromptText("my-kb");
         displayName.setPromptText("From the name");
@@ -156,12 +156,12 @@ public final class NewKnowledgeBaseForm extends BorderPane {
         release.setPromptText("The release's coordinate, or its path");
         importerOptions.setPromptText("No options");
         editModule.setPromptText("None: every module's versions are kept");
-        segmented(assembly, sourceLayer);
+        segmented(assembly, sourceKnowledgeSource);
         assembly.setSelected(true);
         segmented(rocksBySize, rocksAlways, rocksNever);
         rocksBySize.setSelected(true);
 
-        fields.getChildren().addAll(identity(), layers(), size(), deployment(), repository());
+        fields.getChildren().addAll(identity(), knowledgeSources(), size(), deployment(), repository());
         VBox form = new VBox(14, fields, draftSection());
         form.setPadding(new Insets(16, 20, 16, 20));
         scroll.setContent(form);
@@ -216,10 +216,10 @@ public final class NewKnowledgeBaseForm extends BorderPane {
     }
 
     private Node identity() {
-        HBox kind = new HBox(assembly, sourceLayer);
+        HBox kind = new HBox(assembly, sourceKnowledgeSource);
         Label kindLine = muted("");
         kindLine.textProperty().bind(assembly.selectedProperty().map(selected -> selected
-                ? "Combines the layers, runs the reasoner, and publishes a reasoned protobuf."
+                ? "Combines the knowledge sources, runs the reasoner, and publishes a reasoned protobuf."
                 : "Reads a release into an unreasoned protobuf, which an assembly then loads."));
         GridPane first = grid();
         int row = field(first, 0, "Name", name, "Lower-case letters, digits and hyphens. It also names the folder.");
@@ -232,7 +232,7 @@ public final class NewKnowledgeBaseForm extends BorderPane {
         row = field(source, 0, "Importer", importer, null);
         row = field(source, row, "Release", release, null);
         field(source, row, "Importer options", importerOptions, null);
-        sourceLayerOnly.add(source);
+        sourceKnowledgeSourceOnly.add(source);
         GridPane edits = grid();
         field(edits, 0, "Komet edits", editModule,
                 "Kept as change sets in the project's changesets folder. Name a module's UUID to keep only its versions.");
@@ -243,10 +243,10 @@ public final class NewKnowledgeBaseForm extends BorderPane {
         return section("Identity", new VBox(6, first, source, edits, last));
     }
 
-    private Node layers() {
+    private Node knowledgeSources() {
         HBox buttons = new HBox(8, addProtobuf, copyInputs);
-        Label order = muted("Layers load in the order listed.");
-        return section("Layers", new VBox(8, layerBox, buttons, order));
+        Label order = muted("Sources are loaded in the order listed.");
+        return section("Built from", new VBox(8, knowledgeSourceBox, buttons, order));
     }
 
     private Node size() {
@@ -291,7 +291,7 @@ public final class NewKnowledgeBaseForm extends BorderPane {
         draft.setEditable(false);
         draft.setPrefRowCount(14);
         draft.setStyle("-fx-font-family: Menlo, Consolas, monospace; -fx-font-size: 11px;");
-        draft.setPromptText("Draft shows what will be created, with each layer at its exact version on Nexus."
+        draft.setPromptText("Draft shows what will be created, with each knowledge source at its exact version on Nexus."
                 + " Nothing is written until you choose Create knowledge base.");
         return section("Draft", draft);
     }
@@ -350,7 +350,7 @@ public final class NewKnowledgeBaseForm extends BorderPane {
     }
 
     /**
-     * What Nexus offers, to pick layers from and to copy another knowledge base's inputs from.
+     * What Nexus offers, to pick knowledge sources from and to copy another knowledge base's inputs from.
      *
      * @param catalog the described knowledge bases and their protobufs
      */
@@ -449,8 +449,8 @@ public final class NewKnowledgeBaseForm extends BorderPane {
         put(properties, "groupId", group, KnowledgeBaseProject.DEFAULT_GROUP);
         put(properties, "version", version, KnowledgeBaseProject.DEFAULT_VERSION);
         put(properties, "displayName", displayName, "");
-        properties.put(KnowledgeBaseProject.LAYERS, String.join(",", rows.stream().map(row -> row.layer().toString()).toList()));
-        if (kind == KnowledgeBaseProject.Kind.SOURCE_LAYER) {
+        properties.put(KnowledgeBaseProject.KNOWLEDGE_SOURCES, String.join(",", rows.stream().map(row -> row.knowledgeSource().toString()).toList()));
+        if (kind == KnowledgeBaseProject.Kind.SOURCE) {
             put(properties, "importer", importer, "");
             put(properties, "release", release, "");
             put(properties, "importerOptions", importerOptions, "");
@@ -475,7 +475,7 @@ public final class NewKnowledgeBaseForm extends BorderPane {
     }
 
     private KnowledgeBaseProject.Kind kind() {
-        return assembly.isSelected() ? KnowledgeBaseProject.Kind.ASSEMBLY : KnowledgeBaseProject.Kind.SOURCE_LAYER;
+        return assembly.isSelected() ? KnowledgeBaseProject.Kind.ASSEMBLY : KnowledgeBaseProject.Kind.SOURCE;
     }
 
     private Optional<Boolean> rocks() {
@@ -483,7 +483,7 @@ public final class NewKnowledgeBaseForm extends BorderPane {
     }
 
     /**
-     * The layers listed, in load order, without the starter set the goals put first.
+     * The knowledge sources listed, in load order, without the starter set the goals put first.
      *
      * @return the rows
      */
@@ -492,12 +492,12 @@ public final class NewKnowledgeBaseForm extends BorderPane {
     }
 
     /**
-     * Adds a protobuf Nexus offers as the last layer; one of an artifact already listed replaces it in place.
+     * Adds a protobuf Nexus offers as the last knowledge source; one of an artifact already listed replaces it in place.
      *
      * @param offer the protobuf
      */
-    void addLayer(NexusCatalog.Offer offer) {
-        Row row = new Row(KnowledgeBaseProject.Layer.of(offer), offer.sizeBytes(), Optional.of(offer.updated()),
+    void addKnowledgeSource(NexusCatalog.Offer offer) {
+        Row row = new Row(KnowledgeBaseProject.KnowledgeSource.of(offer), offer.sizeBytes(), Optional.of(offer.updated()),
                 displayName(offer.coordinate()), builtFrom(offer.coordinate()));
         place(row);
         changed();
@@ -505,7 +505,7 @@ public final class NewKnowledgeBaseForm extends BorderPane {
 
     /**
      * Lists the protobufs another knowledge base was built from, as its descriptor on Nexus records them,
-     * in place of the layers listed. The starter set is left out: the goals put it first.
+     * in place of the knowledge sources listed. The starter set is left out: the goals put it first.
      *
      * @param knowledgeBase the knowledge base, as the catalog describes it
      */
@@ -521,14 +521,14 @@ public final class NewKnowledgeBaseForm extends BorderPane {
             if (coordinate.isEmpty() || classifier.isEmpty()) {
                 continue;
             }
-            KnowledgeBaseProject.Layer layer = new KnowledgeBaseProject.Layer(coordinate.get().groupId(),
+            KnowledgeBaseProject.KnowledgeSource knowledgeSource = new KnowledgeBaseProject.KnowledgeSource(coordinate.get().groupId(),
                     coordinate.get().artifactId(), classifier.get(), coordinate.get().version());
-            if (layer.starterSet()) {
+            if (knowledgeSource.starterSet()) {
                 continue;
             }
             Optional<NexusCatalog.Offer> offer = catalog.offers().stream().filter(candidate ->
                     candidate.coordinate().equals(coordinate.get()) && candidate.classifier().equals(classifier.get())).findFirst();
-            place(new Row(layer, offer.map(NexusCatalog.Offer::sizeBytes).orElse(-1L), offer.map(NexusCatalog.Offer::updated),
+            place(new Row(knowledgeSource, offer.map(NexusCatalog.Offer::sizeBytes).orElse(-1L), offer.map(NexusCatalog.Offer::updated),
                     displayName(coordinate.get()), builtFrom(coordinate.get())));
         }
         changed();
@@ -536,7 +536,7 @@ public final class NewKnowledgeBaseForm extends BorderPane {
 
     private void place(Row row) {
         for (int index = 0; index < rows.size(); index++) {
-            if (rows.get(index).layer().sameArtifact(row.layer())) {
+            if (rows.get(index).knowledgeSource().sameArtifact(row.knowledgeSource())) {
                 rows.set(index, row);
                 return;
             }
@@ -558,7 +558,7 @@ public final class NewKnowledgeBaseForm extends BorderPane {
                 .map(Map.Entry::getValue).findFirst();
     }
 
-    /** What a layer's own descriptor says it was built from: each input's artifact, version, and role. */
+    /** What a knowledge source's own descriptor says it was built from: each input's artifact, version, and role. */
     private String builtFrom(Coordinate knowledgeBase) {
         NexusCatalog.Described entry = catalog.described().get(knowledgeBase);
         if (entry == null) {
@@ -594,17 +594,17 @@ public final class NewKnowledgeBaseForm extends BorderPane {
     private void refresh() {
         KnowledgeBaseProject.Kind kind = kind();
         assemblyOnly.forEach(node -> show(node, kind == KnowledgeBaseProject.Kind.ASSEMBLY));
-        sourceLayerOnly.forEach(node -> show(node, kind == KnowledgeBaseProject.Kind.SOURCE_LAYER));
-        showLayers();
+        sourceKnowledgeSourceOnly.forEach(node -> show(node, kind == KnowledgeBaseProject.Kind.SOURCE));
+        showKnowledgeSources();
         KnowledgeBaseProject.Estimate estimate = KnowledgeBaseProject.estimate(kind,
                 rows.stream().map(Row::sizeBytes).toList(), rocks());
-        // Until a draft pins the layers the sizes are an estimate, without the starter set; then they are the goals' own.
-        Optional<String> total = draftOutcome.flatMap(outcome -> outcome.reported("Layers total"));
+        // Until a draft pins the knowledge sources the sizes are an estimate, without the starter set; then they are the goals' own.
+        Optional<String> total = draftOutcome.flatMap(outcome -> outcome.reported("Knowledge sources total"));
         Optional<String> heap = draftOutcome.flatMap(outcome -> outcome.reported("Build heap"));
         Optional<String> store = draftOutcome.flatMap(outcome -> outcome.reported("Rocks store"));
-        sizes.setText(rows.isEmpty() ? "No layers yet."
-                : total.isPresent() && heap.isPresent() ? "Layers total " + total.get() + "  ·  the build is given " + heap.get()
-                : "Layers total " + KnowledgeBaseProject.Estimate.size(estimate.layerBytes())
+        sizes.setText(rows.isEmpty() ? "No knowledge sources yet."
+                : total.isPresent() && heap.isPresent() ? "The knowledge sources total " + total.get() + "  ·  the build is given " + heap.get()
+                : "The knowledge sources total " + KnowledgeBaseProject.Estimate.size(estimate.knowledgeSourceBytes())
                 + (estimate.unknownSizes() == 0 ? "" : " (" + estimate.unknownSizes() + " not known)")
                 + "  ·  about " + KnowledgeBaseProject.Estimate.size(estimate.loadedBytes()) + " of memory once loaded"
                 + "  ·  the build is given " + estimate.heapGib() + " GiB");
@@ -666,26 +666,26 @@ public final class NewKnowledgeBaseForm extends BorderPane {
         message.setStyle(problem ? PROBLEM : MUTED);
     }
 
-    private void showLayers() {
+    private void showKnowledgeSources() {
         List<Node> shown = new ArrayList<>();
-        List<KnowledgeBaseProject.Layer> layers = rows.stream().map(Row::layer).toList();
+        List<KnowledgeBaseProject.KnowledgeSource> knowledgeSources = rows.stream().map(Row::knowledgeSource).toList();
         int position = 1;
-        if (KnowledgeBaseProject.starterSetFirst(layers)) {
-            Optional<Map.Entry<KnowledgeBaseProject.Layer, String>> starter = pinned.entrySet().stream()
+        if (KnowledgeBaseProject.starterSetFirst(knowledgeSources)) {
+            Optional<Map.Entry<KnowledgeBaseProject.KnowledgeSource, String>> starter = pinned.entrySet().stream()
                     .filter(entry -> entry.getKey().starterSet()).findFirst();
-            shown.add(layerRow(position++, "IKE Starter Set", NexusCatalog.label("unreasoned-pb") + "  ·  "
+            shown.add(knowledgeSourceRow(position++, "IKE Starter Set", NexusCatalog.label("unreasoned-pb") + "  ·  "
                             + starter.map(entry -> entry.getKey().version() + "  ·  " + entry.getValue())
                             .orElse("the draft finds its exact version"),
-                    "Always loaded first. Every other layer depends on it.", List.of()));
+                    "Always loaded first. Every other source depends on it.", List.of()));
         }
         for (int index = 0; index < rows.size(); index++) {
             Row row = rows.get(index);
             int at = index;
-            Optional<Map.Entry<KnowledgeBaseProject.Layer, String>> pin = pinned.entrySet().stream()
-                    .filter(entry -> entry.getKey().sameArtifact(row.layer())).findFirst();
-            String facts = NexusCatalog.label(row.layer().classifier()) + "  ·  "
+            Optional<Map.Entry<KnowledgeBaseProject.KnowledgeSource, String>> pin = pinned.entrySet().stream()
+                    .filter(entry -> entry.getKey().sameArtifact(row.knowledgeSource())).findFirst();
+            String facts = NexusCatalog.label(row.knowledgeSource().classifier()) + "  ·  "
                     + pin.map(entry -> entry.getKey().version() + "  ·  " + entry.getValue())
-                    .orElse(row.layer().version()
+                    .orElse(row.knowledgeSource().version()
                             + row.deployed().map(when -> ", deployed " + DAY.format(when)).orElse("")
                             + "  ·  " + (row.sizeBytes() < 0 ? "size not known" : KnowledgeBaseProject.Estimate.size(row.sizeBytes())));
             Button up = small("↑", "Load " + row.name() + " earlier", () -> move(at, at - 1));
@@ -696,10 +696,10 @@ public final class NewKnowledgeBaseForm extends BorderPane {
                 rows.remove(at);
                 changed();
             });
-            shown.add(layerRow(position++, row.name(), facts,
+            shown.add(knowledgeSourceRow(position++, row.name(), facts,
                     row.builtFrom().isEmpty() ? "" : "Built from " + row.builtFrom(), List.of(up, down, remove)));
         }
-        layerBox.getChildren().setAll(shown);
+        knowledgeSourceBox.getChildren().setAll(shown);
     }
 
     private void move(int from, int to) {
@@ -719,7 +719,7 @@ public final class NewKnowledgeBaseForm extends BorderPane {
         return button;
     }
 
-    private static Node layerRow(int position, String name, String facts, String builtFrom, List<Button> actions) {
+    private static Node knowledgeSourceRow(int position, String name, String facts, String builtFrom, List<Button> actions) {
         Label number = new Label(position + ".");
         number.setMinWidth(22);
         number.setStyle(MUTED);
@@ -741,22 +741,22 @@ public final class NewKnowledgeBaseForm extends BorderPane {
     }
 
     /**
-     * Opens the list of every protobuf Nexus offers, each with a checkbox and what it is, with the layers
+     * Opens the list of every protobuf Nexus offers, each with a checkbox and what it is, with the knowledge sources
      * chosen so far checked.
      */
     private void chooseProtobuf() {
         if (chooser != null) {
             chooser.close();
         }
-        LayerChooser layers = new LayerChooser(catalog, rows.stream().map(Row::layer).toList());
+        KnowledgeSourceChooser knowledgeSources = new KnowledgeSourceChooser(catalog, rows.stream().map(Row::knowledgeSource).toList());
         Stage window = new Stage();
-        layers.setOnCancel(window::close);
-        layers.setOnDone(checked -> {
+        knowledgeSources.setOnCancel(window::close);
+        knowledgeSources.setOnDone(checked -> {
             window.close();
-            setLayers(checked);
+            setKnowledgeSources(checked);
         });
-        window.setTitle("Choose the layers of the knowledge base");
-        window.setScene(new Scene(layers, 720, 640));
+        window.setTitle("Choose the knowledge sources");
+        window.setScene(new Scene(knowledgeSources, 720, 640));
         if (getScene() != null && getScene().getWindow() != null) {
             window.initOwner(getScene().getWindow());
         }
@@ -765,25 +765,25 @@ public final class NewKnowledgeBaseForm extends BorderPane {
     }
 
     /**
-     * Makes the layers what was checked among what Nexus offers. A layer that stays keeps its place in the
-     * load order, a new one loads last, and one no longer checked is taken out. A layer Nexus offers no
+     * Makes the knowledge sources what was checked among what Nexus offers. A knowledge source that stays keeps its place in the
+     * load order, a new one loads last, and one no longer checked is taken out. A knowledge source Nexus offers no
      * protobuf of, such as one copied from another knowledge base's inputs, could not be checked and stays.
      *
      * @param checked the protobufs checked
      */
-    void setLayers(List<NexusCatalog.Offer> checked) {
-        List<KnowledgeBaseProject.Layer> offered = catalog.offers().stream().map(KnowledgeBaseProject.Layer::of).toList();
-        List<KnowledgeBaseProject.Layer> wanted = checked.stream().map(KnowledgeBaseProject.Layer::of).toList();
-        rows.removeIf(row -> wanted.stream().noneMatch(layer -> same(layer, row.layer()))
-                && offered.stream().anyMatch(layer -> same(layer, row.layer())));
+    void setKnowledgeSources(List<NexusCatalog.Offer> checked) {
+        List<KnowledgeBaseProject.KnowledgeSource> offered = catalog.offers().stream().map(KnowledgeBaseProject.KnowledgeSource::of).toList();
+        List<KnowledgeBaseProject.KnowledgeSource> wanted = checked.stream().map(KnowledgeBaseProject.KnowledgeSource::of).toList();
+        rows.removeIf(row -> wanted.stream().noneMatch(knowledgeSource -> same(knowledgeSource, row.knowledgeSource()))
+                && offered.stream().anyMatch(knowledgeSource -> same(knowledgeSource, row.knowledgeSource())));
         for (NexusCatalog.Offer offer : checked) {
-            place(new Row(KnowledgeBaseProject.Layer.of(offer), offer.sizeBytes(), Optional.of(offer.updated()),
+            place(new Row(KnowledgeBaseProject.KnowledgeSource.of(offer), offer.sizeBytes(), Optional.of(offer.updated()),
                     displayName(offer.coordinate()), builtFrom(offer.coordinate())));
         }
         changed();
     }
 
-    private static boolean same(KnowledgeBaseProject.Layer one, KnowledgeBaseProject.Layer other) {
+    private static boolean same(KnowledgeBaseProject.KnowledgeSource one, KnowledgeBaseProject.KnowledgeSource other) {
         return one.sameArtifact(other) && one.classifier().equals(other.classifier());
     }
 
@@ -878,7 +878,7 @@ public final class NewKnowledgeBaseForm extends BorderPane {
     }
 
     /**
-     * Shows how a draft ended: its plan, with each layer at the deploy it was pinned to, or why the goals
+     * Shows how a draft ended: its plan, with each knowledge source at the deploy it was pinned to, or why the goals
      * refused it.
      *
      * @param project the project drafted

@@ -1106,17 +1106,17 @@ public final class DashboardApp extends Application {
         });
     }
 
-    /** Shows what creating a knowledge base would do; Nexus is read to pin its layers, and nothing is written. */
+    /** Shows what creating a knowledge base would do; Nexus is read to pin its knowledge sources, and nothing is written. */
     private void draftKnowledgeBase(KnowledgeBaseProject project) {
         NewKnowledgeBaseForm form = view.newKnowledgeBase();
         runMaven("kb-draft-" + project.name(), (creation, line) -> creation.draft(project, line),
-                () -> form.working("Drafting " + project.name() + ": finding each layer's exact version on Nexus …"),
+                () -> form.working("Drafting " + project.name() + ": finding each knowledge source's exact version on Nexus …"),
                 form::progress, outcome -> form.drafted(project, outcome), form::failed);
     }
 
     /**
      * Creates the knowledge base the draft showed: its project, its git repository with one commit, and
-     * a validation that every layer resolves. The Projects tab then shows it.
+     * a validation that every knowledge source resolves. The Projects tab then shows it.
      */
     private void createKnowledgeBase(KnowledgeBaseProject project) {
         NewKnowledgeBaseForm form = view.newKnowledgeBase();

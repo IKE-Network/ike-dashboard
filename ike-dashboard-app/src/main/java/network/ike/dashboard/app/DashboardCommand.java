@@ -59,9 +59,9 @@ import java.util.Locale;
  * kb-remote-draft &lt;project&gt; &lt;git-url&gt;   what kb-remote would do; the remote is asked, nothing is changed
  * kb-remote &lt;project&gt; &lt;git-url&gt;         give a project its remote: origin, the POM's scm, a commit, the
  *                                       push; the project by its name in ~/knowledge-bases, or its folder
- * kb-draft &lt;name&gt; [property=value …]    what kb-new would create, each layer pinned; nothing is written
+ * kb-draft &lt;name&gt; [property=value …]    what kb-new would create, each knowledge source pinned; nothing is written
  * kb-new &lt;name&gt; [property=value …]      create a knowledge-base project in a local git repository:
- *                                       layers=&lt;g:a:zip:classifier:v,…&gt; in load order, folder=&lt;path&gt;
+ *                                       knowledge sources=&lt;g:a:zip:classifier:v,…&gt; in load order, folder=&lt;path&gt;
  *                                       (default: ~/knowledge-bases/&lt;name&gt;), and any other property of
  *                                       ike:kb-create-publish, such as kind, collection, rocks; a name
  *                                       already used by a project, in ~/Solor or on Nexus is refused,
@@ -137,7 +137,7 @@ public final class DashboardCommand {
             }
             case "kb-draft", "kb-new" -> {
                 if (args.length < 2) {
-                    throw new IllegalArgumentException(command + " <name> [property=value …], such as layers=<g:a:zip:classifier:v,…>");
+                    throw new IllegalArgumentException(command + " <name> [property=value …], such as knowledgeSources=<g:a:zip:classifier:v,…>");
                 }
                 newKnowledgeBase(out, settings, command.equals("kb-new"),
                         KnowledgeBaseProject.parse(args[1], List.of(args).subList(2, args.length), settings.projects()));
@@ -495,8 +495,8 @@ public final class DashboardCommand {
             String repository = git.isEmpty() || !java.nio.file.Files.exists(project.folder().resolve(".git")) ? "no git repository"
                     : describe(RepositorySync.local(git.get(), new RepositorySync.Repository(project.folder(), "project")));
             out.printf("%-28s %-44s %s%n", project.artifactId(), project.coordinates(), repository);
-            for (KnowledgeBaseProject.Layer layer : project.layers()) {
-                out.printf("    %-30s %-22s %s%n", layer.artifactId(), NexusCatalog.label(layer.classifier()), layer.version());
+            for (KnowledgeBaseProject.KnowledgeSource knowledgeSource : project.knowledgeSources()) {
+                out.printf("    %-30s %-22s %s%n", knowledgeSource.artifactId(), NexusCatalog.label(knowledgeSource.classifier()), knowledgeSource.version());
             }
             for (KnowledgeBaseProjectFolder member : project.members()) {
                 out.printf("    member %-23s %s%n", member.artifactId(), member.coordinates());

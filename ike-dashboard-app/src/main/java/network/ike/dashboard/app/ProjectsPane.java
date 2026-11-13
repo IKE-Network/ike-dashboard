@@ -486,7 +486,7 @@ public final class ProjectsPane extends SplitPane {
         if (project.workingSet()) {
             detail.getChildren().add(muted("A working set. It builds its members together, in the order listed."));
         } else if (!project.buildsKnowledgeBase()) {
-            detail.getChildren().add(muted("This project builds no knowledge base: it is built from no protobuf layers."));
+            detail.getChildren().add(muted("This project builds no knowledge base: it is built from no knowledge sources."));
         }
 
         boolean busy = working.isPresent();
@@ -529,14 +529,14 @@ public final class ProjectsPane extends SplitPane {
                     : "Deploy each member from its own page."));
         }
 
-        if (!project.layers().isEmpty()) {
+        if (!project.knowledgeSources().isEmpty()) {
             detail.getChildren().add(heading("Built from"));
             int position = 1;
-            for (KnowledgeBaseProject.Layer layer : project.layers()) {
-                detail.getChildren().add(SelectableText.of(position++ + ".  " + layer.artifactId() + "  ·  "
-                        + NexusCatalog.label(layer.classifier()) + "  ·  " + layer.version()));
+            for (KnowledgeBaseProject.KnowledgeSource knowledgeSource : project.knowledgeSources()) {
+                detail.getChildren().add(SelectableText.of(position++ + ".  " + knowledgeSource.artifactId() + "  ·  "
+                        + NexusCatalog.label(knowledgeSource.classifier()) + "  ·  " + knowledgeSource.version()));
             }
-            detail.getChildren().add(muted("Each layer stays at this version until the project is changed."));
+            detail.getChildren().add(muted("Each source stays at this version until the project is changed."));
         }
         if (!project.workingSet()) {
             detail.getChildren().add(heading("Deploys to"));
@@ -640,7 +640,7 @@ public final class ProjectsPane extends SplitPane {
         title.setStyle("-fx-font-size: 20px; -fx-font-weight: bold;");
         detail.getChildren().add(title);
         detail.getChildren().add(muted("A working set builds several projects together, in order: a knowledge base and the"
-                + " source layers it is assembled from, for example. It is made empty, in a folder of its own in " + folder
+                + " sources it is built from, for example. It is made empty, in a folder of its own in " + folder
                 + ". A project is added once it builds on its own."));
         HBox.setHgrow(workingSetName, Priority.ALWAYS);
         HBox.setHgrow(workingSetGroup, Priority.ALWAYS);

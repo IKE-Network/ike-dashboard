@@ -40,14 +40,14 @@ import java.util.Optional;
 import java.util.function.Consumer;
 
 /**
- * Where the layers of a new knowledge base are chosen (IKE-Network/ike-issues#1370; KEC, 2026-11-12:
+ * Where the knowledge sources of a new knowledge base are chosen (IKE-Network/ike-issues#1370; KEC, 2026-11-12:
  * "we want checkboxes for what to include, and more of an idea what each of the options are beyond just
  * the name"). Every protobuf Nexus offers is listed with a checkbox, and under its name what it is: one
  * source or a whole knowledge base, its coordinates, version, size and when it was deployed, and what it
  * was built from. The two kinds are listed apart, because they cannot be combined yet (decision 10):
  * choosing one of a kind sets the other kind aside, and says why.
  */
-final class LayerChooser extends BorderPane {
+final class KnowledgeSourceChooser extends BorderPane {
 
     private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneId.systemDefault());
     private static final String MUTED = "-fx-text-fill: #6b6b6b;";
@@ -61,18 +61,18 @@ final class LayerChooser extends BorderPane {
     private final Label sourcesNote = new Label();
     private final Label wholeNote = new Label();
     private final Label summary = new Label();
-    private final Button done = new Button("Use these layers");
+    private final Button done = new Button("Use these knowledge sources");
     private final Button cancel = new Button("Cancel");
     private Consumer<List<NexusCatalog.Offer>> onDone = offers -> { };
     private Runnable onCancel = () -> { };
 
     /**
-     * A chooser of what Nexus offers, with the layers already chosen checked.
+     * A chooser of what Nexus offers, with the knowledge sources already chosen checked.
      *
      * @param catalog the described knowledge bases and their protobufs
-     * @param chosen  the layers chosen so far
+     * @param chosen  the knowledge sources chosen so far
      */
-    LayerChooser(NexusCatalog.Catalog catalog, List<KnowledgeBaseProject.Layer> chosen) {
+    KnowledgeSourceChooser(NexusCatalog.Catalog catalog, List<KnowledgeBaseProject.KnowledgeSource> chosen) {
         this.catalog = catalog;
         search.setPromptText("Search");
         search.textProperty().addListener((observable, was, now) -> show());
@@ -82,10 +82,10 @@ final class LayerChooser extends BorderPane {
             if (!NexusCatalog.PROTOBUF_CLASSIFIERS.contains(offer.classifier())) {
                 continue;
             }
-            KnowledgeBaseProject.Layer layer = KnowledgeBaseProject.Layer.of(offer);
+            KnowledgeBaseProject.KnowledgeSource knowledgeSource = KnowledgeBaseProject.KnowledgeSource.of(offer);
             CheckBox box = new CheckBox();
             box.setAccessibleText("Include " + name(catalog, offer.coordinate()));
-            box.setSelected(chosen.stream().anyMatch(was -> was.sameArtifact(layer) && was.classifier().equals(layer.classifier())));
+            box.setSelected(chosen.stream().anyMatch(was -> was.sameArtifact(knowledgeSource) && was.classifier().equals(knowledgeSource.classifier())));
             box.selectedProperty().addListener((observable, was, now) -> changed());
             boxes.put(offer, box);
             rows.put(offer, row(offer, box));
@@ -115,7 +115,7 @@ final class LayerChooser extends BorderPane {
     }
 
     /**
-     * What Use these layers does, given the protobufs checked, sources first, each kind in the order listed.
+     * What Use these knowledge sources does, given the protobufs checked, sources first, each kind in the order listed.
      *
      * @param action the action
      */
@@ -193,7 +193,7 @@ final class LayerChooser extends BorderPane {
     }
 
     private static boolean whole(NexusCatalog.Offer offer) {
-        return KnowledgeBaseProject.Layer.of(offer).reasoned();
+        return KnowledgeBaseProject.KnowledgeSource.of(offer).reasoned();
     }
 
     /** Lists the protobufs the search matches, the sources first and the whole knowledge bases after them. */
@@ -206,7 +206,7 @@ final class LayerChooser extends BorderPane {
             if (matching.isEmpty()) {
                 continue;
             }
-            Label heading = new Label(whole ? "Whole knowledge bases" : "Sources");
+            Label heading = new Label(whole ? "Whole knowledge bases" : "Single sources");
             heading.setStyle(NAME + " -fx-padding: 8 0 0 0;");
             shown.add(heading);
             shown.add(whole ? wholeNote : sourcesNote);
@@ -227,7 +227,7 @@ final class LayerChooser extends BorderPane {
     /** A box was checked or cleared: the other kind is set aside or offered again, and the total is said. */
     private void changed() {
         boolean sources = checked().stream().anyMatch(offer -> !whole(offer));
-        boolean wholes = checked().stream().anyMatch(LayerChooser::whole);
+        boolean wholes = checked().stream().anyMatch(KnowledgeSourceChooser::whole);
         boxes.forEach((offer, box) -> box.setDisable(whole(offer) ? sources : wholes));
         sourcesNote.setText(wholes ? "Not offered while a whole knowledge base is chosen: the two cannot be combined yet."
                 : "Each is one terminology or data set. Choose any number. The IKE Starter Set is always included first.");
@@ -270,7 +270,7 @@ final class LayerChooser extends BorderPane {
             return "";
         }
         List<String> releases = new ArrayList<>();
-        List<String> layers = new ArrayList<>();
+        List<String> knowledgeSources = new ArrayList<>();
         for (KnowledgeBaseDescriptor.Input input : entry.descriptor().inputs()) {
             if (input.of(offer.coordinate())) {
                 continue;                                // a store records the protobuf it was loaded from
@@ -280,9 +280,9 @@ final class LayerChooser extends BorderPane {
                     .or(input::file).orElse(input.reference());
             switch (input.role()) {
                 case "SOURCE" -> releases.add(what + input.importer().map(importer -> " by the " + importer + " importer").orElse(""));
-                case "PB", "STORE_SEED" -> layers.add(coordinate.map(named -> name(catalog, named)).orElse(what));
+                case "PB", "STORE_SEED" -> knowledgeSources.add(coordinate.map(named -> name(catalog, named)).orElse(what));
                 default -> {
-                    // Change sets folded in at assembly are the knowledge base's own edits, not a layer to name.
+                    // Change sets folded in at assembly are the knowledge base's own edits, not a knowledge source to name.
                 }
             }
         }
@@ -290,8 +290,8 @@ final class LayerChooser extends BorderPane {
         if (!releases.isEmpty()) {
             sentences.add("Read from " + String.join(", ", releases) + ".");
         }
-        if (!layers.isEmpty()) {
-            sentences.add((whole(offer) ? "Contains " : "Built on ") + String.join(", ", layers) + ".");
+        if (!knowledgeSources.isEmpty()) {
+            sentences.add((whole(offer) ? "Contains " : "Built on ") + String.join(", ", knowledgeSources) + ".");
         }
         return String.join(" ", sentences);
     }

@@ -27,13 +27,13 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * A knowledge base to create (IKE-Network/ike-issues#1370): a Maven 4 project built from protobuf layers
+ * A knowledge base to create (IKE-Network/ike-issues#1370): a Maven 4 project built from knowledge sources
  * already on Nexus, kept in a local git repository. It is written in the words of the goals that create
  * it, {@code ike:kb-create-draft} and {@code ike:kb-create-publish}: its name, its folder, and the goals'
  * own properties, so the window's form and the headless {@code kb-new} say the same thing and nothing is
  * translated between them. The goals are the judge of a project; {@link #problems()} only catches early
  * what they would refuse, and {@link #estimate} only previews the sizes they work out from the pinned
- * layers.
+ * knowledge sources.
  *
  * @param name       the artifactId, which also names the folder
  * @param folder     the project's folder, the goals' {@code targetDirectory}
@@ -41,10 +41,10 @@ import java.util.regex.Pattern;
  */
 public record KnowledgeBaseProject(String name, Path folder, Map<String, String> properties) {
 
-    /** The property that names the layers, comma-separated, in load order. */
-    public static final String LAYERS = "layers";
+    /** The property that names the knowledge sources, comma-separated, in load order. */
+    public static final String KNOWLEDGE_SOURCES = "knowledgeSources";
 
-    /** The property that names the kind, {@code assembly} or {@code source-layer}. */
+    /** The property that names the kind, {@code assembly} or {@code source-knowledge source}. */
     public static final String KIND = "kind";
 
     /** The property that decides the Rocks store, {@code true} or {@code false}; by size when absent. */
@@ -70,10 +70,10 @@ public record KnowledgeBaseProject(String name, Path folder, Map<String, String>
 
     /** Every property the goals take beside {@code name} and {@code targetDirectory}. */
     public static final List<String> PROPERTIES = List.of(KIND, "groupId", "version", "displayName", "description",
-            LAYERS, "starterSetVersion", "importer", "release", "importerOptions", "collection", "distributionId",
+            KNOWLEDGE_SOURCES, "starterSetVersion", "importer", "release", "importerOptions", "collection", "distributionId",
             "releasesUrl", "snapshotsUrl", "siteUrl", ROCKS, "heap", "editModule", "parentVersion", "providerVersion",
-            "tinkarCoreVersion", "rocksKbVersion", "rocksdbjniVersion", "rocksdbjniClassifier", "layerRepository",
-            "layerRepositoryId", "skipVerify");
+            "tinkarCoreVersion", "rocksKbVersion", "rocksdbjniVersion", "rocksdbjniClassifier", "knowledgeSourceRepository",
+            "knowledgeSourceRepositoryId", "skipVerify");
 
     private static final Pattern ARTIFACT_ID = Pattern.compile("[a-z0-9]+(?:[.-][a-z0-9]+)*");
     private static final Pattern GROUP_ID = Pattern.compile("[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*");
@@ -89,6 +89,14 @@ public record KnowledgeBaseProject(String name, Path folder, Map<String, String>
     public KnowledgeBaseProject {
         Map<String, String> kept = new LinkedHashMap<>();
         properties.forEach((property, value) -> {
+            if (property.startsWith("layer")) {
+                throw new IllegalArgumentException(property + " is now " + property.replace("layers", "knowledgeSources")
+                        .replace("layer", "knowledgeSource") + ". The knowledge sources were called layers before.");
+            }
+            if (property.startsWith("layer")) {
+                throw new IllegalArgumentException(property + " is now " + property.replace("layers", "knowledgeSources")
+                        .replace("layer", "knowledgeSource") + ". The knowledge sources were called layers before.");
+            }
             if (!PROPERTIES.contains(property)) {
                 throw new IllegalArgumentException("Unknown property " + property + "; use one of "
                         + String.join(", ", PROPERTIES) + ", or folder");
@@ -103,10 +111,10 @@ public record KnowledgeBaseProject(String name, Path folder, Map<String, String>
 
     /** What a knowledge-base project is, as {@code kind} names it (decision 8). */
     public enum Kind {
-        /** Combines layers, classifies, and publishes a reasoned protobuf. */
+        /** Combines knowledge sources, classifies, and publishes a reasoned protobuf. */
         ASSEMBLY("assembly", "Assembly"),
         /** Turns a release into an unreasoned protobuf, loaded only under an assembly. */
-        SOURCE_LAYER("source-layer", "Source layer");
+        SOURCE("source", "Source");
 
         private final String value;
         private final String label;
@@ -119,7 +127,7 @@ public record KnowledgeBaseProject(String name, Path folder, Map<String, String>
         /**
          * The kind as the goals' {@code kind} property writes it.
          *
-         * @return {@code assembly} or {@code source-layer}
+         * @return {@code assembly} or {@code source-knowledge source}
          */
         public String value() {
             return value;
@@ -136,14 +144,14 @@ public record KnowledgeBaseProject(String name, Path folder, Map<String, String>
     }
 
     /**
-     * One protobuf layer, as the goals' {@code layers} property names it.
+     * One protobuf knowledge source, as the goals' {@code knowledge sources} property names it.
      *
-     * @param groupId    the layer's group
-     * @param artifactId the layer's artifact
+     * @param groupId    the knowledge source's group
+     * @param artifactId the knowledge source's artifact
      * @param classifier {@code unreasoned-pb} or {@code reasoned-pb}
      * @param version    the version, which the goals pin to its exact deploy (decision 9)
      */
-    public record Layer(String groupId, String artifactId, String classifier, String version) {
+    public record KnowledgeSource(String groupId, String artifactId, String classifier, String version) {
 
         /** The group of the IKE starter set, which every knowledge base loads first. */
         public static final String STARTER_SET_GROUP = "network.ike.foundation";
@@ -152,33 +160,33 @@ public record KnowledgeBaseProject(String name, Path folder, Map<String, String>
         public static final String STARTER_SET_ARTIFACT = "ike-starter-set";
 
         /**
-         * Reads a layer.
+         * Reads a knowledge source.
          *
          * @param text {@code groupId:artifactId:zip:classifier:version}
-         * @return the layer
-         * @throws IllegalArgumentException if the text is not a layer's coordinate
+         * @return the knowledge source
+         * @throws IllegalArgumentException if the text is not a knowledge source's coordinate
          */
-        public static Layer parse(String text) {
+        public static KnowledgeSource parse(String text) {
             String[] parts = text.strip().split(":");
             if (parts.length != 5 || !"zip".equals(parts[2]) || java.util.Arrays.stream(parts).anyMatch(String::isBlank)) {
                 throw new IllegalArgumentException("Expected groupId:artifactId:zip:classifier:version, got " + text);
             }
-            return new Layer(parts[0], parts[1], parts[3], parts[4]);
+            return new KnowledgeSource(parts[0], parts[1], parts[3], parts[4]);
         }
 
         /**
-         * The layer a protobuf on Nexus is.
+         * The knowledge source a protobuf on Nexus is.
          *
          * @param offer the protobuf
-         * @return the layer, at the offer's version
+         * @return the knowledge source, at the offer's version
          */
-        public static Layer of(NexusCatalog.Offer offer) {
-            return new Layer(offer.coordinate().groupId(), offer.coordinate().artifactId(), offer.classifier(),
+        public static KnowledgeSource of(NexusCatalog.Offer offer) {
+            return new KnowledgeSource(offer.coordinate().groupId(), offer.coordinate().artifactId(), offer.classifier(),
                     offer.coordinate().version());
         }
 
         /**
-         * Whether the layer is the IKE starter set.
+         * Whether the knowledge source is the IKE starter set.
          *
          * @return whether it is
          */
@@ -187,7 +195,7 @@ public record KnowledgeBaseProject(String name, Path folder, Map<String, String>
         }
 
         /**
-         * Whether the layer is a reasoned protobuf, which stands alone and already carries the starter set.
+         * Whether the knowledge source is a reasoned protobuf, which stands alone and already carries the starter set.
          *
          * @return whether it is
          */
@@ -196,12 +204,12 @@ public record KnowledgeBaseProject(String name, Path folder, Map<String, String>
         }
 
         /**
-         * Whether two layers are the same artifact, at any version.
+         * Whether two knowledge sources are the same artifact, at any version.
          *
-         * @param other the other layer
+         * @param other the other knowledge source
          * @return whether they are
          */
-        public boolean sameArtifact(Layer other) {
+        public boolean sameArtifact(KnowledgeSource other) {
             return groupId.equals(other.groupId) && artifactId.equals(other.artifactId);
         }
 
@@ -212,23 +220,23 @@ public record KnowledgeBaseProject(String name, Path folder, Map<String, String>
     }
 
     /**
-     * The sizes of a project, estimated before its layers are pinned, by the goals' own rule (decision 6;
+     * The sizes of a project, estimated before its knowledge sources are pinned, by the goals' own rule (decision 6;
      * the rule is {@code KbCreatePlan}'s in ike-tooling, and its draft is the figure that counts).
      *
-     * @param layerBytes   the total of the layers whose size is known
-     * @param unknownSizes how many layers' sizes are not known
-     * @param loadedBytes  the heap a spined store of the layers is estimated to hold
+     * @param knowledgeSourceBytes   the total of the knowledge sources whose size is known
+     * @param unknownSizes how many knowledge sources' sizes are not known
+     * @param loadedBytes  the heap a spined store of the knowledge sources is estimated to hold
      * @param heapGib      the heap the build is given, in whole GiB
      * @param rocks        whether a Rocks store is built
      * @param rocksReason  why, as a clause
      */
-    public record Estimate(long layerBytes, int unknownSizes, long loadedBytes, long heapGib, boolean rocks,
+    public record Estimate(long knowledgeSourceBytes, int unknownSizes, long loadedBytes, long heapGib, boolean rocks,
                            String rocksReason) {
 
         /** Bytes in a GiB. */
         static final long GIB = 1L << 30;
 
-        /** At this many GiB of layers or more, an assembly builds a Rocks store. */
+        /** At this many GiB of knowledge sources or more, an assembly builds a Rocks store. */
         static final long ROCKS_THRESHOLD_GIB = 2;
 
         /** Loaded heap per byte of input protobuf: 3.3 to 3.9 measured, rounded up. */
@@ -240,7 +248,7 @@ public record KnowledgeBaseProject(String name, Path folder, Map<String, String>
         /** What the reasoner adds to an assembly's live heap, per byte loaded. */
         static final double REASONER_PER_LOADED_BYTE = 3.2;
 
-        /** What an import adds to a source layer's live heap, per byte loaded. */
+        /** What an import adds to a source's live heap, per byte loaded. */
         static final double IMPORT_PER_LOADED_BYTE = 1.0;
 
         /** The least heap a generated project is given, in GiB. */
@@ -259,10 +267,10 @@ public record KnowledgeBaseProject(String name, Path folder, Map<String, String>
     }
 
     /**
-     * Estimates a project's sizes from its layers' sizes.
+     * Estimates a project's sizes from its knowledge sources' sizes.
      *
      * @param kind  the kind
-     * @param sizes each layer's size in bytes, negative when not known
+     * @param sizes each knowledge source's size in bytes, negative when not known
      * @param rocks the person's choice of a Rocks store, or empty to decide by size
      * @return the estimate
      */
@@ -276,12 +284,12 @@ public record KnowledgeBaseProject(String name, Path folder, Map<String, String>
         boolean bySize = bytes >= Estimate.ROCKS_THRESHOLD_GIB * Estimate.GIB;
         boolean built = kind == Kind.ASSEMBLY && rocks.orElse(bySize);
         String reason;
-        if (kind == Kind.SOURCE_LAYER) {
-            reason = "a source layer is loaded only under an assembly";
+        if (kind == Kind.SOURCE) {
+            reason = "a source is loaded only under an assembly";
         } else if (rocks.isPresent()) {
             reason = rocks.get() ? "always, as chosen" : "never, as chosen";
         } else {
-            reason = "the layers total " + Estimate.size(bytes) + (unknown == 0 ? "" : " (" + unknown + " not known)")
+            reason = "the knowledge sources total " + Estimate.size(bytes) + (unknown == 0 ? "" : " (" + unknown + " not known)")
                     + (bySize ? ", at or above " : ", below ") + Estimate.ROCKS_THRESHOLD_GIB + " GiB";
         }
         return new Estimate(bytes, unknown, loaded, heap, built, reason);
@@ -454,32 +462,32 @@ public record KnowledgeBaseProject(String name, Path folder, Map<String, String>
             return Kind.ASSEMBLY;
         }
         return java.util.Arrays.stream(Kind.values()).filter(kind -> kind.value().equals(value)).findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("kind is assembly or source-layer, got " + value));
+                .orElseThrow(() -> new IllegalArgumentException("kind is assembly or source, got " + value));
     }
 
     /**
-     * The layers, in load order, as listed; the goals put the starter set first when it is needed.
+     * The knowledge sources, in load order, as listed; the goals put the starter set first when it is needed.
      *
-     * @return the layers
-     * @throws IllegalArgumentException if one is not a layer's coordinate
+     * @return the knowledge sources
+     * @throws IllegalArgumentException if one is not a knowledge source's coordinate
      */
-    public List<Layer> layers() {
-        String value = properties.get(LAYERS);
+    public List<KnowledgeSource> knowledgeSources() {
+        String value = properties.get(KNOWLEDGE_SOURCES);
         if (value == null) {
             return List.of();
         }
-        return java.util.Arrays.stream(value.split(",")).filter(text -> !text.isBlank()).map(Layer::parse).toList();
+        return java.util.Arrays.stream(value.split(",")).filter(text -> !text.isBlank()).map(KnowledgeSource::parse).toList();
     }
 
     /**
-     * Whether the goals put the IKE starter set before the layers listed: always, unless it is listed or
+     * Whether the goals put the IKE starter set before the knowledge sources listed: always, unless it is listed or
      * a reasoned protobuf, which already carries it, is among them.
      *
-     * @param layers the layers listed
+     * @param knowledge sources the knowledge sources listed
      * @return whether the starter set is put first
      */
-    public static boolean starterSetFirst(List<Layer> layers) {
-        return layers.stream().noneMatch(layer -> layer.starterSet() || layer.reasoned());
+    public static boolean starterSetFirst(List<KnowledgeSource> knowledgeSources) {
+        return knowledgeSources.stream().noneMatch(knowledgeSource -> knowledgeSource.starterSet() || knowledgeSource.reasoned());
     }
 
     /**
@@ -494,41 +502,41 @@ public record KnowledgeBaseProject(String name, Path folder, Map<String, String>
         }
         problems.addAll(nameProblems(name, properties.getOrDefault("groupId", DEFAULT_GROUP)));
         Kind kind;
-        List<Layer> layers;
+        List<KnowledgeSource> knowledgeSources;
         try {
             kind = kind();
-            layers = layers();
+            knowledgeSources = knowledgeSources();
         } catch (IllegalArgumentException e) {
             problems.add(e.getMessage() + ".");
             return problems;
         }
-        if (layers.isEmpty()) {
-            problems.add("Add at least one protobuf layer.");
+        if (knowledgeSources.isEmpty()) {
+            problems.add("Add at least one knowledge source.");
         }
         Set<String> seen = new HashSet<>();
-        for (Layer layer : layers) {
-            if (!seen.add(layer.groupId() + ":" + layer.artifactId())) {
-                problems.add(layer.artifactId() + " is listed twice.");
+        for (KnowledgeSource knowledgeSource : knowledgeSources) {
+            if (!seen.add(knowledgeSource.groupId() + ":" + knowledgeSource.artifactId())) {
+                problems.add(knowledgeSource.artifactId() + " is listed twice.");
             }
         }
-        for (int index = 1; index < layers.size(); index++) {
-            if (layers.get(index).starterSet()) {
+        for (int index = 1; index < knowledgeSources.size(); index++) {
+            if (knowledgeSources.get(index).starterSet()) {
                 problems.add("The starter set must be first. It is at position " + (index + 1) + ".");
             }
         }
-        if (layers.stream().anyMatch(Layer::reasoned) && layers.stream().anyMatch(layer -> !layer.reasoned())) {
+        if (knowledgeSources.stream().anyMatch(KnowledgeSource::reasoned) && knowledgeSources.stream().anyMatch(knowledgeSource -> !knowledgeSource.reasoned())) {
             problems.add("Reasoned and unreasoned protobufs cannot be combined yet.");
         }
         boolean importer = properties.containsKey("importer");
         boolean release = properties.containsKey("release");
-        if (kind == Kind.SOURCE_LAYER && (!importer || !release)) {
-            problems.add("A source layer needs its importer and the release it reads.");
+        if (kind == Kind.SOURCE && (!importer || !release)) {
+            problems.add("A source needs its importer and the release it reads.");
         }
         if (kind == Kind.ASSEMBLY && (importer || release)) {
-            problems.add("An assembly imports no release. An importer and a release belong to a source layer.");
+            problems.add("An assembly imports no release. An importer and a release belong to a source.");
         }
-        if (kind == Kind.SOURCE_LAYER && "true".equals(properties.get(ROCKS))) {
-            problems.add("A source layer builds no Rocks database.");
+        if (kind == Kind.SOURCE && "true".equals(properties.get(ROCKS))) {
+            problems.add("A source builds no Rocks database.");
         }
         return problems;
     }

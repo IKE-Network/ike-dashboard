@@ -90,7 +90,7 @@ class ProjectsPaneTest {
                 .contains("Gene Knowledge Base", "network.ike.data:gene-kb:1-SNAPSHOT", "Folder  " + PROJECTS.resolve("gene-kb"),
                         "Built from", "1.  ike-starter-set  ·  protobuf, unreasoned  ·  1-20261107.045844-2",
                         "2.  ncbi-gene-kb  ·  protobuf, unreasoned  ·  20261020.1-20261111.021538-1",
-                        "Each layer stays at this version until the project is changed.",
+                        "Each source stays at this version until the project is changed.",
                         "Deploys to", "ike-restricted  ·  https://nexus.example/snapshots/", "Collection  TRY",
                         "Repository", "Branch main  ·  everything committed  ·  no remote yet",
                         "Its history is on this machine only.", "Last build")
@@ -98,7 +98,7 @@ class ProjectsPaneTest {
         assertThat(shown.get(2)).as("another project: uncommitted work, a remote, and no build yet")
                 .contains("notes-kb", "Branch main  ·  2 files not committed  ·  has a remote", "Not built yet.",
                         "Its POM names no repository of its own.",
-                        "This project builds no knowledge base: it is built from no protobuf layers.");
+                        "This project builds no knowledge base: it is built from no knowledge sources.");
         assertThat(shown.get(3)).as("Projects is a tab of its own, beside Knowledge Bases")
                 .containsExactly("true", "[Knowledge Bases, Projects, Komet, Notices]");
     }
@@ -337,7 +337,7 @@ class ProjectsPaneTest {
     private static KnowledgeBaseProjectFolder project(Path folder, String artifactId) {
         return new KnowledgeBaseProjectFolder(folder, artifactId, Optional.of("network.ike.data"), Optional.of("1-SNAPSHOT"),
                 Optional.empty(), Optional.empty(),
-                List.of(KnowledgeBaseProject.Layer.parse("network.ike.data:ncbi-gene-kb:zip:unreasoned-pb:20261020.1-20261111.021538-1")),
+                List.of(KnowledgeBaseProject.KnowledgeSource.parse("network.ike.data:ncbi-gene-kb:zip:unreasoned-pb:20261020.1-20261111.021538-1")),
                 Optional.empty(), Optional.empty());
     }
 
@@ -359,8 +359,8 @@ class ProjectsPaneTest {
     private static void setProjects(ProjectsPane pane) {
         KnowledgeBaseProjectFolder gene = new KnowledgeBaseProjectFolder(PROJECTS.resolve("gene-kb"), "gene-kb",
                 Optional.of("network.ike.data"), Optional.of("1-SNAPSHOT"), Optional.of("Gene Knowledge Base"), Optional.of("TRY"),
-                List.of(KnowledgeBaseProject.Layer.parse("network.ike.foundation:ike-starter-set:zip:unreasoned-pb:1-20261107.045844-2"),
-                        KnowledgeBaseProject.Layer.parse("network.ike.data:ncbi-gene-kb:zip:unreasoned-pb:20261020.1-20261111.021538-1")),
+                List.of(KnowledgeBaseProject.KnowledgeSource.parse("network.ike.foundation:ike-starter-set:zip:unreasoned-pb:1-20261107.045844-2"),
+                        KnowledgeBaseProject.KnowledgeSource.parse("network.ike.data:ncbi-gene-kb:zip:unreasoned-pb:20261020.1-20261111.021538-1")),
                 Optional.of(new KnowledgeBaseProjectFolder.Repository("ike-restricted", "https://nexus.example/snapshots/")),
                 Optional.of(BUILT));
         KnowledgeBaseProjectFolder notes = new KnowledgeBaseProjectFolder(PROJECTS.resolve("notes-kb"), "notes-kb",

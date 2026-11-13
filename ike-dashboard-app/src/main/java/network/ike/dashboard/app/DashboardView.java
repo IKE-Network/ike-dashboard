@@ -1939,7 +1939,7 @@ public final class DashboardView extends BorderPane {
         browserWindow.toFront();
     }
 
-    /** Opens the form that creates a knowledge base, asking Nexus again for the layers to pick from. */
+    /** Opens the form that creates a knowledge base, asking Nexus again for the knowledge sources to pick from. */
     void openNewKnowledgeBase() {
         if (newKnowledgeBaseWindow == null) {
             newKnowledgeBaseWindow = new Stage();

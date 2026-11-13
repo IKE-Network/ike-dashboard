@@ -84,8 +84,8 @@ class DashboardViewRelationsTest {
                 .contains("network.ike.foundation  ·  protobuf, unreasoned", "network.ike.data  ·  protobuf, unreasoned");
         assertThat(shown.getFirst()).as("and beneath each, the source release its own descriptor records, here or on Nexus")
                 .contains("snomedct-origin", "SnomedCT_InternationalRF2_20260601+1.0.0",
-                        "org.snomed  ·  source, read by snomed-rf2", "gudid-origin", "20261001",
-                        "gov.fda  ·  source, read by gudid");
+                        "org.snomed  ·  release, read by snomed-rf2", "gudid-origin", "20261001",
+                        "gov.fda  ·  release, read by gudid");
         assertThat(shown.getLast()).as("the source, a protobuf, which the link selected")
                 .contains("selected snomedct-kb", "Only protobuf files. Komet cannot open these directly. It loads them into a knowledge base.",
                         "Included in", "link SOLOR", "link SOLOR GUDID");
@@ -121,7 +121,7 @@ class DashboardViewRelationsTest {
                 .doesNotContain("Built from");
         assertThat(shown.getLast()).as("the newest version: what Nexus records it was built from")
                 .contains("Built from", "link GUDID", "20261001.2-SNAPSHOT", "network.ike.data  ·  protobuf, unreasoned",
-                        "gudid-origin", "20261001", "gov.fda  ·  source, read by gudid");
+                        "gudid-origin", "20261001", "gov.fda  ·  release, read by gudid");
     }
 
     @Test

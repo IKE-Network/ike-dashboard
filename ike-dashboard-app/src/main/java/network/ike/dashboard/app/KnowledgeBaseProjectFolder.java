@@ -40,7 +40,7 @@ import java.util.stream.Stream;
  *
  * <p>A working set is a project too: a folder whose POM lists member projects, each in a folder of its
  * own inside it, with a {@code workspace.yaml} beside the POM. It builds its members together, in order,
- * so a knowledge base and the source layers it is assembled from build in one go.
+ * so a knowledge base and the sources it is assembled from build in one go.
  *
  * @param folder      the project's folder
  * @param artifactId  the name its POM gives it, or the folder's name when the POM cannot be read
@@ -48,7 +48,7 @@ import java.util.stream.Stream;
  * @param version     its version
  * @param displayName the name a person reads, the POM's {@code <name>}
  * @param collection  the collection its knowledge base is listed under
- * @param layers      the protobuf layers it is built from, in load order, each at the version it is fixed to
+ * @param knowledge sources      the knowledge sources it is built from, in load order, each at the version it is fixed to
  * @param deploysTo   the repository a deploy of its version goes to
  * @param built       when it last built the protobuf it publishes, when it has
  * @param workingSet  whether it is a working set
@@ -56,7 +56,7 @@ import java.util.stream.Stream;
  */
 public record KnowledgeBaseProjectFolder(Path folder, String artifactId, Optional<String> groupId, Optional<String> version,
                                          Optional<String> displayName, Optional<String> collection,
-                                         List<KnowledgeBaseProject.Layer> layers, Optional<Repository> deploysTo,
+                                         List<KnowledgeBaseProject.KnowledgeSource> knowledgeSources, Optional<Repository> deploysTo,
                                          Optional<Instant> built, boolean workingSet,
                                          List<KnowledgeBaseProjectFolder> members) {
 
@@ -73,7 +73,7 @@ public record KnowledgeBaseProjectFolder(Path folder, String artifactId, Optiona
     }
 
     /**
-     * Copies the layers.
+     * Copies the knowledge sources.
      *
      * @param folder      the project's folder
      * @param artifactId  its name
@@ -81,14 +81,14 @@ public record KnowledgeBaseProjectFolder(Path folder, String artifactId, Optiona
      * @param version     its version
      * @param displayName the name a person reads
      * @param collection  its collection
-     * @param layers      the layers it is built from
+     * @param knowledge sources      the knowledge sources it is built from
      * @param deploysTo   where a deploy goes
      * @param built       when it last built
      * @param workingSet  whether it is a working set
      * @param members     a working set's members
      */
     public KnowledgeBaseProjectFolder {
-        layers = List.copyOf(layers);
+        knowledgeSources = List.copyOf(knowledgeSources);
         members = List.copyOf(members);
     }
 
@@ -101,15 +101,15 @@ public record KnowledgeBaseProjectFolder(Path folder, String artifactId, Optiona
      * @param version     its version
      * @param displayName the name a person reads
      * @param collection  its collection
-     * @param layers      the layers it is built from
+     * @param knowledge sources      the knowledge sources it is built from
      * @param deploysTo   where a deploy goes
      * @param built       when it last built
      */
     public KnowledgeBaseProjectFolder(Path folder, String artifactId, Optional<String> groupId, Optional<String> version,
                                       Optional<String> displayName, Optional<String> collection,
-                                      List<KnowledgeBaseProject.Layer> layers, Optional<Repository> deploysTo,
+                                      List<KnowledgeBaseProject.KnowledgeSource> knowledgeSources, Optional<Repository> deploysTo,
                                       Optional<Instant> built) {
-        this(folder, artifactId, groupId, version, displayName, collection, layers, deploysTo, built, false, List.of());
+        this(folder, artifactId, groupId, version, displayName, collection, knowledgeSources, deploysTo, built, false, List.of());
     }
 
     /**
@@ -166,14 +166,14 @@ public record KnowledgeBaseProjectFolder(Path folder, String artifactId, Optiona
         String artifactId = text(project, "artifactId").orElse(folderName);
         Optional<String> groupId = text(project, "groupId").or(() -> child(project, "parent").flatMap(parent -> text(parent, "groupId")));
         Optional<String> version = text(project, "version").or(() -> child(project, "parent").flatMap(parent -> text(parent, "version")));
-        List<KnowledgeBaseProject.Layer> layers = new ArrayList<>();
+        List<KnowledgeBaseProject.KnowledgeSource> knowledgeSources = new ArrayList<>();
         child(project, "dependencies").ifPresent(dependencies -> {
             for (Element dependency : children(dependencies)) {
                 Optional<String> classifier = text(dependency, "classifier").filter(NexusCatalog.PROTOBUF_CLASSIFIERS::contains);
                 if (classifier.isEmpty() || !"zip".equals(text(dependency, "type").orElse(""))) {
                     continue;
                 }
-                layers.add(new KnowledgeBaseProject.Layer(text(dependency, "groupId").orElse(""),
+                knowledgeSources.add(new KnowledgeBaseProject.KnowledgeSource(text(dependency, "groupId").orElse(""),
                         text(dependency, "artifactId").orElse(""), classifier.get(),
                         resolve(text(dependency, "version").orElse(""), properties)));
             }
@@ -197,7 +197,7 @@ public record KnowledgeBaseProjectFolder(Path folder, String artifactId, Optiona
         }
         return new KnowledgeBaseProjectFolder(folder, artifactId, groupId, version, text(project, "name"),
                 Optional.ofNullable(properties.get("ike.kbAssemble.collection")).filter(text -> !text.isEmpty()),
-                layers, deploysTo, version.flatMap(text -> built(folder, artifactId, text)), workingSet, members);
+                knowledgeSources, deploysTo, version.flatMap(text -> built(folder, artifactId, text)), workingSet, members);
     }
 
     /** When the protobuf the project publishes was last written by a build. */
@@ -262,12 +262,12 @@ public record KnowledgeBaseProjectFolder(Path folder, String artifactId, Optiona
     }
 
     /**
-     * Whether the project builds a knowledge base: it is built from protobuf layers.
+     * Whether the project builds a knowledge base: it is built from knowledge sources.
      *
-     * @return whether it has layers
+     * @return whether it has knowledge sources
      */
     public boolean buildsKnowledgeBase() {
-        return !layers.isEmpty();
+        return !knowledgeSources.isEmpty();
     }
 
     /**

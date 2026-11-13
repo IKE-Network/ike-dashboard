@@ -82,7 +82,7 @@ class KnowledgeBaseTreeTest {
 
         KnowledgeBaseDescriptor.Input rf2 = new KnowledgeBaseDescriptor.Input("SOURCE", "org.snomed:rf2:zip:20260601",
                 Optional.empty(), Optional.of("snomed-rf2"));
-        assertThat(KnowledgeBaseTree.describe(rf2)).isEqualTo("source, read by snomed-rf2");
+        assertThat(KnowledgeBaseTree.describe(rf2)).isEqualTo("release, read by snomed-rf2");
         assertThat(rf2.classifier()).as("a four-part coordinate names no classifier").isEmpty();
     }
 
@@ -99,10 +99,10 @@ class KnowledgeBaseTreeTest {
                 pb("network.ike.data:rxnorm-kb:zip:unreasoned-pb:20240410.2-SNAPSHOT", null), described);
 
         assertThat(rxnorm.label()).isEqualTo("RxNorm");
-        assertThat(rxnorm.children()).as("the release it was imported from, not the protobufs it is layered on")
+        assertThat(rxnorm.children()).as("the release it was imported from, not the knowledge sources it is built on")
                 .extracting(KnowledgeBaseTree.Node::label, node -> KnowledgeBaseTree.describe(node.input().orElseThrow()),
                         node -> node.input().flatMap(KnowledgeBaseDescriptor.Input::version).orElse(""))
-                .containsExactly(org.assertj.core.groups.Tuple.tuple("rxnorm-origin", "source, read by rxnorm-owl",
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("rxnorm-origin", "release, read by rxnorm-owl",
                         "rxnorm-2024-04-10+1.0.0-20261019.181821-3"));
 
         assertThat(KnowledgeBaseTree.input(pb("network.ike.data:rxnorm-kb:zip:unreasoned-pb:20230101.1", null), described)

@@ -40,7 +40,7 @@ import java.util.stream.Stream;
  * machine with no {@code ike:} prefix in its Maven settings runs them too. Maven cannot run before a
  * project exists and need not be installed (decision 1), so the Maven wrapper is written first, into
  * the project's own folder for a publish and into a folder of its own for a draft, which writes nothing
- * where the project will be. The goals do everything else: pin each layer, write the POM, apply the
+ * where the project will be. The goals do everything else: pin each knowledge source, write the POM, apply the
  * standards scaffold, make the git repository and its first commit, and validate the result.
  *
  * <p>The build needs JDK {@value #JDK} and git (decision 11); {@link #prerequisites} finds both or says
@@ -52,8 +52,8 @@ public final class KnowledgeBaseCreation {
     /** The plugin that contains the goals, as {@code groupId:artifactId}. */
     public static final String PLUGIN = "network.ike.tooling:ike-maven-plugin";
 
-    /** The plugin version the dashboard runs, the first that contains the goals. */
-    public static final String TOOLING_VERSION = "280";
+    /** The plugin version the dashboard runs to create a project: the first whose goals name knowledge sources, not layers. */
+    public static final String TOOLING_VERSION = "282";
 
     /** The variable that names another plugin version to run, such as a snapshot under test. */
     public static final String TOOLING_OVERRIDE = "IKE_DASHBOARD_TOOLING_VERSION";
@@ -221,12 +221,12 @@ public final class KnowledgeBaseCreation {
         }
 
         /**
-         * Each layer as the goals pinned it, in load order: its coordinate at the exact deploy, and its size.
+         * Each knowledge source as the goals pinned it, in load order: its coordinate at the exact deploy, and its size.
          *
-         * @return the pinned coordinate of each layer, to its size as the report words it
+         * @return the pinned coordinate of each knowledge source, to its size as the report words it
          */
-        public Map<KnowledgeBaseProject.Layer, String> pinned() {
-            Map<KnowledgeBaseProject.Layer, String> pinned = new LinkedHashMap<>();
+        public Map<KnowledgeBaseProject.KnowledgeSource, String> pinned() {
+            Map<KnowledgeBaseProject.KnowledgeSource, String> pinned = new LinkedHashMap<>();
             for (String line : report()) {
                 String text = line.strip();
                 int comma = text.indexOf(", ");
@@ -234,8 +234,8 @@ public final class KnowledgeBaseCreation {
                     continue;
                 }
                 try {
-                    pinned.put(KnowledgeBaseProject.Layer.parse(text.substring(0, comma)), text.substring(comma + 2));
-                } catch (IllegalArgumentException notALayer) {
+                    pinned.put(KnowledgeBaseProject.KnowledgeSource.parse(text.substring(0, comma)), text.substring(comma + 2));
+                } catch (IllegalArgumentException notASource) {
                     // Another indented line of the report, such as a file's name.
                 }
             }
@@ -457,7 +457,7 @@ public final class KnowledgeBaseCreation {
     }
 
     /**
-     * Shows what creating a project would do, with every layer pinned. Nexus is read; nothing is written
+     * Shows what creating a project would do, with every knowledge source pinned. Nexus is read; nothing is written
      * where the project will be.
      *
      * @param project the project
