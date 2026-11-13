@@ -100,7 +100,7 @@ public final class NewKnowledgeBaseForm extends BorderPane {
     private final TextField importerOptions = new TextField();
     private final TextField editModule = new TextField();
     private final VBox layerBox = new VBox(6);
-    private final Button addProtobuf = new Button("Add protobuf…");
+    private final Button addProtobuf = new Button("Choose layers…");
     private final Button copyInputs = new Button("Copy inputs from KB…");
     private final Label sizes = new Label();
     private final ToggleButton rocksBySize = new ToggleButton("By size");
@@ -740,15 +740,51 @@ public final class NewKnowledgeBaseForm extends BorderPane {
         return row;
     }
 
-    /** Offers the protobufs on Nexus that are not layers yet. */
+    /**
+     * Opens the list of every protobuf Nexus offers, each with a checkbox and what it is, with the layers
+     * chosen so far checked.
+     */
     private void chooseProtobuf() {
-        List<NexusCatalog.Offer> offers = catalog.offers().stream()
-                .filter(offer -> NexusCatalog.PROTOBUF_CLASSIFIERS.contains(offer.classifier()))
-                .filter(offer -> rows.stream().noneMatch(row -> row.layer().equals(KnowledgeBaseProject.Layer.of(offer))))
-                .toList();
-        choose("Add a protobuf layer", "Add", offers, offer -> displayName(offer.coordinate()) + "  ·  " + offer.label()
-                + "  ·  " + offer.coordinate().version() + "  ·  " + KnowledgeBaseProject.Estimate.size(offer.sizeBytes()),
-                this::addLayer);
+        if (chooser != null) {
+            chooser.close();
+        }
+        LayerChooser layers = new LayerChooser(catalog, rows.stream().map(Row::layer).toList());
+        Stage window = new Stage();
+        layers.setOnCancel(window::close);
+        layers.setOnDone(checked -> {
+            window.close();
+            setLayers(checked);
+        });
+        window.setTitle("Choose the layers of the knowledge base");
+        window.setScene(new Scene(layers, 720, 640));
+        if (getScene() != null && getScene().getWindow() != null) {
+            window.initOwner(getScene().getWindow());
+        }
+        chooser = window;
+        window.show();
+    }
+
+    /**
+     * Makes the layers what was checked among what Nexus offers. A layer that stays keeps its place in the
+     * load order, a new one loads last, and one no longer checked is taken out. A layer Nexus offers no
+     * protobuf of, such as one copied from another knowledge base's inputs, could not be checked and stays.
+     *
+     * @param checked the protobufs checked
+     */
+    void setLayers(List<NexusCatalog.Offer> checked) {
+        List<KnowledgeBaseProject.Layer> offered = catalog.offers().stream().map(KnowledgeBaseProject.Layer::of).toList();
+        List<KnowledgeBaseProject.Layer> wanted = checked.stream().map(KnowledgeBaseProject.Layer::of).toList();
+        rows.removeIf(row -> wanted.stream().noneMatch(layer -> same(layer, row.layer()))
+                && offered.stream().anyMatch(layer -> same(layer, row.layer())));
+        for (NexusCatalog.Offer offer : checked) {
+            place(new Row(KnowledgeBaseProject.Layer.of(offer), offer.sizeBytes(), Optional.of(offer.updated()),
+                    displayName(offer.coordinate()), builtFrom(offer.coordinate())));
+        }
+        changed();
+    }
+
+    private static boolean same(KnowledgeBaseProject.Layer one, KnowledgeBaseProject.Layer other) {
+        return one.sameArtifact(other) && one.classifier().equals(other.classifier());
     }
 
     /** Offers the knowledge bases on Nexus whose descriptor records protobuf inputs. */

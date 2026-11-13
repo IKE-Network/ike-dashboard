@@ -244,6 +244,30 @@ class NewKnowledgeBaseFormTest {
         assertThat(shown.get(8)).as("the offer is gone once the name is free").isEqualTo(false);
     }
 
+    @Test
+    void whatIsCheckedBecomesTheLayersKeepingTheLoadOrderOfThoseThatStay() throws Exception {
+        List<List<String>> shown = onFx(() -> {
+            NewKnowledgeBaseForm form = form();
+            NexusCatalog.Offer snomed = offer("snomedct-kb", "20260601.2-SNAPSHOT", "unreasoned-pb", (long) (0.45 * GIB));
+            NexusCatalog.Offer gene = offer("ncbi-gene-kb", "20261020.1-SNAPSHOT", "unreasoned-pb", 100_000);
+            form.addLayer(gene);
+            form.addLayer(snomed);
+            form.copyInputs(coordinate("solor-gudid-kb", "1-SNAPSHOT"));       // SNOMED CT, then GUDID, which Nexus offers no protobuf of here
+            List<String> copied = form.rows().stream().map(NewKnowledgeBaseForm.Row::name).toList();
+            form.setLayers(List.of(gene, snomed));
+            List<String> added = form.rows().stream().map(NewKnowledgeBaseForm.Row::name).toList();
+            form.setLayers(List.of(gene));
+            return List.of(copied, added, form.rows().stream().map(NewKnowledgeBaseForm.Row::name).toList(),
+                    List.of(all(form, Button.class).stream().anyMatch(button -> "Choose layers…".equals(button.getText())) ? "offered" : "missing"));
+        });
+
+        assertThat(shown.getFirst()).containsExactly("SNOMED CT", "GUDID");
+        assertThat(shown.get(1)).as("one that stays keeps its place, a new one loads last, and one that could not be checked stays")
+                .containsExactly("SNOMED CT", "GUDID", "NCBI Gene");
+        assertThat(shown.get(2)).as("one no longer checked is taken out").containsExactly("GUDID", "NCBI Gene");
+        assertThat(shown.get(3)).containsExactly("offered");
+    }
+
     private static NewKnowledgeBaseForm form() {
         NewKnowledgeBaseForm form = new NewKnowledgeBaseForm();
         form.setProjectsFolder(Path.of("/home/kb"));

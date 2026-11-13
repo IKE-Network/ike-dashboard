@@ -171,7 +171,10 @@ member is deployed from its own page.
 
 *New knowledge base…*, on that tab, creates a Maven 4 project for a knowledge base built from
 protobuf layers already on Nexus (IKE-Network/ike-issues#1370). The form asks for a name, the layers
-in load order, and a folder. *Draft* shows what will be created, with each layer at its exact version
+in load order, and a folder. *Choose layers…* lists every protobuf on Nexus with a checkbox and, under
+its name, what it is: one source or a whole knowledge base, its coordinates, version, size and deploy
+date, and the release it was read from or the knowledge bases it contains. Sources and whole knowledge
+bases are listed apart, because they cannot be combined yet. *Draft* shows what will be created, with each layer at its exact version
 on Nexus, and writes nothing. *Create knowledge base* then makes the project in a local git repository
 with one commit and no remote, and the Projects tab shows it.
 
