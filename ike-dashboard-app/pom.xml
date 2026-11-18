@@ -21,8 +21,9 @@
     </description>
 
     <properties>
-        <!-- Komet's working set is on JavaFX 27 (komet-bom). -->
-        <javafx.version>27</javafx.version>
+        <!-- The JavaFX build Komet's working set is on (komet-bom): 27.0.1.1, for the security
+             fixes made since the GA build (IKE-Network/ike-issues#1393). -->
+        <javafx.version>27.0.1.1</javafx.version>
         <openjfx-monocle.version>21.0.2-jpms</openjfx-monocle.version>
         <!-- The first ike-maven-plugin that notarizes an application bundle (signed-app). -->
         <ike-dashboard.notarize.version>271</ike-dashboard.notarize.version>
