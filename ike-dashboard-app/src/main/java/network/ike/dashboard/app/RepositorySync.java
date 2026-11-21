@@ -284,8 +284,43 @@ public final class RepositorySync {
      * The git command, run with no prompt: no terminal prompt for a password, and SSH in batch mode.
      *
      * @param executable the git executable
+     * @param identity   git's variables naming the author and committer of a commit, set on every command
+     *                   it runs: the person's, when {@link #as} was given a file of authors, else none, and git
+     *                   then writes the name in its configuration
      */
-    public record Git(Path executable) {
+    public record Git(Path executable, Map<String, String> identity) {
+
+        /**
+         * Copies the identity.
+         *
+         * @param executable the git executable
+         * @param identity   the variables naming a commit's author and committer
+         */
+        public Git {
+            if (identity == null) {
+                throw new IllegalArgumentException("The identity of git is none or some, never null");
+            }
+            identity = Map.copyOf(identity);
+        }
+
+        /**
+         * Git with no identity of its own, whose commits name the author in its configuration.
+         *
+         * @param executable the git executable
+         */
+        public Git(Path executable) {
+            this(executable, Map.of());
+        }
+
+        /**
+         * The same git, committing as the person in a file of authors (IKE-Network/ike-issues#1399).
+         *
+         * @param authors what the file of authors gives
+         * @return git with the person as author and committer, or with no identity when there are no authors
+         */
+        public Git as(Authors.Reading authors) {
+            return new Git(executable, authors.gitEnvironment());
+        }
 
         /** Where installers put git on macOS and Linux, in the order preferred. */
         static final List<Path> CANDIDATES = List.of(
@@ -402,6 +437,7 @@ public final class RepositorySync {
             command.addAll(List.of(args));
             ProcessBuilder builder = new ProcessBuilder(command);
             Map<String, String> environment = builder.environment();
+            environment.putAll(identity);
             environment.put("GIT_TERMINAL_PROMPT", "0");
             environment.put("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=10");
             environment.put("LC_ALL", "C");

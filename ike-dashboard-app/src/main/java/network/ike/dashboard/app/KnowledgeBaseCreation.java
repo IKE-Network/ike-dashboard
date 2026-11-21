@@ -137,13 +137,15 @@ public final class KnowledgeBaseCreation {
         }
 
         /**
-         * The environment a run is given: the JDK as {@code JAVA_HOME}, and it and git first on the path.
+         * The environment a run is given: the JDK as {@code JAVA_HOME}, it and git first on the path, and
+         * git's identity, so a commit the run makes names the person ({@link RepositorySync.Git#as}).
          *
          * @param environment the dashboard's own environment
          * @return what to add to it
          */
         Map<String, String> environment(Map<String, String> environment) {
             Map<String, String> added = new LinkedHashMap<>();
+            git.ifPresent(found -> added.putAll(found.identity()));
             List<String> path = new ArrayList<>();
             jdk.ifPresent(home -> {
                 added.put("JAVA_HOME", home.toString());
@@ -337,12 +339,14 @@ public final class KnowledgeBaseCreation {
     }
 
     /**
-     * Finds what a build needs on this machine.
+     * Finds what a build needs on this machine, with git committing as the person in the file of
+     * {@link Authors}, when there is one.
      *
      * @return the JDK and git found
      */
     public static Prerequisites prerequisites() {
-        return prerequisites(System.getenv(), System.getProperty("os.name", ""), Path.of(System.getProperty("user.home")));
+        Prerequisites found = prerequisites(System.getenv(), System.getProperty("os.name", ""), Path.of(System.getProperty("user.home")));
+        return new Prerequisites(found.jdk(), found.git().map(git -> git.as(Authors.current())));
     }
 
     static Prerequisites prerequisites(Map<String, String> environment, String osName, Path home) {

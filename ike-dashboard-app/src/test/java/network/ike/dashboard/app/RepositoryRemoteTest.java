@@ -84,6 +84,20 @@ class RepositoryRemoteTest {
     }
 
     @Test
+    void theDashboardCommitsAsThePersonInTheFileOfAuthors(@TempDir Path temp) throws IOException {
+        Path file = Files.createDirectories(temp.resolve("home/.ike")).resolve("authors.properties");
+        Files.writeString(file, "person.name=Ada Lovelace\nperson.email=ada@komet.ike.network\n");
+        Path changeSets = Files.createDirectories(temp.resolve("solor-kb/changeSets"));
+        String remote = bare(temp.resolve("host/solor-changes.git"));
+
+        RepositoryRemote.add(git.as(Authors.read(file)), changeSets, remote);
+
+        assertThat(out(changeSets, "log", "-1", "--format=%an <%ae>|%cn <%ce>"))
+                .as("the person is author and committer, whatever git's configuration says")
+                .isEqualTo("Ada Lovelace <ada@komet.ike.network>|Ada Lovelace <ada@komet.ike.network>");
+    }
+
+    @Test
     void aRepositoryWithItsOwnCommitsIsPushedToAnEmptyRemote(@TempDir Path temp) throws IOException {
         Path changeSets = repository(temp.resolve("solor-kb/changeSets"), "edits.zip");
         String remote = bare(temp.resolve("host/solor-changes.git"));

@@ -56,7 +56,7 @@ From then on it updates itself (see [Self-update](#self-update)). The links neve
   `ws-new <name> [groupId]`, `ws-add <working-set> <project>`, `ws-remove <working-set> <member>`,
   `changes-remote-check <folder> <git-url>`, `changes-remote <folder> <git-url>`,
   `preferences-remote-check <folder> <git-url>`, `preferences-remote <folder> <git-url>`,
-  `preferences-send <folder>`,
+  `preferences-send <folder>`, `authors`,
   `dashboard-latest`, `self-update [application]`). The window has three views, one switch across its top:
   *Knowledge Bases*, the list and the chosen one's detail, and *Notices*, the first screen, across the
   window: one card per finding of its checks (newer builds, knowledge bases not yet downloaded, a newer
@@ -114,6 +114,41 @@ From then on it updates itself (see [Self-update](#self-update)). The links neve
 
 The Nexus check reads the `ike-restricted` login from `~/.m2/settings.xml`, filling `${env.…}`
 placeholders from the environment, so run it from a shell that has them.
+
+## Authors
+
+The dashboard starts Komet as the person who uses it. Until the registry of people runs, the person and
+the assistant they direct are kept in a file of the dashboard's own, `~/.ike/authors.properties`
+(`IKE-Network/ike-issues#1399`, steps 1 and 2). It is UTF-8, and the assistant may be left out. With
+invented values:
+
+```properties
+person.name=Ada Lovelace
+person.email=ada@komet.ike.network
+assistant.name=Ada's Claude
+assistant.email=ada-claude@komet.ike.network
+```
+
+Every Komet the dashboard starts is given git's `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`,
+`GIT_COMMITTER_NAME` and `GIT_COMMITTER_EMAIL`, naming the person, so Komet's commits name the person
+with no change to Komet. The dashboard's own commits, of a store's change sets and preferences, and the
+Maven runs that make and connect knowledge-base projects name the person the same way. A knowledge base's
+panel, and a Komet's, say *Opens as …* under the Open button. With no file nothing is set, and git writes
+the name in its configuration, as before. A file that cannot be used is named in the panel with the
+reason, and nothing is taken from it. The file is read at each launch and each commit, so a change takes
+effect with no restart.
+
+`DashboardCommand authors` prints the two for other tools, each as git shows an author, and stops with a
+message when there is no file or it cannot be used:
+
+```
+person     Ada Lovelace <ada@komet.ike.network>
+assistant  Ada's Claude <ada-claude@komet.ike.network>
+from       /Users/ada/.ike/authors.properties
+```
+
+The assistant is not yet used in a commit: a commit of the assistant's work, with the assistant as author
+and the person as committer, is step 3 of the issue.
 
 ## Remotes for a knowledge base's change sets and preferences
 

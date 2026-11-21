@@ -169,6 +169,7 @@ public final class DashboardApp extends Application {
         view = new DashboardView();
         view.setCollections(settings.collections());
         view.setLastOpened(history::lastOpened);
+        view.setAuthors(Authors::current);
         view.setSortRecent(preferences.getBoolean(DashboardPreferences.Key.SORT_RECENT).orElse(false));
         view.setOnSortChange(recent -> preferences.putBoolean(DashboardPreferences.Key.SORT_RECENT, recent));
         view.setOnRefresh(this::refresh);
@@ -733,7 +734,7 @@ public final class DashboardApp extends Application {
             transfer.phase("Checking in Komet " + komet.version() + ", in the background, that every change set loads");
             KnowledgeBase staged = KnowledgeBaseScanner.inspect(work);
             return Optional.of(KometLauncher.loadChangeSets(komet, staged, heapPlan(komet, staged).environment(),
-                    settings.logFolder()));
+                    Authors.current(), settings.logFolder()));
         } finally {
             kometCheck.release();
         }
@@ -1060,7 +1061,8 @@ public final class DashboardApp extends Application {
         }
         HeapSizing.Plan launched = need.get().equals(plan.need()) ? plan : plan.with(need.get());
         try {
-            Path log = KometLauncher.launch(komet, knowledgeBase, launched.environment(), settings.logFolder());
+            Path log = KometLauncher.launch(komet, knowledgeBase, launched.environment(), Authors.current(),
+                    settings.logFolder());
             history.opened(KnowledgeBaseFamily.familyName(knowledgeBase));
             view.setLastOpened(history::lastOpened);
             view.setLastLog(log);
@@ -1166,7 +1168,7 @@ public final class DashboardApp extends Application {
                 return;
             }
             try {
-                RepositoryRemote.add(git.get(), folder, address, personal, send);
+                RepositoryRemote.add(git.get().as(Authors.current()), folder, address, personal, send);
                 Platform.runLater(() -> {
                     view.repositoryRemoteAdded(folder, Optional.empty());
                     view.setMessage("Added the remote of " + Names.of(folder.getParent().getFileName()) + "'s "
@@ -1188,7 +1190,7 @@ public final class DashboardApp extends Application {
         view.repositoryWorking(folder);
         files.submit(() -> {
             try {
-                String done = RepositoryRemote.send(git.get(), folder);
+                String done = RepositoryRemote.send(git.get().as(Authors.current()), folder);
                 Platform.runLater(() -> view.repositorySent(folder, done, Optional.empty()));
             } catch (IOException e) {
                 Platform.runLater(() -> view.repositorySent(folder, "", Optional.of(e.getMessage())));

@@ -88,6 +88,7 @@ import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -161,6 +162,7 @@ public final class DashboardView extends BorderPane {
     private final Map<String, BuildStatus> statuses = new HashMap<>();
     private final Map<Path, Image> icons = new HashMap<>();
     private Function<String, Optional<Instant>> lastOpened = name -> Optional.empty();
+    private Supplier<Optional<Authors.Reading>> authors = Optional::empty;
     private Path lastLog;
 
     private BiConsumer<KometInstallation, KnowledgeBase> onOpen = (komet, knowledgeBase) -> { };
@@ -1227,6 +1229,7 @@ public final class DashboardView extends BorderPane {
             openRow.setAlignment(Pos.CENTER_LEFT);
             openRow.setPadding(new Insets(6, 0, 0, 0));
             kometDetail.getChildren().add(openRow);
+            authorsLine().ifPresent(kometDetail.getChildren()::add);
             kometDetail.getChildren().add(muted("This opens it once in Komet " + komet.version()
                     + ". Which Komet a knowledge base opens in is set beside its own Open."));
         }
@@ -1754,6 +1757,37 @@ public final class DashboardView extends BorderPane {
     }
 
     /**
+     * Where a knowledge base's panel learns the authors Komet is started as, read each time the panel is
+     * shown, so a change to the file shows at once (IKE-Network/ike-issues#1399).
+     *
+     * @param authors what the file of authors gives
+     */
+    public void setAuthors(Supplier<Authors.Reading> authors) {
+        this.authors = () -> Optional.of(authors.get());
+    }
+
+    /**
+     * The line under a knowledge base's Open button that says who Komet is started as: the person, and
+     * the assistant they direct; why the file of authors cannot be used; or nothing, when there is no
+     * file and Komet starts under the name in git's configuration, as it always has.
+     *
+     * @return the line, when there is one to show
+     */
+    private Optional<SelectableText> authorsLine() {
+        return authors.get().flatMap(reading -> switch (reading) {
+            case Authors.Found(_, Authors found) -> Optional.of(muted("Opens as " + found.person().ident()
+                    + found.assistant().map(assistant -> ", with " + assistant.ident() + " as assistant").orElse("")));
+            case Authors.Unreadable(Path file, String problem) -> {
+                SelectableText text = SelectableText.of("The authors in " + Names.of(file) + " cannot be used: " + problem
+                        + ". Komet opens under the name in git's configuration.");
+                text.setStyle(PROBLEM);
+                yield Optional.of(text);
+            }
+            case Authors.Absent _ -> Optional.empty();
+        });
+    }
+
+    /**
      * Where the Recent order learns when each knowledge base was last opened.
      *
      * @param lastOpened the time a name was last opened
@@ -2201,6 +2235,7 @@ public final class DashboardView extends BorderPane {
         }
         actions.setAlignment(Pos.CENTER_LEFT);
         panel.getChildren().add(actions);
+        authorsLine().ifPresent(panel.getChildren()::add);
         pin.filter(version -> readers.stream().noneMatch(reader -> reader.version().equals(version)))
                 .ifPresent(missing -> {
                     SelectableText gone = SelectableText.of("This knowledge base is set to open in Komet " + missing

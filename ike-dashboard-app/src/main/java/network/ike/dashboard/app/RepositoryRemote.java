@@ -316,10 +316,14 @@ public final class RepositoryRemote {
         return files == 0 ? "Pushed." : "Committed " + files + (files == 1 ? " file" : " files") + " and pushed.";
     }
 
-    /** The words of a commit that never asks for a signature, and is the dashboard's own when git has been told no name. */
+    /**
+     * The words of a commit that never asks for a signature. It is the person's when git carries the
+     * person's identity ({@link RepositorySync.Git#as}), else git's configured name, else, when git has
+     * been told no name, the dashboard's own.
+     */
     private static String[] commit(String message, RepositorySync.Git git, Path folder, String... only) {
         List<String> commit = new ArrayList<>(List.of("-c", "commit.gpgsign=false"));
-        if (!git.run(folder, LOCAL, "config", "user.email").ok()) {
+        if (git.identity().isEmpty() && !git.run(folder, LOCAL, "config", "user.email").ok()) {
             commit.addAll(List.of("-c", "user.name=IKE Dashboard", "-c", "user.email=ike-dashboard@localhost"));
         }
         commit.addAll(List.of("commit", "-q"));

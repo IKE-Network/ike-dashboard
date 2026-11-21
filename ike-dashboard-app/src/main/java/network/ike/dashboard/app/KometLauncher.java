@@ -33,6 +33,11 @@ import java.util.Map;
  * the heap it was built with. Windows' {@code launchKomet.bat} cannot default an unset variable inline,
  * so it takes only {@code KOMET_JAVA_OPTS}, after its own {@code -Xmx}: there the heap goes in as
  * {@code -Xmx}, which the JVM takes the last of ({@link #launcherEnvironment}).
+ *
+ * <p>Komet commits as the person in the file of {@link Authors}: every launch sets git's variables for
+ * a commit's author and committer to the person, and Komet runs git, and JGit, with its own environment,
+ * so its commits use them with no change to Komet (step 2 of IKE-Network/ike-issues#1399). With no such
+ * file nothing is set, and Komet commits under the name in git's configuration, as before.
  */
 public final class KometLauncher {
 
@@ -92,6 +97,23 @@ public final class KometLauncher {
         String options = environment.get(HeapSizing.JAVA_OPTS_VARIABLE);
         translated.put(HeapSizing.JAVA_OPTS_VARIABLE, "-Xmx" + heap + (options == null || options.isBlank() ? "" : " " + options));
         return translated;
+    }
+
+    /**
+     * The variables a launch sets: those sizing the heap, as {@link #launcherEnvironment(KometInstallation, Map)}
+     * gives them, and git's variables naming the person as author and committer of Komet's commits.
+     *
+     * @param komet       the Komet
+     * @param environment the plan's variables ({@link HeapSizing.Plan#environment})
+     * @param authors     the authors Komet commits as: none are set when there is no file, or it cannot be
+     *                    used
+     * @return the variables to set
+     */
+    static Map<String, String> launcherEnvironment(KometInstallation komet, Map<String, String> environment,
+                                                   Authors.Reading authors) {
+        Map<String, String> variables = new LinkedHashMap<>(launcherEnvironment(komet, environment));
+        variables.putAll(authors.gitEnvironment());
+        return variables;
     }
 
     private static boolean windowsLauncher(Path launcher) {
@@ -168,20 +190,21 @@ public final class KometLauncher {
      * @param komet         the Komet
      * @param knowledgeBase the knowledge base
      * @param environment   the variables sizing its heap ({@link HeapSizing.Plan#environment})
+     * @param authors       the authors Komet commits as ({@link Authors#current})
      * @param logFolder     where the run's output goes
      * @return what the run did
      * @throws IOException          if Komet cannot be started
      * @throws InterruptedException if the wait is interrupted
      */
     public static HeadlessRun loadChangeSets(KometInstallation komet, KnowledgeBase knowledgeBase,
-                                             Map<String, String> environment, Path logFolder)
+                                             Map<String, String> environment, Authors.Reading authors, Path logFolder)
             throws IOException, InterruptedException {
         Files.createDirectories(logFolder);
         Path log = logFolder.resolve("komet-load-" + knowledgeBase.name() + "-" + LocalDateTime.now().format(STAMP) + ".log");
         ProcessBuilder builder = new ProcessBuilder(loadCommand(komet, knowledgeBase))
                 .redirectErrorStream(true)
                 .redirectOutput(log.toFile());
-        builder.environment().putAll(launcherEnvironment(komet, environment));
+        builder.environment().putAll(launcherEnvironment(komet, environment, authors));
         Process process = builder.start();
         int status = process.waitFor();
         return new HeadlessRun(status, report(Files.readString(log)), log);
@@ -213,18 +236,19 @@ public final class KometLauncher {
      * @param komet         the Komet to start
      * @param knowledgeBase the knowledge base to open
      * @param environment   the variables sizing its heap ({@link HeapSizing.Plan#environment})
+     * @param authors       the authors Komet commits as ({@link Authors#current})
      * @param logFolder     where its log goes
      * @return the log file the process writes to
      * @throws IOException if the process cannot be started
      */
     public static Path launch(KometInstallation komet, KnowledgeBase knowledgeBase, Map<String, String> environment,
-                              Path logFolder) throws IOException {
+                              Authors.Reading authors, Path logFolder) throws IOException {
         Files.createDirectories(logFolder);
         Path log = logFolder.resolve("komet-" + knowledgeBase.name() + "-" + LocalDateTime.now().format(STAMP) + ".log");
         ProcessBuilder builder = new ProcessBuilder(command(komet, knowledgeBase))
                 .redirectErrorStream(true)
                 .redirectOutput(log.toFile());
-        builder.environment().putAll(launcherEnvironment(komet, environment));
+        builder.environment().putAll(launcherEnvironment(komet, environment, authors));
         builder.start();
         return log;
     }
