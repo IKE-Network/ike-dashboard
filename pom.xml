@@ -61,10 +61,50 @@
         <!-- Komet's working set builds on Java 27 with preview features, which ike-parent enables
              for every module; the dashboard follows it so one JDK builds both. -->
         <java.version>27</java.version>
+        <!-- The oldest JDK 27 build the dashboard may be built on, in the spelling
+             requireJavaVersion compares: the rule rewrites the JDK's four-part 27.0.1.1 as
+             27.0.1-1, and a range written [27.0.1.1,) refuses 27.0.1.1 itself. 27.0.1.1 carries the
+             November 2026 security fixes, and the application's runtime is linked from the JDK
+             running Maven (IKE-Network/ike-issues#1393, IKE-Network/ike-issues#1398). java.version
+             stays the feature release: it is the compiler release, and the CI scripts read it to
+             choose JDK_27_0. -->
+        <java.minimum.build>27.0.1-1</java.minimum.build>
         <!-- The dashboard's zips are an application, not a library: they have no place on Maven
              Central, and a Central upload cannot be withdrawn. ike-parent defaults this to true. -->
         <ike.publishToCentral>false</ike.publishToCentral>
     </properties>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <!-- version from ike-parent pluginManagement -->
+                <executions>
+                    <!-- jpackage links the application's runtime from the JDK running Maven, so
+                         Maven itself must run on a JDK that has the security fixes of
+                         java.minimum.build. Declared here, in the parent of every module, so a
+                         build of any of them fails fast on an older JDK 27 rather than make an
+                         installer whose runtime lacks those fixes (IKE-Network/ike-issues#1398),
+                         as Komet's working set does (IKE-Network/ike-issues#1393). -->
+                    <execution>
+                        <id>enforce-dashboard-jdk</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <requireJavaVersion>
+                                    <version>[${java.minimum.build},)</version>
+                                    <message>The IKE Dashboard requires Maven to run on JDK 27.0.1.1 or later (set JAVA_HOME, and IntelliJ's project and Maven runner JDK). Builds are at https://jdk.java.net/27/.</message>
+                                </requireJavaVersion>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 
     <subprojects>
         <subproject>ike-dashboard-download</subproject>

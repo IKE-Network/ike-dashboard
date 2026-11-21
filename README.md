@@ -303,7 +303,8 @@ project, run by hand) runs:
 It then publishes both installers as release `v<version>`, under the version-free names
 `IKE-Dashboard-osx-aarch64.pkg` and `IKE-Dashboard-windows-x86_64.msi`, each with its `.sha256`, and
 marks it Latest, which is what keeps the download links stable. Older versions stay on the releases page
-and on Nexus.
+and on Nexus. The release notes name the JDK and JavaFX builds the installers bundle, as each installer
+build read them from the application it made.
 
 ## Build
 
@@ -311,4 +312,6 @@ and on Nexus.
 ./mvnw clean verify
 ```
 
-Java 27 with preview features, as Komet's working set.
+Java 27 with preview features, as Komet's working set. Maven must run on JDK 27.0.1.1 or later, and the
+build stops on an older JDK 27: the application's runtime is linked from the JDK that runs Maven, and
+27.0.1.1 carries the security fixes of November 2026. Builds are at https://jdk.java.net/27/.
