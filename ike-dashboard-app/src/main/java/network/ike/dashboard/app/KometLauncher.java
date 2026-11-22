@@ -20,6 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,6 +39,12 @@ import java.util.Map;
  * a commit's author and committer to the person, and Komet runs git, and JGit, with its own environment,
  * so its commits use them with no change to Komet (step 2 of IKE-Network/ike-issues#1399). With no such
  * file nothing is set, and Komet commits under the name in git's configuration, as before.
+ *
+ * <p>A Komet is opened as the choice of its folder ({@link OpenAs}; KEC, 2026-11-22): the person with the
+ * assistant the file names, or with no assistant. A Komet that takes the choice is also given
+ * {@code --user} with the person's name, and no password, so its author screen opens with the person
+ * selected where the knowledge base has them as a user. No assistant reaches Komet as
+ * {@value Authors#ASSISTANT_VARIABLE} beside git's variables.
  */
 public final class KometLauncher {
 
@@ -114,6 +121,37 @@ public final class KometLauncher {
         Map<String, String> variables = new LinkedHashMap<>(launcherEnvironment(komet, environment));
         variables.putAll(authors.gitEnvironment());
         return variables;
+    }
+
+    /**
+     * The variables a launch sets when a Komet is opened as a choice of authors: those sizing the heap, as
+     * {@link #launcherEnvironment(KometInstallation, Map)} gives them, and the choice's own
+     * ({@link OpenAs#environment}).
+     *
+     * @param komet       the Komet
+     * @param environment the plan's variables ({@link HeapSizing.Plan#environment})
+     * @param openAs      who Komet is opened as
+     * @return the variables to set
+     */
+    static Map<String, String> launcherEnvironment(KometInstallation komet, Map<String, String> environment, OpenAs openAs) {
+        Map<String, String> variables = new LinkedHashMap<>(launcherEnvironment(komet, environment));
+        variables.putAll(openAs.environment());
+        return variables;
+    }
+
+    /**
+     * A command that starts a Komet, with what opening it as a choice of authors adds
+     * ({@link OpenAs#arguments}).
+     *
+     * @param komet   the Komet the command starts
+     * @param command the command and its arguments
+     * @param openAs  who Komet is opened as
+     * @return the command, then the choice's arguments
+     */
+    static List<String> openedAs(KometInstallation komet, List<String> command, OpenAs openAs) {
+        List<String> opened = new ArrayList<>(command);
+        opened.addAll(openAs.arguments(komet));
+        return List.copyOf(opened);
     }
 
     private static boolean windowsLauncher(Path launcher) {
@@ -236,19 +274,19 @@ public final class KometLauncher {
      * @param komet         the Komet to start
      * @param knowledgeBase the knowledge base to open
      * @param environment   the variables sizing its heap ({@link HeapSizing.Plan#environment})
-     * @param authors       the authors Komet commits as ({@link Authors#current})
+     * @param openAs        who Komet is opened as: the folder's choice ({@link OpenAsChoices#openAs})
      * @param logFolder     where its log goes
      * @return the log file the process writes to
      * @throws IOException if the process cannot be started
      */
     public static Path launch(KometInstallation komet, KnowledgeBase knowledgeBase, Map<String, String> environment,
-                              Authors.Reading authors, Path logFolder) throws IOException {
+                              OpenAs openAs, Path logFolder) throws IOException {
         Files.createDirectories(logFolder);
         Path log = logFolder.resolve("komet-" + knowledgeBase.name() + "-" + LocalDateTime.now().format(STAMP) + ".log");
-        ProcessBuilder builder = new ProcessBuilder(command(komet, knowledgeBase))
+        ProcessBuilder builder = new ProcessBuilder(openedAs(komet, command(komet, knowledgeBase), openAs))
                 .redirectErrorStream(true)
                 .redirectOutput(log.toFile());
-        builder.environment().putAll(launcherEnvironment(komet, environment, authors));
+        builder.environment().putAll(launcherEnvironment(komet, environment, openAs));
         builder.start();
         return log;
     }

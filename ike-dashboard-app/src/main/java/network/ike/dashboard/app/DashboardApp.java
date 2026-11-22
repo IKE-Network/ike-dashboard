@@ -106,6 +106,8 @@ public final class DashboardApp extends Application {
     private OpenHistory history;
     private Preferences heapPreferences;
     private Preferences heapStores;
+    /** Who each folder is opened as; a request from a link reads the same choice as the Open button. */
+    private OpenAsChoices openAsChoices = OpenAsChoices.NONE;
 
     /** How long Komet release notes are kept before GitHub is asked again. */
     private static final java.time.Duration NOTES_AGE = java.time.Duration.ofMinutes(10);
@@ -166,6 +168,7 @@ public final class DashboardApp extends Application {
         DashboardPreferences preferences = DashboardPreferences.current();
         heapPreferences = preferences.node(DashboardPreferences.Node.HEAP);
         heapStores = preferences.node(DashboardPreferences.Node.HEAP_STORES);
+        openAsChoices = new OpenAsChoices(preferences.node(DashboardPreferences.Node.OPEN_AS));
         view = new DashboardView();
         view.setCollections(settings.collections());
         view.setLastOpened(history::lastOpened);
@@ -183,6 +186,7 @@ public final class DashboardApp extends Application {
         view.setUnsavedWork(copy -> UnsavedWork.of(git, copy.path()));
         view.setOnOpenLink(uri -> getHostServices().showDocument(uri.toString()));
         view.setKometPins(KometPins.current());
+        view.setOpenAsChoices(openAsChoices);
         view.setOnBrowse(this::loadCatalog);
         view.setOnRepositoryRemote(this::repositoryRemote);
         view.setOnRepositorySend(this::repositorySend);
@@ -1061,8 +1065,8 @@ public final class DashboardApp extends Application {
         }
         HeapSizing.Plan launched = need.get().equals(plan.need()) ? plan : plan.with(need.get());
         try {
-            Path log = KometLauncher.launch(komet, knowledgeBase, launched.environment(), Authors.current(),
-                    settings.logFolder());
+            Path log = KometLauncher.launch(komet, knowledgeBase, launched.environment(),
+                    openAsChoices.openAs(Authors.current(), knowledgeBase.path()), settings.logFolder());
             history.opened(KnowledgeBaseFamily.familyName(knowledgeBase));
             view.setLastOpened(history::lastOpened);
             view.setLastLog(log);

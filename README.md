@@ -132,11 +132,34 @@ assistant.email=ada-claude@komet.ike.network
 Every Komet the dashboard starts is given git's `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`,
 `GIT_COMMITTER_NAME` and `GIT_COMMITTER_EMAIL`, naming the person, so Komet's commits name the person
 with no change to Komet. The dashboard's own commits, of a store's change sets and preferences, and the
-Maven runs that make and connect knowledge-base projects name the person the same way. A knowledge base's
-panel, and a Komet's, say *Opens as …* under the Open button. With no file nothing is set, and git writes
-the name in its configuration, as before. A file that cannot be used is named in the panel with the
-reason, and nothing is taken from it. The file is read at each launch and each commit, so a change takes
-effect with no restart.
+Maven runs that make and connect knowledge-base projects name the person the same way. With no file
+nothing is set, and git writes the name in its configuration, as before. A file that cannot be used is
+named in the panel with the reason, and nothing is taken from it. The file is read at each launch and each
+commit, so a change takes effect with no restart.
+
+### Who Komet opens as
+
+A knowledge base's Open row reads as one sentence: *Open* in a Komet *as* an author. The last part is a
+choice of the two the file gives: the person with the assistant, and the person with no assistant. A
+file that names no assistant gives the person's name alone, and with no file the row ends at the Komet.
+The choice is kept for each folder, a new folder starts with the assistant, and a Komet's own Open row
+shows the choice of the folder it opens.
+
+What a launch sets for the choice:
+
+- `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and `GIT_COMMITTER_EMAIL`, naming the person,
+  for every Komet.
+- `IKE_ASSISTANT=none`, when the folder opens with no assistant. Komet still reads the file of authors
+  itself, and passes the assistant over: a narration and the assistant's own edits are then committed as
+  the person. The tools Komet starts inherit the variable, and `DashboardCommand authors` reads it, so
+  they see the same choice.
+- `--user=<the person's name>`, with no password, so Komet's author screen opens with the person
+  selected in a knowledge base that has them as a user. In a knowledge base that does not, the screen
+  opens as it always has.
+
+Komet takes the choice from version 26.1122.2027 on (`OpenAs.SINCE`, the first build after the Komet
+change landed). An older Komet is started with git's variables alone, since `--user` would write a
+warning in its log at each launch, and the panel says that it does not read a choice of no assistant.
 
 `DashboardCommand authors` prints the two for other tools, each as git shows an author, and stops with a
 message when there is no file or it cannot be used:
@@ -147,8 +170,10 @@ assistant  Ada's Claude <ada-claude@komet.ike.network>
 from       /Users/ada/.ike/authors.properties
 ```
 
-The assistant is not yet used in a commit: a commit of the assistant's work, with the assistant as author
-and the person as committer, is step 3 of the issue.
+With `IKE_ASSISTANT=none` in its environment the command prints the person alone.
+
+A commit of the assistant's work, with the assistant as author and the person as committer, is written by
+Komet, which reads the same file (step 3 of the issue).
 
 ## Remotes for a knowledge base's change sets and preferences
 

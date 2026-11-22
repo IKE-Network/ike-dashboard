@@ -61,6 +61,17 @@ public record Authors(Author person, Optional<Author> assistant) {
     static final String COMMITTER_EMAIL = "GIT_COMMITTER_EMAIL";
 
     /**
+     * The variable that leaves the assistant out for a process and the tools it starts (KEC, 2026-11-22):
+     * set to {@value #NO_ASSISTANT}, the file's assistant is passed over, and the assistant's work is
+     * committed as the person. The dashboard sets it on a Komet opened with no assistant ({@link OpenAs});
+     * Komet reads it beside the file ({@code CommitAuthors} in komet-stamped-document-plugin), and so does
+     * {@link #current}.
+     */
+    static final String ASSISTANT_VARIABLE = "IKE_ASSISTANT";
+    /** The value of {@value #ASSISTANT_VARIABLE} that leaves the assistant out. Any other value says nothing. */
+    static final String NO_ASSISTANT = "none";
+
+    /**
      * Checks that both are given.
      *
      * @param person    the person
@@ -177,6 +188,19 @@ public record Authors(Author person, Optional<Author> assistant) {
         default Map<String, String> gitEnvironment() {
             return found().map(Authors::gitEnvironment).orElse(Map.of());
         }
+
+        /**
+         * The same reading with the assistant left out: the person alone, when the file gives authors, and
+         * otherwise the reading as it is.
+         *
+         * @return the reading, naming no assistant
+         */
+        default Reading withoutAssistant() {
+            return switch (this) {
+                case Found(Path file, Authors authors) -> new Found(file, authors.withoutAssistant());
+                case Absent _, Unreadable _ -> this;
+            };
+        }
     }
 
     /**
@@ -223,6 +247,15 @@ public record Authors(Author person, Optional<Author> assistant) {
     }
 
     /**
+     * The person alone, with no assistant.
+     *
+     * @return the same person, and no assistant
+     */
+    public Authors withoutAssistant() {
+        return assistant.isEmpty() ? this : new Authors(person, Optional.empty());
+    }
+
+    /**
      * Where the file is for a user.
      *
      * @param home the user's home folder
@@ -233,12 +266,37 @@ public record Authors(Author person, Optional<Author> assistant) {
     }
 
     /**
-     * Reads the file of the user running the dashboard.
+     * Reads the file of the user running the dashboard, as this process was started: with
+     * {@value #ASSISTANT_VARIABLE} set to {@value #NO_ASSISTANT} in its environment, the assistant is left
+     * out.
      *
      * @return what the file gives
      */
     public static Reading current() {
-        return read(file(Path.of(System.getProperty("user.home"))));
+        return current(Path.of(System.getProperty("user.home")), System.getenv());
+    }
+
+    /**
+     * Reads a user's file as a process with an environment sees it.
+     *
+     * @param home        the user's home folder
+     * @param environment the process's environment
+     * @return what the file gives, with the assistant left out when the environment says so
+     */
+    static Reading current(Path home, Map<String, String> environment) {
+        Reading reading = read(file(home));
+        return leavesAssistantOut(environment) ? reading.withoutAssistant() : reading;
+    }
+
+    /**
+     * Whether an environment leaves the assistant out.
+     *
+     * @param environment a process's environment
+     * @return {@code true} when {@value #ASSISTANT_VARIABLE} is {@value #NO_ASSISTANT}, in any case
+     */
+    static boolean leavesAssistantOut(Map<String, String> environment) {
+        String value = environment.get(ASSISTANT_VARIABLE);
+        return value != null && value.strip().equalsIgnoreCase(NO_ASSISTANT);
     }
 
     /**

@@ -188,6 +188,49 @@ class AuthorsTest {
     }
 
     @Nested
+    class WithNoAssistant {
+
+        @Test
+        void theVariableLeavesTheAssistantOutForAProcessAndTheToolsItStarts(@TempDir Path home) throws IOException {
+            write(home, ADA);
+
+            assertThat(Authors.current(home, Map.of()).found().orElseThrow().assistant())
+                    .contains(new Authors.Author("Ada's Claude", "ada-claude@komet.ike.network"));
+            Authors.Reading alone = Authors.current(home, Map.of("IKE_ASSISTANT", "none"));
+            assertThat(alone.found().orElseThrow().person()).isEqualTo(new Authors.Author("Ada Lovelace", "ada@komet.ike.network"));
+            assertThat(alone.found().orElseThrow().assistant()).isEmpty();
+            assertThat(alone.file()).isEqualTo(Authors.file(home));
+        }
+
+        @Test
+        void onlyNoneLeavesTheAssistantOut() {
+            assertThat(Authors.leavesAssistantOut(Map.of("IKE_ASSISTANT", " None "))).isTrue();
+            assertThat(Authors.leavesAssistantOut(Map.of("IKE_ASSISTANT", ""))).isFalse();
+            assertThat(Authors.leavesAssistantOut(Map.of("IKE_ASSISTANT", "Ada's Claude"))).isFalse();
+            assertThat(Authors.leavesAssistantOut(Map.of())).isFalse();
+        }
+
+        @Test
+        void noFileAndAFileThatCannotBeUsedStayAsTheyAre(@TempDir Path home) throws IOException {
+            assertThat(Authors.current(home, Map.of("IKE_ASSISTANT", "none"))).isInstanceOf(Authors.Absent.class);
+            write(home, "person.name=Ada Lovelace\n");
+            assertThat(Authors.current(home, Map.of("IKE_ASSISTANT", "none"))).isInstanceOf(Authors.Unreadable.class);
+        }
+
+        @Test
+        void theCommandThenPrintsThePersonAlone(@TempDir Path home) throws IOException {
+            Path file = write(home, ADA);
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+
+            DashboardCommand.authors(new PrintStream(bytes, true, StandardCharsets.UTF_8),
+                    Authors.current(home, Map.of("IKE_ASSISTANT", "none")));
+
+            assertThat(bytes.toString(StandardCharsets.UTF_8)).isEqualTo(String.join(System.lineSeparator(),
+                    "person     Ada Lovelace <ada@komet.ike.network>", "from       " + file, ""));
+        }
+    }
+
+    @Nested
     class TheCommand {
 
         @Test

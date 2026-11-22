@@ -46,7 +46,9 @@ public final class DashboardPreferences {
         /** When each knowledge base was last opened, keyed by family name. */
         OPENED(DASHBOARD, "opened"),
         /** The Komet each knowledge base is pinned to, keyed by family name. */
-        KOMET_PINS(DASHBOARD, "komet-pins");
+        KOMET_PINS(DASHBOARD, "komet-pins"),
+        /** The folders opened with no assistant, keyed by store ({@link OpenAsChoices}). */
+        OPEN_AS(DASHBOARD, "open-as");
 
         private final Node parent;
         private final String stored;
