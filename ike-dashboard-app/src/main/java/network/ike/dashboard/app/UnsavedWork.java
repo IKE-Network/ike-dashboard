@@ -27,10 +27,15 @@ import java.util.stream.Stream;
  * What in a store is saved nowhere else, read before the store goes to the Trash (KEC, 2026-11-08: "Can't you
  * tell if there is unsaved changes? i.e. change sets not synchronized with git"). For each git repository in the
  * store: files not committed, commits not pushed, and history with no remote at all; and change sets in no
- * repository. Read from the repositories' own files, with no network: "not pushed" is as of the last push or fetch
- * from this machine.
+ * repository. Those of local data are counted apart from the rest. They are in no repository by design, so they are
+ * only ever in this folder, and no sync would change that (IKE-Network/ike-issues#1313). The change sets of
+ * documents saved in files are not counted, because those files contain the documents. Read from the repositories'
+ * own files, with no network: "not pushed" is as of the last push or fetch from this machine.
  */
 public final class UnsavedWork {
+
+    /** What the name of a change set's file ends with. */
+    static final String CHANGE_SET_SUFFIX = ".zip";
 
     /** The folders change sets are kept in. */
     private static final List<String> CHANGE_SET_FOLDERS = StoreUpgrade.CHANGE_SET_FOLDERS;
@@ -72,10 +77,17 @@ public final class UnsavedWork {
             return new Report(List.of("Its folders could not be read: " + e.getMessage() + "."), 0, false);
         }
         List<String> findings = new ArrayList<>();
-        int outside = changeSetsOutside(store, repositories);
-        if (outside > 0) {
-            findings.add(outside + (outside == 1 ? " change set is" : " change sets are")
-                    + " in no git repository, so " + (outside == 1 ? "it is" : "they are") + " only in this folder.");
+        List<Path> outside = changeSetsOutside(store, repositories);
+        int local = (int) outside.stream().filter(UnsavedWork::isLocal).count();
+        int others = outside.size() - local;
+        if (others > 0) {
+            findings.add(others + (others == 1 ? " change set is" : " change sets are")
+                    + " in no git repository, so " + (others == 1 ? "it is" : "they are") + " only in this folder.");
+        }
+        if (local > 0) {
+            findings.add(local + (local == 1 ? " change set of local data is" : " change sets of local data are")
+                    + " only in this folder. Local data, such as a conversation with the assistant, does not sync with the"
+                    + " knowledge base.");
         }
         if (repositories.isEmpty()) {
             return new Report(List.copyOf(findings), 0, true);
@@ -117,23 +129,33 @@ public final class UnsavedWork {
         return findings;
     }
 
-    /** Change-set files in the store that no repository contains. */
-    private static int changeSetsOutside(Path store, List<RepositorySync.Repository> repositories) {
-        int count = 0;
+    /** Whether a change set is one of local data: in a local folder, or set aside from one by an upgrade. */
+    private static boolean isLocal(Path changeSet) {
+        Path folder = changeSet.getName(0);
+        if (folder.toString().equals(RefusedChangeSets.UNPROCESSED_FOLDER) && changeSet.getNameCount() > 1) {
+            folder = changeSet.getName(1);
+        }
+        return StoreUpgrade.LOCAL_CHANGE_SET_FOLDERS.contains(folder.toString());
+    }
+
+    /** Change-set files in the store that no repository contains, relative to the store. */
+    private static List<Path> changeSetsOutside(Path store, List<RepositorySync.Repository> repositories) {
+        List<Path> outside = new ArrayList<>();
         for (String folder : CHANGE_SET_FOLDERS) {
             Path changeSets = store.resolve(folder);
             if (!Files.isDirectory(changeSets)) {
                 continue;
             }
             try (Stream<Path> files = Files.walk(changeSets)) {
-                count += (int) files.filter(Files::isRegularFile)
-                        .filter(file -> file.getFileName().toString().endsWith(".zip"))
+                files.filter(Files::isRegularFile)
+                        .filter(file -> file.getFileName().toString().endsWith(CHANGE_SET_SUFFIX))
                         .filter(file -> repositories.stream().noneMatch(repository -> file.startsWith(repository.folder())))
-                        .count();
+                        .map(store::relativize)
+                        .forEach(outside::add);
             } catch (IOException e) {
                 // A folder that cannot be walked is reported by git, or not at all; it is not counted here.
             }
         }
-        return count;
+        return outside;
     }
 }

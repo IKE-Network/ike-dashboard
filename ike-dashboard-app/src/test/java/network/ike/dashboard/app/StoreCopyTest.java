@@ -29,6 +29,10 @@ class StoreCopyTest {
         write(store.resolve("rocks/CURRENT"), "data");
         write(store.resolve("changeSets/src/main/resources/mine.zip"), "mine");
         write(store.resolve("changeSets/.git/HEAD"), "ref: refs/heads/main");
+        write(store.resolve("sharedChangeSets/lab.zip"), "shared");
+        write(store.resolve("sharedChangeSets/.git/HEAD"), "ref: refs/heads/shared");
+        write(store.resolve("localChangeSets/conversation.zip"), "local");
+        write(store.resolve("fileChangeSets/document.zip"), "of a file");
         write(store.resolve("preferences/preferences.xml"), "my windows");
 
         Path copy = StoreCopy.copy(store, "  pizza-teaching ");
@@ -38,6 +42,10 @@ class StoreCopyTest {
         assertThat(copy.resolve("changeSets/src/main/resources/mine.zip")).hasContent("mine");
         assertThat(copy.resolve("changeSets/.git/HEAD")).as("repositories travel with their history")
                 .hasContent("ref: refs/heads/main");
+        assertThat(copy.resolve("sharedChangeSets/lab.zip")).hasContent("shared");
+        assertThat(copy.resolve("sharedChangeSets/.git/HEAD")).hasContent("ref: refs/heads/shared");
+        assertThat(copy.resolve("localChangeSets/conversation.zip")).hasContent("local");
+        assertThat(copy.resolve("fileChangeSets/document.zip")).as("a copy is everything").hasContent("of a file");
         assertThat(copy.resolve("preferences/preferences.xml")).hasContent("my windows");
         assertThat(store.resolve("changeSets/src/main/resources/mine.zip")).hasContent("mine");
         assertThat(solor.resolve("pizza-teaching" + StoreCopy.PARTIAL_SUFFIX)).doesNotExist();
@@ -89,6 +97,21 @@ class StoreCopyTest {
         assertThat(refusals).hasSize(2);
         assertThat(refusals.get(0)).contains("is open in Komet. Quit Komet");
         assertThat(refusals.get(1)).contains("still writing");
+    }
+
+    @Test
+    void aStoreWhoseSharedOrLocalChangeSetsAreBeingWrittenIsNotCopied() throws IOException {
+        Path store = solor.resolve("pizza-kb");
+        Path shared = Path.of("sharedChangeSets", "Lab documents [abc] Author ike-cs.spool");
+        Path local = Path.of("localChangeSets", "Conversation journal module [abc] Author ike-cs.spool");
+        write(store.resolve(shared), "being written");
+        write(store.resolve(local), "being written");
+        KnowledgeBase copy = new KnowledgeBase("pizza-kb", store, StoreKind.ROCKS, 10, Optional.empty(), Map.of(),
+                Instant.parse("2026-11-01T00:00:00Z"));
+
+        assertThat(StoreCopy.refusals(copy, List.of()).stream().map(Names::plain)).containsExactly(
+                "Komet is still writing " + shared + "; quit it first.",
+                "Komet is still writing " + local + "; quit it first.");
     }
 
     private static void write(Path file, String text) throws IOException {

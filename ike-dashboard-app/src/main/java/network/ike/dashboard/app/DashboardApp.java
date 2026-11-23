@@ -561,9 +561,10 @@ public final class DashboardApp extends Application {
             view.setMessage("Upgrading needs Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE + " or later");
             return;
         }
-        List<String> refusals;
+        List<String> refusals = new ArrayList<>();
         try {
-            refusals = StoreUpgrade.refusals(store, syncOf(store.path()), HeapSizing.Machine.current(komets).running());
+            StoreUpgrade.cannotCarry(store.path()).ifPresent(refusals::add);
+            refusals.addAll(StoreUpgrade.refusals(store, syncOf(store.path()), HeapSizing.Machine.current(komets).running()));
         } catch (IOException e) {
             view.setMessage("Could not read " + Names.of(store.name()) + ": " + e.getMessage());
             return;
@@ -586,17 +587,16 @@ public final class DashboardApp extends Application {
                 release(List.of(store.path()));
                 return;
             }
-            boolean carried = false;
+            StoreUpgrade.Moves moves = new StoreUpgrade.Moves();
             List<Path[]> setAside = List.of();
             try {
                 transfer.phase("Downloading the latest version");
                 StoreDownload.downloadTo(RepositoryHttpClients.newClient(), DashboardCommand.access(settings), action.coordinate(),
                         action.classifier(), work, settings.localRepository(), transfer);
                 transfer.phase("Moving your change sets, preferences and repositories into it");
-                StoreUpgrade.Carried carry = StoreUpgrade.carry(store.path(), work);
-                carried = true;
+                StoreUpgrade.Carried carry = StoreUpgrade.carry(store.path(), work, moves);
                 if (!carry.conflicts().isEmpty()) {
-                    StoreUpgrade.carry(work, store.path());
+                    moves.undo();
                     StoreUpgrade.deleteTree(work);
                     transfer.finished(Transfer.State.FAILED, "Not upgraded. The new version has "
                             + carry.conflicts().size() + (carry.conflicts().size() == 1 ? " file" : " files")
@@ -606,8 +606,7 @@ public final class DashboardApp extends Application {
                 }
                 Optional<KometLauncher.HeadlessRun> checked = check(komet, work, transfer);
                 if (checked.isEmpty()) {
-                    StoreUpgrade.carry(work, store.path());
-                    carried = false;
+                    moves.undo();
                     StoreUpgrade.deleteTree(work);
                     transfer.finished(Transfer.State.CANCELLED, "Cancelled. Nothing in your folder changed. The download"
                             + " is kept, so the next upgrade does not download it again.");
@@ -628,8 +627,7 @@ public final class DashboardApp extends Application {
                         choice.complete(view.chooseForRefused(store, summaries, whyNoAside, first));
                     });
                     if (!choice.get()) {
-                        StoreUpgrade.carry(work, store.path());
-                        carried = false;
+                        moves.undo();
                         StoreUpgrade.deleteTree(work);
                         transfer.finished(Transfer.State.CANCELLED, "Not upgraded. " + DashboardView.refusedHeader(refused.size())
                                 + ". Your folder is as it was. The download is kept, so the next upgrade does not download"
@@ -643,8 +641,7 @@ public final class DashboardApp extends Application {
                     if (checked.isEmpty()) {
                         RefusedChangeSets.putBack(setAside);
                         setAside = List.of();
-                        StoreUpgrade.carry(work, store.path());
-                        carried = false;
+                        moves.undo();
                         StoreUpgrade.deleteTree(work);
                         transfer.finished(Transfer.State.CANCELLED, "Cancelled. Nothing in your folder changed. The"
                                 + " download is kept, so the next upgrade does not download it again.");
@@ -655,8 +652,7 @@ public final class DashboardApp extends Application {
                 if (!run.clean()) {
                     RefusedChangeSets.putBack(setAside);
                     setAside = List.of();
-                    StoreUpgrade.carry(work, store.path());
-                    carried = false;
+                    moves.undo();
                     transfer.finished(Transfer.State.FAILED, "Not upgraded. Komet could not load every change set into the"
                             + " new version. Its exit status was " + run.exitStatus() + ". Your folder is as it was. The new"
                             + " version is kept next to it as " + Names.of(work.getFileName()) + " so you can look at it. Move it to the " + Finder.trashName()
@@ -673,6 +669,7 @@ public final class DashboardApp extends Application {
                     Finder.trash(List.of(previous));
                 }
                 StoreUpgrade.swap(store.path(), work);
+                moves.keep();
                 // The new build passed Komet's check and is in place: the old one goes to the Trash, the way back.
                 String old;
                 try {
@@ -698,9 +695,10 @@ public final class DashboardApp extends Application {
             } catch (Exception e) {
                 String kept = "";
                 try {
-                    RefusedChangeSets.putBack(setAside);
-                    if (carried) {
-                        StoreUpgrade.carry(work, store.path());
+                    try {
+                        RefusedChangeSets.putBack(setAside);
+                    } finally {
+                        moves.undo();
                     }
                 } catch (IOException back) {
                     kept = " Your change sets and preferences may still be in " + Names.of(work.getFileName()) + ": " + back.getMessage();

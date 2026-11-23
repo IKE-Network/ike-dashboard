@@ -81,12 +81,18 @@ From then on it updates itself (see [Self-update](#self-update)). The links neve
   build in place: the build downloads into `<store>.upgrade` beside it, the change-set folders, the
   preferences and every git repository in the store are carried into it, a Komet from 26.1107.1831 on
   checks with no window (`--load-change-sets`) that it opens and loads every change set, and the two
-  folders swap by rename; the old build, confirmed replaced, goes to the Trash, which is the way back. When some change sets do not load, the dashboard says
+  folders swap by rename; the old build, confirmed replaced, goes to the Trash, which is the way back. The change-set
+  folders are those of knowledge (`changeSets`), shared data (`sharedChangeSets`) and local data (`localChangeSets`,
+  earlier `instanceChangeSets`), and the one for change sets set aside. The change sets of documents saved in files
+  (`fileChangeSets`, earlier `ephemeralChangeSets`) stay behind, because Komet reads those documents from their files
+  again (`IKE-Network/ike-issues#1313`). When some change sets do not load, the dashboard says
   what each contains, who packaged it and why it was refused, and the person cancels the upgrade or
   sets them aside in `unprocessedChangeSets/`, which Komet never reads and later upgrades carry along
   (`IKE-Network/ike-issues#1356`); a change set in a git repository with a remote is never moved out.
   Transfers run three at a time, one check in Komet at a time (`IKE-Network/ike-issues#1354`). Every
-  failure leaves the store as it was. *Reinstall*
+  failure leaves the store as it was. A store that is itself a git repository is not upgraded, because the upgrade
+  could not keep that repository. When the dashboard stops during an upgrade, work can stay in `<store>.upgrade`;
+  the next upgrade does not start, and says which work to move back first. *Reinstall*
   moves the store to the Trash and downloads the newest build under the same name. *Install a new copy*
   unpacks the newest build beside the copy there is, with the version appended. Nothing is ever written
   over. Older change sets are loaded by Komet at open, never rewritten: the dashboard no longer offers a

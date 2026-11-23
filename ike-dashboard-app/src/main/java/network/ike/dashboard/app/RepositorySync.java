@@ -33,9 +33,10 @@ import java.util.stream.Stream;
 
 /**
  * The sync state of the git repositories inside a store (the IKE Dashboard design, decision 14). A
- * store holds several, each synced on its own: Komet's sync keeps its change sets in one, and its
- * preferences may be another. The dashboard assumes no fixed list: it finds every {@code .git} within
- * a few levels of the store's folder.
+ * store contains several, each synced on its own: Komet's sync keeps its change sets in one and its shared
+ * data in another, and its preferences may be a third. The dashboard assumes no fixed list: it finds every
+ * {@code .git} within a few levels of the store's folder. Each is compared with the branch of its remote that
+ * is checked out in it, so two repositories with one remote, on a branch each, are each compared with their own.
  *
  * <p>Two of the three answers need no network: <em>uncommitted</em> (files the repository has not
  * committed) and <em>needs push</em> (commits its remote-tracking branch does not have). The third,
@@ -63,6 +64,12 @@ public final class RepositorySync {
 
     /** The folder Komet keeps a store's change sets in, which its sync makes a repository. */
     static final String CHANGE_SETS = "changeSets";
+
+    /**
+     * The folder Komet keeps a store's shared change sets in: a repository of its own, whose remote is the
+     * change sets' remote and whose branch is another, {@code shared} (IKE-Network/ike-issues#1313).
+     */
+    static final String SHARED_CHANGE_SETS = "sharedChangeSets";
 
     /** The folder Komet keeps one person's preferences for a store in. */
     static final String PREFERENCES = "preferences";
@@ -116,7 +123,8 @@ public final class RepositorySync {
      * A git repository inside a store.
      *
      * @param folder its working tree
-     * @param label  what the person reads: {@code change sets}, {@code preferences}, or its path in the store
+     * @param label  what the person reads: {@code change sets}, {@code shared data}, {@code preferences}, or its
+     *               path in the store
      */
     public record Repository(Path folder, String label) {
     }
@@ -199,8 +207,9 @@ public final class RepositorySync {
         String relative = store.relativize(folder).toString();
         return switch (relative) {
             case "" -> "the store";
-            case "changeSets" -> "change sets";
-            case "preferences" -> "preferences";
+            case CHANGE_SETS -> "change sets";
+            case SHARED_CHANGE_SETS -> "shared data";
+            case PREFERENCES -> "preferences";
             default -> relative;
         };
     }

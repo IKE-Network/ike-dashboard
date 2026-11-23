@@ -47,8 +47,8 @@ class UnsavedWorkTest {
         Files.writeString(store.resolve("changeSets/third.zip"), "third");      // not committed
         init(store.resolve("preferences"));
         commit(store.resolve("preferences"), "preferences.xml");                // no remote
-        Files.createDirectories(store.resolve("instanceChangeSets"));
-        Files.writeString(store.resolve("instanceChangeSets/loose.zip"), "loose"); // in no repository
+        Files.createDirectories(store.resolve("unprocessedChangeSets/changeSets"));
+        Files.writeString(store.resolve("unprocessedChangeSets/changeSets/loose.zip"), "loose"); // in no repository
 
         UnsavedWork.Report report = UnsavedWork.of(Optional.of(git), store);
 
@@ -67,6 +67,56 @@ class UnsavedWorkTest {
         Files.createDirectories(pushed);
         run(pushed, "clone", "-q", remote.toString(), pushed.resolve("changeSets").toString());
         assertThat(UnsavedWork.of(Optional.of(git), pushed).saved()).as("committed and pushed: nothing at stake").isTrue();
+    }
+
+    @Test
+    void localChangeSetsAreCountedApartBecauseTheyAreNeverInARepository(@TempDir Path temp) throws IOException {
+        Path store = temp.resolve("ike-kb");
+        write(store.resolve("localChangeSets/conversation.zip"));
+        write(store.resolve("instanceChangeSets/older.zip"));                                  // the name earlier Komets write
+        write(store.resolve("unprocessedChangeSets/localChangeSets/refused.zip"));              // set aside by an upgrade
+        write(store.resolve("sharedChangeSets/lab.zip"));                                       // not a repository yet
+        write(store.resolve("fileChangeSets/document.zip"));                                    // its file contains it
+        write(store.resolve("ephemeralChangeSets/document.zip"));
+
+        assertThat(UnsavedWork.of(Optional.of(git), store).findings()).containsExactly(
+                "1 change set is in no git repository, so it is only in this folder.",
+                "3 change sets of local data are only in this folder. Local data, such as a conversation with the"
+                        + " assistant, does not sync with the knowledge base.");
+
+        Path one = temp.resolve("one");
+        write(one.resolve("localChangeSets/conversation.zip"));
+        assertThat(UnsavedWork.of(Optional.of(git), one).findings()).containsExactly(
+                "1 change set of local data is only in this folder. Local data, such as a conversation with the"
+                        + " assistant, does not sync with the knowledge base.");
+
+        Path files = temp.resolve("files");
+        write(files.resolve("fileChangeSets/document.zip"));
+        assertThat(UnsavedWork.of(Optional.of(git), files).saved()).as("a document's file contains it").isTrue();
+    }
+
+    @Test
+    void theSharedRepositorysUnsavedWorkIsNamed(@TempDir Path temp) throws IOException {
+        Path remote = temp.resolve("remote.git");
+        Path seed = temp.resolve("seed");
+        init(seed);
+        commit(seed, "knowledge.zip");
+        run(seed, "switch", "-q", "--orphan", "shared");
+        commit(seed, "lab.zip");
+        run(temp, "clone", "-q", "--bare", seed.toString(), remote.toString());
+        Path store = temp.resolve("ike-kb");
+        Files.createDirectories(store);
+        run(store, "clone", "-q", "--branch", "main", remote.toString(), store.resolve("changeSets").toString());
+        Path shared = store.resolve("sharedChangeSets");
+        run(store, "clone", "-q", "--branch", "shared", remote.toString(), shared.toString());
+        assertThat(UnsavedWork.of(Optional.of(git), store).saved()).as("both committed and pushed").isTrue();
+
+        commit(shared, "proposals.zip");
+        Files.writeString(shared.resolve("notes.zip"), "notes");
+
+        assertThat(UnsavedWork.of(Optional.of(git), store).findings().stream().map(Names::plain)).containsExactly(
+                "sharedChangeSets has 1 file not committed.",
+                "sharedChangeSets has 1 commit not pushed.");
     }
 
     @Test
@@ -89,6 +139,11 @@ class UnsavedWorkTest {
     private static KnowledgeBase store(String name) {
         return new KnowledgeBase(name, Path.of("/Solor", name), StoreKind.ROCKS, 10, Optional.empty(), Map.of(),
                 Instant.parse("2026-11-01T00:00:00Z"));
+    }
+
+    private static void write(Path file) throws IOException {
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, file.getFileName().toString());
     }
 
     private static void init(Path folder) throws IOException {
