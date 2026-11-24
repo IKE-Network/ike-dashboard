@@ -209,9 +209,14 @@ class TinkarServiceTest {
         Path jar = folder.resolve("tinkar-service.jar");
         Files.writeString(jar, "jar");
         Instant written = Instant.now().minusSeconds(5);
-        Files.setLastModifiedTime(jar, FileTime.from(Instant.parse("2026-10-26T22:39:54Z")));
+        Instant reproducible = Instant.parse("2026-10-26T22:39:54Z");
+        Files.setLastModifiedTime(jar, FileTime.from(reproducible));
 
-        assertThat(TinkarService.written(jar)).isAfter(written);
+        if (jar.getFileSystem().supportedFileAttributeViews().contains("unix")) {
+            assertThat(TinkarService.written(jar)).isAfter(written);
+        } else {
+            assertThat(TinkarService.written(jar)).as("Windows keeps no change time, so the date is all there is").isEqualTo(reproducible);
+        }
     }
 
     private static KnowledgeBase store(String name, StoreKind kind, Map<String, String> attributes) {
