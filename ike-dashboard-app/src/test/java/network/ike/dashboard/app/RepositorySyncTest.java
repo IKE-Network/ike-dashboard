@@ -52,11 +52,13 @@ class RepositorySyncTest {
         Path store = temp.resolve("ike-kb");
         init(store.resolve("changeSets"));
         init(store.resolve("preferences"));
+        init(store.resolve("sharedChangeSets"));
         Files.createDirectories(store.resolve("lucene"));
 
         assertThat(RepositorySync.find(store)).containsExactly(
                 new RepositorySync.Repository(store.resolve("changeSets"), "change sets"),
-                new RepositorySync.Repository(store.resolve("preferences"), "preferences"));
+                new RepositorySync.Repository(store.resolve("preferences"), "preferences"),
+                new RepositorySync.Repository(store.resolve("sharedChangeSets"), "shared data"));
         assertThat(RepositorySync.find(temp.resolve("absent"))).isEmpty();
     }
 
@@ -108,6 +110,53 @@ class RepositorySyncTest {
         assertThat(status.behind()).isEqualTo(2);
         assertThat(run(mine, "rev-parse", "HEAD").strip()).as("the tree and branch are untouched").isEqualTo(before);
         assertThat(Files.exists(mine.resolve("Theirs 1 ike-cs.zip"))).isFalse();
+    }
+
+    @Test
+    void aRepositoryOnAnotherBranchIsComparedWithThatBranchOfTheRemote(@TempDir Path temp) throws IOException {
+        // The knowledge base's own remote: its knowledge on main, the default, and its shared data on shared.
+        Path remote = remote(temp);
+        Path seed = temp.resolve("shared-seed");
+        init(seed);
+        run(seed, "symbolic-ref", "HEAD", "refs/heads/shared");
+        commit(seed, "Lab documents 1 ike-cs.zip");
+        run(seed, "push", "-q", remote.toString(), "shared");
+        Path mine = temp.resolve("sharedChangeSets");
+        run(temp, "clone", "-q", "--branch", "shared", remote.toString(), mine.toString());
+        assertThat(RepositorySync.remote(git, local(mine), Optional.empty(), NOW).remote())
+                .as("main has a commit shared does not, which is nothing to pull").isEqualTo(RepositorySync.Remote.CURRENT);
+
+        commit(mine, "Mine 1 ike-cs.zip");
+        commit(mine, "Mine 2 ike-cs.zip");
+        Path knowledge = cloneOf(remote, temp.resolve("knowledge"));
+        commit(knowledge, "Knowledge ike-cs.zip");
+        run(knowledge, "push", "-q", "origin", "main");
+        Path theirs = temp.resolve("theirs");
+        run(temp, "clone", "-q", "--branch", "shared", remote.toString(), theirs.toString());
+        commit(theirs, "Theirs 1 ike-cs.zip");
+        run(theirs, "push", "-q", "origin", "shared");
+
+        RepositorySync.Status status = RepositorySync.remote(git, local(mine), Optional.empty(), NOW);
+
+        assertThat(status.branch()).isEqualTo("shared");
+        assertThat(status.ahead()).as("what origin/shared does not have").isEqualTo(2);
+        assertThat(status.remote()).isEqualTo(RepositorySync.Remote.BEHIND);
+        assertThat(status.behind()).as("what shared has, and nothing of main").isEqualTo(1);
+    }
+
+    @Test
+    void aBranchTheRemoteDoesNotHaveYetIsAllToPush(@TempDir Path temp) throws IOException {
+        Path remote = remote(temp);
+        Path mine = temp.resolve("sharedChangeSets");
+        init(mine);
+        run(mine, "symbolic-ref", "HEAD", "refs/heads/shared");
+        commit(mine, "Lab documents 1 ike-cs.zip");
+        run(mine, "remote", "add", "origin", remote.toString());
+
+        RepositorySync.Status status = RepositorySync.remote(git, local(mine), Optional.empty(), NOW);
+
+        assertThat(status.ahead()).isEqualTo(1);
+        assertThat(status.remote()).as("main of the remote is not its other side").isEqualTo(RepositorySync.Remote.CURRENT);
     }
 
     @Test

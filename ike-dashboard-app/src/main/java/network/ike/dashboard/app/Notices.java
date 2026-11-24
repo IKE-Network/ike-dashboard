@@ -153,14 +153,14 @@ public final class Notices {
     }
 
     /**
-     * Komet's sync keeps the change sets; a person's preferences are sent when they choose Commit and push
-     * in the knowledge base's detail; any other repository in a store is synced with git itself.
+     * Komet's sync keeps the change sets and the shared data; a person's preferences are sent when they choose
+     * Commit and push in the knowledge base's detail; any other repository in a store is synced with git itself.
      */
     private static String howToSync(RepositorySync.Status status) {
         String folder = status.repository().folder().getFileName() == null ? ""
                 : status.repository().folder().getFileName().toString();
         return switch (folder) {
-            case RepositorySync.CHANGE_SETS -> "Komet's sync does this.";
+            case RepositorySync.CHANGE_SETS, RepositorySync.SHARED_CHANGE_SETS -> "Komet's sync does this.";
             case RepositorySync.PREFERENCES -> "Commit and push, in this knowledge base's Repositories, does this when you choose it.";
             default -> "Use git in " + status.repository().folder() + ".";
         };

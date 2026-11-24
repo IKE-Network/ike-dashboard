@@ -55,6 +55,28 @@ class NoticesTest {
     }
 
     @Test
+    void sharedDataIsSyncedByKometAsTheChangeSetsAreAndIsOfferedNoRemoteOfItsOwn() {
+        KnowledgeBaseFamily pizza = family(store("pizza-kb", StoreKind.ROCKS, Map.of()));
+        Path store = pizza.latest().orElseThrow().path();
+        Path folder = store.resolve("sharedChangeSets");
+        RepositorySync.Repository shared = new RepositorySync.Repository(folder, RepositorySync.label(store, folder));
+        RepositorySync.Status unpushed = new RepositorySync.Status(shared, "shared", 0, 1, RepositorySync.Remote.CURRENT, 0,
+                Optional.of(new Notice.Freshness(NOW, true)), "");
+
+        List<Notice> notices = Notices.compute(inputs(List.of(pizza), Map.of(), List.of(KOMET_1024), Optional.empty(),
+                Optional.empty(), Map.of(store, List.of(unpushed))), id -> false);
+
+        assertThat(notices).singleElement().satisfies(notice -> {
+            assertThat(notice.title()).isEqualTo("1 commit not pushed from Pizza, shared data");
+            assertThat(notice.detail()).endsWith("Komet's sync does this.");
+        });
+        assertThat(RepositoriesSection.describe(unpushed)).isEqualTo("Shared data  ·  branch shared  ·  everything committed"
+                + "  ·  1 commit not pushed");
+        assertThat(RepositoriesSection.offersRemote(unpushed.withRemote(RepositorySync.Remote.NONE, 0, Optional.empty(), "")))
+                .as("Komet gives it the knowledge base's own remote").isFalse();
+    }
+
+    @Test
     void aNewerBuildOffersUpgradeWhenAKometCanCheckItAndACopyOtherwise() {
         KnowledgeBaseFamily pizza = family(store("pizza-kb", StoreKind.ROCKS, Map.of()));
         KnowledgeBase latest = pizza.latest().orElseThrow();

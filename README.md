@@ -56,7 +56,7 @@ From then on it updates itself (see [Self-update](#self-update)). The links neve
   `ws-new <name> [groupId]`, `ws-add <working-set> <project>`, `ws-remove <working-set> <member>`,
   `changes-remote-check <folder> <git-url>`, `changes-remote <folder> <git-url>`,
   `preferences-remote-check <folder> <git-url>`, `preferences-remote <folder> <git-url>`,
-  `preferences-send <folder>`,
+  `preferences-send <folder>`, `authors`,
   `dashboard-latest`, `self-update [application]`). The window has three views, one switch across its top:
   *Knowledge Bases*, the list and the chosen one's detail, and *Notices*, the first screen, across the
   window: one card per finding of its checks (newer builds, knowledge bases not yet downloaded, a newer
@@ -81,12 +81,18 @@ From then on it updates itself (see [Self-update](#self-update)). The links neve
   build in place: the build downloads into `<store>.upgrade` beside it, the change-set folders, the
   preferences and every git repository in the store are carried into it, a Komet from 26.1107.1831 on
   checks with no window (`--load-change-sets`) that it opens and loads every change set, and the two
-  folders swap by rename; the old build, confirmed replaced, goes to the Trash, which is the way back. When some change sets do not load, the dashboard says
+  folders swap by rename; the old build, confirmed replaced, goes to the Trash, which is the way back. The change-set
+  folders are those of knowledge (`changeSets`), shared data (`sharedChangeSets`) and local data (`localChangeSets`,
+  earlier `instanceChangeSets`), and the one for change sets set aside. The change sets of documents saved in files
+  (`fileChangeSets`, earlier `ephemeralChangeSets`) stay behind, because Komet reads those documents from their files
+  again (`IKE-Network/ike-issues#1313`). When some change sets do not load, the dashboard says
   what each contains, who packaged it and why it was refused, and the person cancels the upgrade or
   sets them aside in `unprocessedChangeSets/`, which Komet never reads and later upgrades carry along
   (`IKE-Network/ike-issues#1356`); a change set in a git repository with a remote is never moved out.
   Transfers run three at a time, one check in Komet at a time (`IKE-Network/ike-issues#1354`). Every
-  failure leaves the store as it was. *Reinstall*
+  failure leaves the store as it was. A store that is itself a git repository is not upgraded, because the upgrade
+  could not keep that repository. When the dashboard stops during an upgrade, work can stay in `<store>.upgrade`;
+  the next upgrade does not start, and says which work to move back first. *Reinstall*
   moves the store to the Trash and downloads the newest build under the same name. *Install a new copy*
   unpacks the newest build beside the copy there is, with the version appended. Nothing is ever written
   over. Older change sets are loaded by Komet at open, never rewritten: the dashboard no longer offers a
@@ -114,6 +120,66 @@ From then on it updates itself (see [Self-update](#self-update)). The links neve
 
 The Nexus check reads the `ike-restricted` login from `~/.m2/settings.xml`, filling `${env.…}`
 placeholders from the environment, so run it from a shell that has them.
+
+## Authors
+
+The dashboard starts Komet as the person who uses it. Until the registry of people runs, the person and
+the assistant they direct are kept in a file of the dashboard's own, `~/.ike/authors.properties`
+(`IKE-Network/ike-issues#1399`, steps 1 and 2). It is UTF-8, and the assistant may be left out. With
+invented values:
+
+```properties
+person.name=Ada Lovelace
+person.email=ada@komet.ike.network
+assistant.name=Ada's Claude
+assistant.email=ada-claude@komet.ike.network
+```
+
+Every Komet the dashboard starts is given git's `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`,
+`GIT_COMMITTER_NAME` and `GIT_COMMITTER_EMAIL`, naming the person, so Komet's commits name the person
+with no change to Komet. The dashboard's own commits, of a store's change sets and preferences, and the
+Maven runs that make and connect knowledge-base projects name the person the same way. With no file
+nothing is set, and git writes the name in its configuration, as before. A file that cannot be used is
+named in the panel with the reason, and nothing is taken from it. The file is read at each launch and each
+commit, so a change takes effect with no restart.
+
+### Who Komet opens as
+
+A knowledge base's Open row reads as one sentence: *Open* in a Komet *as* an author. The last part is a
+choice of the two the file gives: the person with the assistant, and the person with no assistant. A
+file that names no assistant gives the person's name alone, and with no file the row ends at the Komet.
+The choice is kept for each folder, a new folder starts with the assistant, and a Komet's own Open row
+shows the choice of the folder it opens.
+
+What a launch sets for the choice:
+
+- `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and `GIT_COMMITTER_EMAIL`, naming the person,
+  for every Komet.
+- `IKE_ASSISTANT=none`, when the folder opens with no assistant. Komet still reads the file of authors
+  itself, and passes the assistant over: a narration and the assistant's own edits are then committed as
+  the person. The tools Komet starts inherit the variable, and `DashboardCommand authors` reads it, so
+  they see the same choice.
+- `--user=<the person's name>`, with no password, so Komet's author screen opens with the person
+  selected in a knowledge base that has them as a user. In a knowledge base that does not, the screen
+  opens as it always has.
+
+Komet takes the choice from version 26.1122.2027 on (`OpenAs.SINCE`, the first build after the Komet
+change landed). An older Komet is started with git's variables alone, since `--user` would write a
+warning in its log at each launch, and the panel says that it does not read a choice of no assistant.
+
+`DashboardCommand authors` prints the two for other tools, each as git shows an author, and stops with a
+message when there is no file or it cannot be used:
+
+```
+person     Ada Lovelace <ada@komet.ike.network>
+assistant  Ada's Claude <ada-claude@komet.ike.network>
+from       /Users/ada/.ike/authors.properties
+```
+
+With `IKE_ASSISTANT=none` in its environment the command prints the person alone.
+
+A commit of the assistant's work, with the assistant as author and the person as committer, is written by
+Komet, which reads the same file (step 3 of the issue).
 
 ## Remotes for a knowledge base's change sets and preferences
 
@@ -303,7 +369,8 @@ project, run by hand) runs:
 It then publishes both installers as release `v<version>`, under the version-free names
 `IKE-Dashboard-osx-aarch64.pkg` and `IKE-Dashboard-windows-x86_64.msi`, each with its `.sha256`, and
 marks it Latest, which is what keeps the download links stable. Older versions stay on the releases page
-and on Nexus.
+and on Nexus. The release notes name the JDK and JavaFX builds the installers bundle, as each installer
+build read them from the application it made.
 
 ## Build
 
@@ -311,4 +378,6 @@ and on Nexus.
 ./mvnw clean verify
 ```
 
-Java 27 with preview features, as Komet's working set.
+Java 27 with preview features, as Komet's working set. Maven must run on JDK 27.0.1.1 or later, and the
+build stops on an older JDK 27: the application's runtime is linked from the JDK that runs Maven, and
+27.0.1.1 carries the security fixes of November 2026. Builds are at https://jdk.java.net/27/.

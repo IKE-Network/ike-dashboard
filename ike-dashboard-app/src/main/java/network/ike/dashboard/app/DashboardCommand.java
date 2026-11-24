@@ -66,6 +66,8 @@ import java.util.Locale;
  *                                       ike:kb-create-publish, such as kind, collection, rocks; a name
  *                                       already used by a project, in ~/Solor or on Nexus is refused,
  *                                       with one that is free
+ * authors                               the two authors Komet is started as and the dashboard commits as,
+ *                                       from ~/.ike/authors.properties: the person, then their assistant
  * dashboard-latest [repository-url]     the newest IKE Dashboard on Nexus
  * self-update [application]             replace a dashboard with the newest, once this command has
  *                                       ended, and open it (default: the application running this)
@@ -118,7 +120,8 @@ public final class DashboardCommand {
                 }
                 Path named = settings.solor().resolve(args[1]);
                 Path store = java.nio.file.Files.isDirectory(named) ? named : Path.of(args[1]).toAbsolutePath().normalize();
-                out.println(RepositoryRemote.send(RepositorySync.Git.find().orElseThrow(() -> new IllegalStateException("git is not installed")),
+                out.println(RepositoryRemote.send(RepositorySync.Git.find().map(found -> found.as(Authors.current()))
+                                .orElseThrow(() -> new IllegalStateException("git is not installed")),
                         store.resolve(RepositorySync.PREFERENCES)));
             }
             case "changes-remote-check", "changes-remote", "preferences-remote-check", "preferences-remote" -> {
@@ -142,6 +145,7 @@ public final class DashboardCommand {
                 newKnowledgeBase(out, settings, command.equals("kb-new"),
                         KnowledgeBaseProject.parse(args[1], List.of(args).subList(2, args.length), settings.projects()));
             }
+            case "authors" -> authors(out, Authors.current());
             case "dashboard-latest" -> SelfUpdate.newest(RepositoryHttpClients.newClient(),
                             args.length > 1 ? args[1] : KometReleases.PUBLIC_URL, KometReleases.platformClassifier())
                     .ifPresentOrElse(release -> out.printf("IKE Dashboard %s: %s (%s)%n", release.version(), release.uri(),
@@ -151,8 +155,31 @@ public final class DashboardCommand {
             default -> throw new IllegalArgumentException("Unknown command " + command
                     + "; use list, check, notices, komets, heap, download, projects, kb-draft, kb-new, kb-remote-draft, kb-remote,"
                     + " ws-new, ws-add, ws-remove, changes-remote-check, changes-remote, preferences-remote-check,"
-                    + " preferences-remote, preferences-send,"
+                    + " preferences-remote, preferences-send, authors,"
                     + " dashboard-latest or self-update");
+        }
+    }
+
+    /**
+     * Prints the authors for a person and for other tools, each as git shows an author: the person on
+     * a line beginning {@code person}, the assistant, when there is one, on a line beginning
+     * {@code assistant}, and the file on a line beginning {@code from}.
+     *
+     * @param out     where to print
+     * @param reading what the file gave
+     * @throws IllegalStateException when there is no file or it cannot be used, so a script stops there
+     */
+    static void authors(PrintStream out, Authors.Reading reading) {
+        switch (reading) {
+            case Authors.Found(Path file, Authors authors) -> {
+                out.printf("person     %s%n", authors.person().ident());
+                authors.assistant().ifPresent(assistant -> out.printf("assistant  %s%n", assistant.ident()));
+                out.printf("from       %s%n", file);
+            }
+            case Authors.Absent(Path file) -> throw new IllegalStateException("No authors: " + file
+                    + " does not exist. Komet starts, and the dashboard commits, under the name in git's configuration.");
+            case Authors.Unreadable(Path file, String problem) -> throw new IllegalStateException("The authors in " + file
+                    + " cannot be used: " + problem + ". Komet starts, and the dashboard commits, under the name in git's configuration.");
         }
     }
 
@@ -392,7 +419,8 @@ public final class DashboardCommand {
         if (!java.nio.file.Files.isDirectory(changeSets)) {
             throw new IllegalArgumentException(store + " has no " + inside + " folder");
         }
-        RepositorySync.Git git = RepositorySync.Git.find().orElseThrow(() -> new IllegalStateException("git is not installed"));
+        RepositorySync.Git git = RepositorySync.Git.find().map(found -> found.as(Authors.current()))
+                .orElseThrow(() -> new IllegalStateException("git is not installed"));
         // A person's preferences go on a branch named for the knowledge base, so one remote can keep them all.
         String personal = KnowledgeBaseFamily.familyName(KnowledgeBaseScanner.inspect(store));
         RepositoryRemote.Check check = add ? RepositoryRemote.add(git, changeSets, address, personal, true)

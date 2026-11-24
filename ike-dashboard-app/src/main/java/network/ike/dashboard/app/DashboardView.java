@@ -63,6 +63,7 @@ import javafx.scene.input.MouseButton;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.ColumnConstraints;
+import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -88,6 +89,7 @@ import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -118,6 +120,9 @@ public final class DashboardView extends BorderPane {
 
     /** The section that lists every folder of a knowledge base. */
     static final String FOLDERS = "Folders";
+
+    /** The id of the control that says, or chooses, who a folder is opened as. */
+    static final String OPEN_AS_ID = "open-as";
 
     /** The folder chosen in each knowledge base's Folders table, by family name, kept while the window is open. */
     private final Map<String, String> chosenFolders = new java.util.HashMap<>();
@@ -161,6 +166,7 @@ public final class DashboardView extends BorderPane {
     private final Map<String, BuildStatus> statuses = new HashMap<>();
     private final Map<Path, Image> icons = new HashMap<>();
     private Function<String, Optional<Instant>> lastOpened = name -> Optional.empty();
+    private Supplier<Optional<Authors.Reading>> authors = Optional::empty;
     private Path lastLog;
 
     private BiConsumer<KometInstallation, KnowledgeBase> onOpen = (komet, knowledgeBase) -> { };
@@ -204,6 +210,8 @@ public final class DashboardView extends BorderPane {
     private boolean showingKomets;
     private Consumer<List<KometInstallation>> onTrashKomets = komets -> { };
     private KometPins pins = KometPins.NONE;
+    /** Who each folder is opened as: the last part of an Open row's sentence. */
+    private OpenAsChoices openAsChoices = OpenAsChoices.NONE;
     private java.util.function.Function<KnowledgeBase, UnsavedWork.Report> unsavedWork =
             copy -> new UnsavedWork.Report(List.of(), 0, true);
     private final VBox noticesBox = new VBox(10);
@@ -1072,6 +1080,15 @@ public final class DashboardView extends BorderPane {
     }
 
     /**
+     * Where an Open row learns, and keeps, who each folder is opened as (KEC, 2026-11-22).
+     *
+     * @param choices the choices, kept for each folder
+     */
+    public void setOpenAsChoices(OpenAsChoices choices) {
+        openAsChoices = choices;
+    }
+
+    /**
      * Whether the landing page is shown.
      *
      * @return {@code true} when the notices are
@@ -1283,10 +1300,26 @@ public final class DashboardView extends BorderPane {
             open.setOnAction(event -> Optional.ofNullable(which.getValue()).ifPresent(copy -> onOpen.accept(komet, copy)));
             Label in = new Label("in this Komet");
             in.setStyle(MUTED);
-            HBox openRow = new HBox(8, open, which, in);
+            // Who it opens as is the choice of the folder chosen here, the same one its own Open row shows.
+            HBox as = new HBox();
+            VBox asNote = new VBox();
+            Runnable[] showAs = new Runnable[1];
+            showAs[0] = () -> {
+                Optional<KnowledgeBase> folder = Optional.ofNullable(which.getValue());
+                as.getChildren().setAll(folder.flatMap(copy -> openAsPart(copy, showAs[0])).stream().toList());
+                asNote.getChildren().setAll(folder.flatMap(copy -> openAsNote(copy, Optional.of(komet))).stream().toList());
+                asNote.setVisible(!asNote.getChildren().isEmpty());
+                asNote.setManaged(asNote.isVisible());
+            };
+            which.setOnAction(event -> showAs[0].run());
+            showAs[0].run();
+            FlowPane openRow = new FlowPane(8, 6, open, which, in, as);
             openRow.setAlignment(Pos.CENTER_LEFT);
+            openRow.setRowValignment(VPos.CENTER);
             openRow.setPadding(new Insets(6, 0, 0, 0));
             kometDetail.getChildren().add(openRow);
+            kometDetail.getChildren().add(asNote);
+            authorsProblem().ifPresent(kometDetail.getChildren()::add);
             kometDetail.getChildren().add(muted("This opens it once in Komet " + komet.version()
                     + ". Which Komet a knowledge base opens in is set beside its own Open."));
         }
@@ -1814,6 +1847,114 @@ public final class DashboardView extends BorderPane {
     }
 
     /**
+     * Where a knowledge base's panel learns the authors Komet is started as, read each time the panel is
+     * shown, so a change to the file shows at once (IKE-Network/ike-issues#1399).
+     *
+     * @param authors what the file of authors gives
+     */
+    public void setAuthors(Supplier<Authors.Reading> authors) {
+        this.authors = () -> Optional.of(authors.get());
+    }
+
+    /**
+     * The last part of an Open row's sentence: "as", and who Komet opens as on a folder (KEC, 2026-11-22).
+     * A file of authors that names an assistant gives a selector of two, the person with the assistant and
+     * the person with none, and what is chosen is kept for the folder. A file that names no assistant gives
+     * the person's name alone. With no file, or one that cannot be used, the row ends at the Komet, and
+     * Komet starts under the name in git's configuration, as it always has.
+     *
+     * @param copy    the folder
+     * @param changed what to do once another choice is kept
+     * @return the part, when the file gives authors
+     */
+    private Optional<Node> openAsPart(KnowledgeBase copy, Runnable changed) {
+        Optional<Authors.Reading> file = authors.get();
+        List<OpenAs> choices = file.map(OpenAs::choices).orElse(List.of());
+        if (choices.isEmpty()) {
+            return Optional.empty();
+        }
+        OpenAs kept = openAsChoices.openAs(file.get(), copy.path());
+        String from = " From " + Names.of(file.get().file()) + ".";
+        Node who;
+        if (choices.size() == 1) {
+            Label only = new Label(kept.label().orElse(""));
+            Tooltip.install(only, wrapped(kept.detail().orElse("") + from));
+            who = only;
+        } else {
+            ChoiceBox<OpenAs> as = new ChoiceBox<>();
+            as.getItems().setAll(choices);
+            as.setConverter(new javafx.util.StringConverter<>() {
+                @Override
+                public String toString(OpenAs choice) {
+                    return choice == null ? "" : choice.label().orElse("");
+                }
+
+                @Override
+                public OpenAs fromString(String text) {
+                    return null;
+                }
+            });
+            as.getSelectionModel().select(kept);
+            as.setOnAction(event -> {
+                OpenAs chosen = as.getValue();
+                if (chosen != null && chosen.assistant() != openAsChoices.of(copy.path())) {
+                    openAsChoices.choose(copy.path(), chosen.assistant());
+                    changed.run();
+                }
+            });
+            Tooltip.install(as, wrapped(kept.detail().orElse("") + from + " The choice is kept for this folder."));
+            who = as;
+        }
+        who.setId(OPEN_AS_ID);
+        Label asLabel = new Label("as");
+        asLabel.setStyle(MUTED);
+        HBox part = new HBox(8, asLabel, who);
+        part.setAlignment(Pos.CENTER_LEFT);
+        return Optional.of(part);
+    }
+
+    /**
+     * The line under an Open row when the folder opens with no assistant in a Komet from before the choice:
+     * that Komet does not read it.
+     *
+     * @param copy  the folder
+     * @param komet the Komet the row opens it in, when there is one
+     * @return the line, when the choice does not reach that Komet
+     */
+    private Optional<SelectableText> openAsNote(KnowledgeBase copy, Optional<KometInstallation> komet) {
+        return authors.get().map(file -> openAsChoices.openAs(file, copy.path())).filter(OpenAs::leavesAssistantOut)
+                .flatMap(_ -> komet.filter(chosen -> !OpenAs.taken(chosen)))
+                .map(older -> muted("Komet " + older.version() + " is from before this choice and does not read it. Komet "
+                        + OpenAs.SINCE + " or later does."));
+    }
+
+    /**
+     * The line under an Open row that says why the file of authors cannot be used. Nothing is taken from
+     * such a file, so Komet starts under the name in git's configuration.
+     *
+     * @return the line, when the file is there and cannot be used
+     */
+    private Optional<SelectableText> authorsProblem() {
+        return authors.get().flatMap(reading -> switch (reading) {
+            case Authors.Unreadable(Path file, String problem) -> {
+                SelectableText text = SelectableText.of("The authors in " + Names.of(file) + " cannot be used: " + problem
+                        + ". Komet opens under the name in git's configuration.");
+                text.setStyle(PROBLEM);
+                yield Optional.of(text);
+            }
+            case Authors.Found _, Authors.Absent _ -> Optional.empty();
+        });
+    }
+
+    /** A tooltip of several sentences, wrapped to a readable width. */
+    private static Tooltip wrapped(String text) {
+        Tooltip tooltip = new Tooltip(text);
+        tooltip.setWrapText(true);
+        tooltip.setMaxWidth(440);
+        return tooltip;
+    }
+
+    /**
      * Where the Recent order learns when each knowledge base was last opened.
      *
      * @param lastOpened the time a name was last opened
@@ -2225,7 +2366,10 @@ public final class DashboardView extends BorderPane {
         open.setStyle("-fx-font-size: 14px; -fx-padding: 6 28 6 28;");
         open.setDisable(komet.isEmpty());
         open.setOnAction(event -> komet.ifPresent(chosen -> onOpen.accept(chosen, copy)));
-        HBox actions = new HBox(8, open);
+        // The row reads as one sentence: Open, in a Komet, as an author (KEC, 2026-11-22). Its parts wrap
+        // whole when the panel is narrow.
+        FlowPane actions = new FlowPane(8, 6, open);
+        actions.setRowValignment(VPos.CENTER);
         String pinKey = KnowledgeBaseFamily.familyName(copy);
         Optional<String> pin = pins.of(pinKey);
         List<KometInstallation> readers = komets.stream().filter(candidate -> LauncherChoice.reads(candidate, copy)).toList();
@@ -2261,10 +2405,15 @@ public final class DashboardView extends BorderPane {
                     + " each new Komet you install; a version stays until you change it."));
             Label inLabel = new Label("in");
             inLabel.setStyle(MUTED);
-            actions.getChildren().addAll(inLabel, in);
+            HBox inPart = new HBox(8, inLabel, in);
+            inPart.setAlignment(Pos.CENTER_LEFT);
+            actions.getChildren().add(inPart);
         }
+        openAsPart(copy, this::showDetail).ifPresent(actions.getChildren()::add);
         actions.setAlignment(Pos.CENTER_LEFT);
         panel.getChildren().add(actions);
+        openAsNote(copy, komet).ifPresent(panel.getChildren()::add);
+        authorsProblem().ifPresent(panel.getChildren()::add);
         pin.filter(version -> readers.stream().noneMatch(reader -> reader.version().equals(version)))
                 .ifPresent(missing -> {
                     SelectableText gone = SelectableText.of("This knowledge base is set to open in Komet " + missing

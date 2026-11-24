@@ -109,6 +109,8 @@ public final class DashboardApp extends Application {
     private DashboardPreferences servicePreferences;
     /** The tinkar-service the Service tab started, running or ended; one at a time. */
     private volatile ServiceRun serviceRun;
+    /** Who each folder is opened as; a request from a link reads the same choice as the Open button. */
+    private OpenAsChoices openAsChoices = OpenAsChoices.NONE;
 
     /** How long Komet release notes are kept before GitHub is asked again. */
     private static final java.time.Duration NOTES_AGE = java.time.Duration.ofMinutes(10);
@@ -169,9 +171,11 @@ public final class DashboardApp extends Application {
         DashboardPreferences preferences = DashboardPreferences.current();
         heapPreferences = preferences.node(DashboardPreferences.Node.HEAP);
         heapStores = preferences.node(DashboardPreferences.Node.HEAP_STORES);
+        openAsChoices = new OpenAsChoices(preferences.node(DashboardPreferences.Node.OPEN_AS));
         view = new DashboardView();
         view.setCollections(settings.collections());
         view.setLastOpened(history::lastOpened);
+        view.setAuthors(Authors::current);
         view.setSortRecent(preferences.getBoolean(DashboardPreferences.Key.SORT_RECENT).orElse(false));
         view.setOnSortChange(recent -> preferences.putBoolean(DashboardPreferences.Key.SORT_RECENT, recent));
         view.setOnRefresh(this::refresh);
@@ -185,6 +189,7 @@ public final class DashboardApp extends Application {
         view.setUnsavedWork(copy -> UnsavedWork.of(git, copy.path()));
         view.setOnOpenLink(uri -> getHostServices().showDocument(uri.toString()));
         view.setKometPins(KometPins.current());
+        view.setOpenAsChoices(openAsChoices);
         view.setOnBrowse(this::loadCatalog);
         view.setOnRepositoryRemote(this::repositoryRemote);
         view.setOnRepositorySend(this::repositorySend);
@@ -570,9 +575,10 @@ public final class DashboardApp extends Application {
             view.setMessage("Upgrading needs Komet " + LauncherChoice.LOAD_CHANGE_SETS_SINCE + " or later");
             return;
         }
-        List<String> refusals;
+        List<String> refusals = new ArrayList<>();
         try {
-            refusals = StoreUpgrade.refusals(store, syncOf(store.path()), HeapSizing.Machine.current(komets).running());
+            StoreUpgrade.cannotCarry(store.path()).ifPresent(refusals::add);
+            refusals.addAll(StoreUpgrade.refusals(store, syncOf(store.path()), HeapSizing.Machine.current(komets).running()));
         } catch (IOException e) {
             view.setMessage("Could not read " + Names.of(store.name()) + ": " + e.getMessage());
             return;
@@ -595,17 +601,16 @@ public final class DashboardApp extends Application {
                 release(List.of(store.path()));
                 return;
             }
-            boolean carried = false;
+            StoreUpgrade.Moves moves = new StoreUpgrade.Moves();
             List<Path[]> setAside = List.of();
             try {
                 transfer.phase("Downloading the latest version");
                 StoreDownload.downloadTo(RepositoryHttpClients.newClient(), DashboardCommand.access(settings), action.coordinate(),
                         action.classifier(), work, settings.localRepository(), transfer);
                 transfer.phase("Moving your change sets, preferences and repositories into it");
-                StoreUpgrade.Carried carry = StoreUpgrade.carry(store.path(), work);
-                carried = true;
+                StoreUpgrade.Carried carry = StoreUpgrade.carry(store.path(), work, moves);
                 if (!carry.conflicts().isEmpty()) {
-                    StoreUpgrade.carry(work, store.path());
+                    moves.undo();
                     StoreUpgrade.deleteTree(work);
                     transfer.finished(Transfer.State.FAILED, "Not upgraded. The new version has "
                             + carry.conflicts().size() + (carry.conflicts().size() == 1 ? " file" : " files")
@@ -615,8 +620,7 @@ public final class DashboardApp extends Application {
                 }
                 Optional<KometLauncher.HeadlessRun> checked = check(komet, work, transfer);
                 if (checked.isEmpty()) {
-                    StoreUpgrade.carry(work, store.path());
-                    carried = false;
+                    moves.undo();
                     StoreUpgrade.deleteTree(work);
                     transfer.finished(Transfer.State.CANCELLED, "Cancelled. Nothing in your folder changed. The download"
                             + " is kept, so the next upgrade does not download it again.");
@@ -637,8 +641,7 @@ public final class DashboardApp extends Application {
                         choice.complete(view.chooseForRefused(store, summaries, whyNoAside, first));
                     });
                     if (!choice.get()) {
-                        StoreUpgrade.carry(work, store.path());
-                        carried = false;
+                        moves.undo();
                         StoreUpgrade.deleteTree(work);
                         transfer.finished(Transfer.State.CANCELLED, "Not upgraded. " + DashboardView.refusedHeader(refused.size())
                                 + ". Your folder is as it was. The download is kept, so the next upgrade does not download"
@@ -652,8 +655,7 @@ public final class DashboardApp extends Application {
                     if (checked.isEmpty()) {
                         RefusedChangeSets.putBack(setAside);
                         setAside = List.of();
-                        StoreUpgrade.carry(work, store.path());
-                        carried = false;
+                        moves.undo();
                         StoreUpgrade.deleteTree(work);
                         transfer.finished(Transfer.State.CANCELLED, "Cancelled. Nothing in your folder changed. The"
                                 + " download is kept, so the next upgrade does not download it again.");
@@ -664,8 +666,7 @@ public final class DashboardApp extends Application {
                 if (!run.clean()) {
                     RefusedChangeSets.putBack(setAside);
                     setAside = List.of();
-                    StoreUpgrade.carry(work, store.path());
-                    carried = false;
+                    moves.undo();
                     transfer.finished(Transfer.State.FAILED, "Not upgraded. Komet could not load every change set into the"
                             + " new version. Its exit status was " + run.exitStatus() + ". Your folder is as it was. The new"
                             + " version is kept next to it as " + Names.of(work.getFileName()) + " so you can look at it. Move it to the " + Finder.trashName()
@@ -682,6 +683,7 @@ public final class DashboardApp extends Application {
                     Finder.trash(List.of(previous));
                 }
                 StoreUpgrade.swap(store.path(), work);
+                moves.keep();
                 // The new build passed Komet's check and is in place: the old one goes to the Trash, the way back.
                 String old;
                 try {
@@ -707,9 +709,10 @@ public final class DashboardApp extends Application {
             } catch (Exception e) {
                 String kept = "";
                 try {
-                    RefusedChangeSets.putBack(setAside);
-                    if (carried) {
-                        StoreUpgrade.carry(work, store.path());
+                    try {
+                        RefusedChangeSets.putBack(setAside);
+                    } finally {
+                        moves.undo();
                     }
                 } catch (IOException back) {
                     kept = " Your change sets and preferences may still be in " + Names.of(work.getFileName()) + ": " + back.getMessage();
@@ -747,7 +750,7 @@ public final class DashboardApp extends Application {
             transfer.phase("Checking in Komet " + komet.version() + ", in the background, that every change set loads");
             KnowledgeBase staged = KnowledgeBaseScanner.inspect(work);
             return Optional.of(KometLauncher.loadChangeSets(komet, staged, heapPlan(komet, staged).environment(),
-                    settings.logFolder()));
+                    Authors.current(), settings.logFolder()));
         } finally {
             kometCheck.release();
         }
@@ -1074,7 +1077,8 @@ public final class DashboardApp extends Application {
         }
         HeapSizing.Plan launched = need.get().equals(plan.need()) ? plan : plan.with(need.get());
         try {
-            Path log = KometLauncher.launch(komet, knowledgeBase, launched.environment(), settings.logFolder());
+            Path log = KometLauncher.launch(komet, knowledgeBase, launched.environment(),
+                    openAsChoices.openAs(Authors.current(), knowledgeBase.path()), settings.logFolder());
             history.opened(KnowledgeBaseFamily.familyName(knowledgeBase));
             view.setLastOpened(history::lastOpened);
             view.setLastLog(log);
@@ -1311,7 +1315,7 @@ public final class DashboardApp extends Application {
                 return;
             }
             try {
-                RepositoryRemote.add(git.get(), folder, address, personal, send);
+                RepositoryRemote.add(git.get().as(Authors.current()), folder, address, personal, send);
                 Platform.runLater(() -> {
                     view.repositoryRemoteAdded(folder, Optional.empty());
                     view.setMessage("Added the remote of " + Names.of(folder.getParent().getFileName()) + "'s "
@@ -1333,7 +1337,7 @@ public final class DashboardApp extends Application {
         view.repositoryWorking(folder);
         files.submit(() -> {
             try {
-                String done = RepositoryRemote.send(git.get(), folder);
+                String done = RepositoryRemote.send(git.get().as(Authors.current()), folder);
                 Platform.runLater(() -> view.repositorySent(folder, done, Optional.empty()));
             } catch (IOException e) {
                 Platform.runLater(() -> view.repositorySent(folder, "", Optional.of(e.getMessage())));

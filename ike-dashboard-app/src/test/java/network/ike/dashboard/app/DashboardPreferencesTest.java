@@ -57,7 +57,7 @@ class DashboardPreferencesTest {
         DashboardPreferences preferences = new DashboardPreferences(root);
         assertThat(Arrays.stream(DashboardPreferences.Node.values())
                 .map(node -> preferences.node(node).absolutePath().substring(root.absolutePath().length())))
-                .containsExactly("", "/heap", "/heap/stores", "/dismissed-notices", "/opened", "/komet-pins");
+                .containsExactly("", "/heap", "/heap/stores", "/dismissed-notices", "/opened", "/komet-pins", "/open-as");
         assertThat(DashboardPreferences.Node.DASHBOARD.stored()).isEqualTo("network/ike/dashboard");
     }
 
@@ -77,6 +77,9 @@ class DashboardPreferencesTest {
                 .solor()).isEqualTo(Path.of("/Volumes/Data/Solor"));
         assertThat(HeapSizing.Rule.read(preferences.node(DashboardPreferences.Node.HEAP)).rocksShare()).isEqualTo(0.5);
         assertThat(new KometPins(preferences.node(DashboardPreferences.Node.KOMET_PINS)).of("pizza-kb")).contains("26.1019.900");
+        root.node("open-as").put("pizza-demo", "no-assistant");
+        assertThat(new OpenAsChoices(preferences.node(DashboardPreferences.Node.OPEN_AS)).of(Path.of("Solor", "pizza-demo")))
+                .isEqualTo(OpenAs.Assistant.NONE);
         assertThat(new NoticeDismissals(preferences.node(DashboardPreferences.Node.DISMISSED_NOTICES)).dismissed("newer:pizza-kb:1"))
                 .isTrue();
 
