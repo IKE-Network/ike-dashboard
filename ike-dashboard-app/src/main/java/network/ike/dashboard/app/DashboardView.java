@@ -190,6 +190,10 @@ public final class DashboardView extends BorderPane {
     private final ToggleButton knowledgeBasesTab = new ToggleButton("Knowledge Bases");
     private final ToggleButton noticesTab = new ToggleButton("Notices");
     private final ToggleButton kometsTab = new ToggleButton("Komet");
+    /** The Service tab: a tinkar-service build run on a store, for local development. */
+    private final ToggleButton serviceTab = new ToggleButton("Service");
+    private final ServicePane service = new ServicePane();
+    private boolean showingService;
     /** The Komet tab, laid out as the Knowledge Bases tab: the Komets on the left, the chosen one's detail. */
     private final ListView<KometInstallation> kometList = new ListView<>();
     private final VBox kometDetail = new VBox(10);
@@ -266,6 +270,9 @@ public final class DashboardView extends BorderPane {
         knowledgeBasesTab.setToggleGroup(views);
         noticesTab.setToggleGroup(views);
         kometsTab.setToggleGroup(views);
+        serviceTab.setToggleGroup(views);
+        serviceTab.getStyleClass().add("center-pill");
+        serviceTab.setMinWidth(Region.USE_PREF_SIZE);
         projectsTab.setToggleGroup(views);
         projectsTab.getStyleClass().add("center-pill");
         projectsTab.setMinWidth(Region.USE_PREF_SIZE);
@@ -287,11 +294,13 @@ public final class DashboardView extends BorderPane {
                 showProjects();
             } else if (now == kometsTab) {
                 showKomets();
+            } else if (now == serviceTab) {
+                showService();
             } else {
                 showKnowledgeBases();
             }
         });
-        HBox views3 = new HBox(knowledgeBasesTab, projectsTab, kometsTab, noticesTab);
+        HBox views3 = new HBox(knowledgeBasesTab, projectsTab, kometsTab, serviceTab, noticesTab);
         views3.setAlignment(Pos.CENTER);
         views3.setMaxWidth(Region.USE_PREF_SIZE);
         // Refresh is at the top right on every view, whichever is shown (KEC, 2026-11-08).
@@ -317,6 +326,7 @@ public final class DashboardView extends BorderPane {
                 showingNotices = false;
                 showingKomets = false;
                 showingProjects = false;
+                showingService = false;
                 knowledgeBasesTab.setSelected(true);
             }
             showDetail();
@@ -333,6 +343,7 @@ public final class DashboardView extends BorderPane {
                 showingNotices = false;
                 showingKomets = false;
                 showingProjects = false;
+                showingService = false;
                 knowledgeBasesTab.setSelected(true);
                 list.getSelectionModel().clearSelection();
             }
@@ -396,6 +407,7 @@ public final class DashboardView extends BorderPane {
      */
     public void setFamilies(List<KnowledgeBaseFamily> families) {
         this.families = List.copyOf(families);
+        refreshServiceStores();
         // A store may have been replaced by one with another icon at the same path.
         icons.clear();
         statuses.keySet().retainAll(families.stream().map(KnowledgeBaseFamily::name).collect(Collectors.toSet()));
@@ -413,6 +425,7 @@ public final class DashboardView extends BorderPane {
     public void setUnmanaged(List<KnowledgeBase> entries) {
         String keep = Optional.ofNullable(unmanagedList.getSelectionModel().getSelectedItem()).map(KnowledgeBase::name).orElse(null);
         unmanaged.setAll(entries);
+        refreshServiceStores();
         unmanagedPane.setText("Not managed (" + entries.size() + ")");
         refreshNotices();
         unmanagedPane.setVisible(!entries.isEmpty());
@@ -811,6 +824,7 @@ public final class DashboardView extends BorderPane {
         showingNotices = true;
         showingKomets = false;
         showingProjects = false;
+        showingService = false;
         noticesTab.setSelected(true);
         list.getSelectionModel().clearSelection();
         unmanagedList.getSelectionModel().clearSelection();
@@ -824,6 +838,7 @@ public final class DashboardView extends BorderPane {
         showingNotices = false;
         showingKomets = false;
         showingProjects = false;
+        showingService = false;
         knowledgeBasesTab.setSelected(true);
         if (list.getSelectionModel().isEmpty() && unmanagedList.getSelectionModel().isEmpty()) {
             String last = lastChosen;
@@ -847,6 +862,7 @@ public final class DashboardView extends BorderPane {
         showingKomets = true;
         showingNotices = false;
         showingProjects = false;
+        showingService = false;
         kometsTab.setSelected(true);
         list.getSelectionModel().clearSelection();
         unmanagedList.getSelectionModel().clearSelection();
@@ -860,12 +876,56 @@ public final class DashboardView extends BorderPane {
     public void showProjects() {
         lastChosen = selected().map(KnowledgeBaseFamily::name).orElse(lastChosen);
         showingProjects = true;
+        showingService = false;
         showingKomets = false;
         showingNotices = false;
         projectsTab.setSelected(true);
         list.getSelectionModel().clearSelection();
         unmanagedList.getSelectionModel().clearSelection();
         showDetail();
+    }
+
+    /**
+     * Shows the Service tab, across the window: a tinkar-service build run on a store. The knowledge base chosen
+     * stays chosen.
+     */
+    public void showService() {
+        lastChosen = selected().map(KnowledgeBaseFamily::name).orElse(lastChosen);
+        showingService = true;
+        showingProjects = false;
+        showingKomets = false;
+        showingNotices = false;
+        serviceTab.setSelected(true);
+        list.getSelectionModel().clearSelection();
+        unmanagedList.getSelectionModel().clearSelection();
+        showDetail();
+        service.rescan();                                // a build made since it was last shown
+    }
+
+    /**
+     * Whether the Service tab is shown.
+     *
+     * @return {@code true} when it is
+     */
+    public boolean showingService() {
+        return showingService;
+    }
+
+    /**
+     * The Service tab.
+     *
+     * @return the tab's pane
+     */
+    public ServicePane service() {
+        return service;
+    }
+
+    /** Every store tinkar-service can open: each copy of each knowledge base, then those not managed. */
+    private void refreshServiceStores() {
+        List<KnowledgeBase> stores = new java.util.ArrayList<>();
+        families.forEach(family -> stores.addAll(family.members()));
+        unmanaged.stream().filter(entry -> entry.kind().opensInKomet()).forEach(stores::add);
+        service.setStores(stores);
     }
 
     /**
@@ -1039,7 +1099,7 @@ public final class DashboardView extends BorderPane {
         boolean changed = !List.copyOf(statuses).equals(sync.get(store));
         sync.put(store, List.copyOf(statuses));
         refreshNotices();
-        if (changed && !showingNotices && !showingKomets && !showingProjects) {
+        if (changed && !showingNotices && !showingKomets && !showingProjects && !showingService) {
             showDetail();                                // the chosen folder lists its repositories
         }
     }
@@ -1974,7 +2034,7 @@ public final class DashboardView extends BorderPane {
         listings.setAll(families.stream().sorted(order).toList());
         updateBanner();
         refreshNotices();
-        if ((showingNotices || showingKomets || showingProjects) && keep == null) {
+        if ((showingNotices || showingKomets || showingProjects || showingService) && keep == null) {
             return;
         }
         Optional<KnowledgeBaseFamily> again = shown.stream().filter(family -> family.name().equals(keep)).findFirst()
@@ -1987,6 +2047,10 @@ public final class DashboardView extends BorderPane {
     }
 
     private void showDetail() {
+        if (showingService) {
+            setCenter(service);
+            return;
+        }
         if (showingProjects) {
             setCenter(projects);
             return;

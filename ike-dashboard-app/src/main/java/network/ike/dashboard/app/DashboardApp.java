@@ -106,6 +106,9 @@ public final class DashboardApp extends Application {
     private OpenHistory history;
     private Preferences heapPreferences;
     private Preferences heapStores;
+    private DashboardPreferences servicePreferences;
+    /** The tinkar-service the Service tab started, running or ended; one at a time. */
+    private volatile ServiceRun serviceRun;
 
     /** How long Komet release notes are kept before GitHub is asked again. */
     private static final java.time.Duration NOTES_AGE = java.time.Duration.ofMinutes(10);
@@ -209,6 +212,7 @@ public final class DashboardApp extends Application {
         NoticeDismissals dismissals = NoticeDismissals.current();
         view.setDismissed(dismissals::dismissed);
         view.setOnDismiss(dismissals::dismiss);
+        wireService(preferences);
         stage.setTitle("IKE Dashboard");
         stage.getIcons().setAll(icons());
         stage.setScene(new Scene(view, 1080, 640));
@@ -232,6 +236,16 @@ public final class DashboardApp extends Application {
 
     @Override
     public void stop() {
+        // The dashboard is the only handle on the service it started: stop it gently, so its store is closed.
+        ServiceRun running = serviceRun;
+        if (running != null && running.exitStatus().isEmpty()) {
+            running.stop();
+            try {
+                running.waitFor(ServicePane.STOP_PATIENCE.toSeconds());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
         clock.shutdownNow();
         checks.shutdownNow();
         transfers.shutdownNow();
@@ -1070,6 +1084,137 @@ public final class DashboardApp extends Application {
         } catch (Exception e) {
             view.setMessage("Could not start Komet " + komet.version() + ": " + e.getMessage());
         }
+    }
+
+    /** The Service tab: its choices kept in the preferences, and its starts and stops. */
+    private void wireService(DashboardPreferences preferences) {
+        ServicePane service = view.service();
+        servicePreferences = preferences;
+        service.setPorts(port(preferences, DashboardPreferences.Key.SERVICE_REST_PORT, TinkarService.DEFAULT_REST_PORT),
+                port(preferences, DashboardPreferences.Key.SERVICE_GRPC_PORT, TinkarService.DEFAULT_GRPC_PORT));
+        service.setChosenStore(preferences.get(DashboardPreferences.Key.SERVICE_STORE).map(Path::of));
+        service.setMemoryOf(store -> HeapSizing.override(heapStores, store).orElseGet(() -> HeapSizing.needed(
+                HeapSizing.Rule.read(heapPreferences), store, dataBytes.getOrDefault(store.path(), store.sizeBytes()))));
+        service.setOnFolder(folder -> {
+            preferences.put(DashboardPreferences.Key.SERVICE_FOLDER, folder.toString());
+            preferences.remove(DashboardPreferences.Key.SERVICE_JAR);
+            loadServiceBuilds();
+        });
+        service.setOnRescan(this::loadServiceBuilds);
+        service.setOnJar(jar -> {
+            preferences.put(DashboardPreferences.Key.SERVICE_JAR, jar.toString());
+            TinkarService.build(jar).ifPresent(this::findServiceJdk);
+        });
+        service.setOnJdk(home -> TinkarService.jdk(home).ifPresentOrElse(jdk -> {
+            preferences.put(DashboardPreferences.Key.SERVICE_JDK, home.toString());
+            service.setJdk(Optional.of(jdk));
+        }, () -> view.setMessage(Names.of(home) + " is not a JDK: it has no bin/java and release file.")));
+        service.setOnStore(store -> preferences.put(DashboardPreferences.Key.SERVICE_STORE, store.toString()));
+        service.setOnStart(this::startService);
+        service.setOnStop(() -> Optional.ofNullable(serviceRun).ifPresent(running -> {
+            running.stop();
+            service.refresh();
+            view.setMessage("Stopping tinkar-service: it is closing " + Names.of(running.launch().store().name()));
+        }));
+        service.setOnForceStop(() -> Optional.ofNullable(serviceRun).ifPresent(ServiceRun::forceStop));
+        service.setOnOpenFile(path -> run(() -> Finder.open(path), "Could not open " + Names.of(path)));
+        service.setOnOpenLink(uri -> getHostServices().showDocument(uri.toString()));
+        loadServiceBuilds();
+    }
+
+    private static int port(DashboardPreferences preferences, DashboardPreferences.Key key, int otherwise) {
+        try {
+            return preferences.get(key).map(String::strip).map(Integer::valueOf).orElse(otherwise);
+        } catch (NumberFormatException e) {
+            return otherwise;
+        }
+    }
+
+    /** Reads the builds in the Service tab's folder, then finds a JDK for the one chosen. */
+    private void loadServiceBuilds() {
+        Optional<Path> folder = servicePreferences.get(DashboardPreferences.Key.SERVICE_FOLDER).map(Path::of);
+        Optional<Path> jar = servicePreferences.get(DashboardPreferences.Key.SERVICE_JAR).map(Path::of);
+        files.submit(() -> {
+            List<TinkarService.Build> builds = folder.map(TinkarService::builds).orElse(List.of());
+            Optional<TinkarService.Build> chosen = jar.flatMap(path -> builds.stream().filter(build -> build.jar().equals(path))
+                    .findFirst()).or(() -> builds.stream().findFirst());
+            TinkarService.Source source = folder.map(TinkarService::source).orElse(TinkarService.Source.NONE);
+            Platform.runLater(() -> view.service().setBuilds(folder, builds, jar, source));
+            findServiceJdk(chosen.orElse(null));
+        });
+    }
+
+    /**
+     * The JDK the service runs on: the one the person chose, else one of the release the build was made for,
+     * from {@code JAVA_HOME} or, on macOS, {@code java_home}. Read off the window's thread.
+     */
+    private void findServiceJdk(TinkarService.Build build) {
+        Optional<Path> chosen = servicePreferences.get(DashboardPreferences.Key.SERVICE_JDK).map(Path::of);
+        Runnable find = () -> {
+            int feature = build == null || build.jdk() == 0 ? Runtime.version().feature() : build.jdk();
+            Optional<TinkarService.Jdk> jdk = chosen.flatMap(TinkarService::jdk)
+                    .or(() -> TinkarService.findJdk(feature, System.getenv("JAVA_HOME")));
+            Platform.runLater(() -> view.service().setJdk(jdk));
+        };
+        if (Platform.isFxApplicationThread()) {
+            files.submit(find);
+        } else {
+            find.run();
+        }
+    }
+
+    /** Starts tinkar-service on a store, unless something stands in the way, which the tab then says. */
+    private void startService(ServicePane.StartRequest request) {
+        ServiceRun running = serviceRun;
+        if (running != null && running.exitStatus().isEmpty()) {
+            view.service().setRefusals(List.of("A tinkar-service is already running. Stop it first."));
+            return;
+        }
+        servicePreferences.put(DashboardPreferences.Key.SERVICE_REST_PORT, String.valueOf(request.restPort()));
+        servicePreferences.put(DashboardPreferences.Key.SERVICE_GRPC_PORT, String.valueOf(request.grpcPort()));
+        Optional<Path> jdkChoice = servicePreferences.get(DashboardPreferences.Key.SERVICE_JDK).map(Path::of);
+        KnowledgeBase store = request.store();
+        files.submit(() -> {
+            Optional<TinkarService.Jdk> jdk = jdkChoice.flatMap(TinkarService::jdk)
+                    .or(() -> TinkarService.findJdk(request.build().jdk() == 0 ? Runtime.version().feature() : request.build().jdk(),
+                            System.getenv("JAVA_HOME")));
+            if (jdk.isEmpty()) {
+                Platform.runLater(() -> view.service().setRefusals(List.of("No JDK found for this build. Choose its home folder.")));
+                return;
+            }
+            long data = dataBytes.computeIfAbsent(store.path(), path -> {
+                try {
+                    return HeapSizing.dataBytes(store);
+                } catch (IOException e) {
+                    return store.sizeBytes();
+                }
+            });
+            HeapSizing.Need need = HeapSizing.override(heapStores, store)
+                    .orElseGet(() -> HeapSizing.needed(HeapSizing.Rule.read(heapPreferences), store, data));
+            TinkarService.Launch launch = new TinkarService.Launch(request.build(), jdk.get(), store, need,
+                    request.restPort(), request.grpcPort());
+            List<String> refusals = TinkarService.refusals(launch, TinkarService::portFree);
+            if (!refusals.isEmpty()) {
+                Platform.runLater(() -> view.service().setRefusals(refusals));
+                return;
+            }
+            try {
+                ServiceRun started = TinkarService.start(launch, settings.logFolder());
+                serviceRun = started;
+                started.onExit(() -> Platform.runLater(() -> {
+                    view.service().refresh();
+                    view.setMessage(started.endedAsExpected() ? "tinkar-service stopped"
+                            : "tinkar-service stopped before it was ready. Its log says why.");
+                }));
+                Platform.runLater(() -> {
+                    view.service().setRun(Optional.of(started));
+                    view.setLastLog(started.log());
+                    view.setMessage("Starting tinkar-service on " + Names.of(store.name()) + " with " + need.text());
+                });
+            } catch (IOException e) {
+                Platform.runLater(() -> view.service().setRefusals(List.of("Could not start tinkar-service: " + e.getMessage())));
+            }
+        });
     }
 
     /**

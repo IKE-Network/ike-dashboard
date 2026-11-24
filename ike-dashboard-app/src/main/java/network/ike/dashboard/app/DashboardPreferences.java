@@ -86,6 +86,18 @@ public final class DashboardPreferences {
         COLLECTIONS(Node.DASHBOARD, "collections"),
         /** The folder new knowledge-base projects are made in. */
         PROJECTS(Node.DASHBOARD, "projects"),
+        /** The folder the Service tab finds tinkar-service builds in. */
+        SERVICE_FOLDER(Node.DASHBOARD, "serviceFolder"),
+        /** The tinkar-service jar chosen last. */
+        SERVICE_JAR(Node.DASHBOARD, "serviceJar"),
+        /** The JDK home tinkar-service runs on, when the person chose one. */
+        SERVICE_JDK(Node.DASHBOARD, "serviceJdk"),
+        /** The store tinkar-service was last run on. */
+        SERVICE_STORE(Node.DASHBOARD, "serviceStore"),
+        /** The REST port tinkar-service was last run on. */
+        SERVICE_REST_PORT(Node.DASHBOARD, "serviceRestPort"),
+        /** The gRPC port tinkar-service was last run on. */
+        SERVICE_GRPC_PORT(Node.DASHBOARD, "serviceGrpcPort"),
         /** Heap, as a share of a spined store's size. */
         HEAP_SPINED64_SHARE(Node.HEAP, "spined64Share"),
         /** Heap, as a share of a Rocks store's size. */

@@ -100,7 +100,7 @@ class ProjectsPaneTest {
                         "Its POM names no repository of its own.",
                         "This project builds no knowledge base: it is built from no knowledge sources.");
         assertThat(shown.get(3)).as("Projects is a tab of its own, beside Knowledge Bases")
-                .containsExactly("true", "[Knowledge Bases, Projects, Komet, Notices]");
+                .containsExactly("true", "[Knowledge Bases, Projects, Komet, Service, Notices]");
     }
 
     @Test
