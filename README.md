@@ -131,9 +131,15 @@ invented values:
 ```properties
 person.name=Ada Lovelace
 person.email=ada@komet.ike.network
+person.earlier=ada@example.test, ada@engine.test
 assistant.name=Ada's Claude
 assistant.email=ada-claude@komet.ike.network
 ```
+
+`person.earlier` may be left out too. It lists the addresses the person's work was committed under before
+the person and the assistant each had an identity address. Nothing is committed under one. Komet reads the
+line when it reads a document, and records that the person is responsible for the work committed under
+each address.
 
 Every Komet the dashboard starts is given git's `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`,
 `GIT_COMMITTER_NAME` and `GIT_COMMITTER_EMAIL`, naming the person, so Komet's commits name the person
@@ -167,16 +173,18 @@ Komet takes the choice from version 26.1122.2027 on (`OpenAs.SINCE`, the first b
 change landed). An older Komet is started with git's variables alone, since `--user` would write a
 warning in its log at each launch, and the panel says that it does not read a choice of no assistant.
 
-`DashboardCommand authors` prints the two for other tools, each as git shows an author, and stops with a
-message when there is no file or it cannot be used:
+`DashboardCommand authors` prints the two for other tools, each as git shows an author, then the earlier
+addresses, and stops with a message when there is no file or it cannot be used:
 
 ```
 person     Ada Lovelace <ada@komet.ike.network>
 assistant  Ada's Claude <ada-claude@komet.ike.network>
+earlier    ada@example.test
+earlier    ada@engine.test
 from       /Users/ada/.ike/authors.properties
 ```
 
-With `IKE_ASSISTANT=none` in its environment the command prints the person alone.
+With `IKE_ASSISTANT=none` in its environment the command prints no assistant.
 
 A commit of the assistant's work, with the assistant as author and the person as committer, is written by
 Komet, which reads the same file (step 3 of the issue).

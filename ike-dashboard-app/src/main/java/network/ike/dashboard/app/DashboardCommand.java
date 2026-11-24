@@ -163,7 +163,8 @@ public final class DashboardCommand {
     /**
      * Prints the authors for a person and for other tools, each as git shows an author: the person on
      * a line beginning {@code person}, the assistant, when there is one, on a line beginning
-     * {@code assistant}, and the file on a line beginning {@code from}.
+     * {@code assistant}, each address of the person's earlier commits on a line beginning {@code earlier},
+     * and the file on a line beginning {@code from}.
      *
      * @param out     where to print
      * @param reading what the file gave
@@ -174,6 +175,7 @@ public final class DashboardCommand {
             case Authors.Found(Path file, Authors authors) -> {
                 out.printf("person     %s%n", authors.person().ident());
                 authors.assistant().ifPresent(assistant -> out.printf("assistant  %s%n", assistant.ident()));
+                authors.earlier().forEach(address -> out.printf("earlier    %s%n", address));
                 out.printf("from       %s%n", file);
             }
             case Authors.Absent(Path file) -> throw new IllegalStateException("No authors: " + file

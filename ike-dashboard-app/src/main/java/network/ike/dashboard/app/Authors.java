@@ -21,6 +21,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
@@ -43,13 +45,19 @@ import java.util.Properties;
  * assistant.email=ada-claude@komet.ike.network
  * </pre>
  *
+ * <p>An optional line, {@code person.earlier}, lists the addresses the person's work was committed under
+ * before the person and the assistant each had an identity address, separated by commas (KEC, 2026-11-23).
+ * Nothing is committed under one. Komet records that the person is responsible for the work committed
+ * under them.
+ *
  * <p>The file is read as UTF-8 each time it is needed, so a change to it takes effect at the next
  * launch or commit, with no restart.
  *
  * @param person    the person, who commits and is responsible
  * @param assistant the assistant the person directs, when the file names one
+ * @param earlier   the addresses of the person's earlier commits, in the file's order; empty when it lists none
  */
-public record Authors(Author person, Optional<Author> assistant) {
+public record Authors(Author person, Optional<Author> assistant, List<String> earlier) {
 
     /** Git's variable for the name of a commit's author. */
     static final String AUTHOR_NAME = "GIT_AUTHOR_NAME";
@@ -72,15 +80,43 @@ public record Authors(Author person, Optional<Author> assistant) {
     static final String NO_ASSISTANT = "none";
 
     /**
-     * Checks that both are given.
+     * Checks that each is given, and that each earlier address is one git takes and is not the identity
+     * address of the person or the assistant. An address listed twice, in any case, is kept once.
+     *
+     * @param person    the person
+     * @param assistant the assistant, or empty
+     * @param earlier   the addresses of the person's earlier commits, or none
+     */
+    public Authors {
+        if (person == null || assistant == null || earlier == null) {
+            throw new IllegalArgumentException("The person, and the assistant or none, are both needed");
+        }
+        Map<String, String> addresses = new LinkedHashMap<>();
+        for (String listed : earlier) {
+            String address = listed.strip();
+            if (!Author.address(address)) {
+                throw new IllegalArgumentException(Key.PERSON_EARLIER.stored() + " lists "
+                        + (address.isEmpty() ? "an empty address" : address) + ", which is not an address of the form name@domain");
+            }
+            if (address.equalsIgnoreCase(person.email())
+                    || assistant.filter(a -> address.equalsIgnoreCase(a.email())).isPresent()) {
+                throw new IllegalArgumentException(Key.PERSON_EARLIER.stored() + " lists " + address
+                        + ", which is the identity address of "
+                        + (address.equalsIgnoreCase(person.email()) ? person : assistant.get()).name());
+            }
+            addresses.putIfAbsent(address.toLowerCase(Locale.ROOT), address);
+        }
+        earlier = List.copyOf(addresses.values());
+    }
+
+    /**
+     * A person and their assistant, with no earlier addresses.
      *
      * @param person    the person
      * @param assistant the assistant, or empty
      */
-    public Authors {
-        if (person == null || assistant == null) {
-            throw new IllegalArgumentException("The person, and the assistant or none, are both needed");
-        }
+    public Authors(Author person, Optional<Author> assistant) {
+        this(person, assistant, List.of());
     }
 
     /**
@@ -108,12 +144,17 @@ public record Authors(Author person, Optional<Author> assistant) {
             if (!plain(name)) {
                 throw new IllegalArgumentException("The name " + name + " holds <, > or a line break, which git refuses");
             }
-            int at = email.indexOf('@');
-            if (email.isEmpty() || !plain(email) || email.chars().anyMatch(Character::isWhitespace)
-                    || at <= 0 || at != email.lastIndexOf('@') || at == email.length() - 1) {
+            if (!address(email)) {
                 throw new IllegalArgumentException("The email of " + name + ", " + (email.isEmpty() ? "an empty one" : email)
                         + ", is not an address of the form name@domain");
             }
+        }
+
+        /** Whether a text is an address git takes, of the form {@code name@domain}, with no space. */
+        private static boolean address(String text) {
+            int at = text.indexOf('@');
+            return plain(text) && text.chars().noneMatch(Character::isWhitespace)
+                    && at > 0 && at == text.lastIndexOf('@') && at < text.length() - 1;
         }
 
         private static boolean plain(String text) {
@@ -136,6 +177,8 @@ public record Authors(Author person, Optional<Author> assistant) {
         PERSON_NAME("person.name"),
         /** The person's identity address. */
         PERSON_EMAIL("person.email"),
+        /** The addresses of the person's earlier commits, separated by commas. */
+        PERSON_EARLIER("person.earlier"),
         /** The assistant's name. */
         ASSISTANT_NAME("assistant.name"),
         /** The assistant's identity address. */
@@ -249,10 +292,10 @@ public record Authors(Author person, Optional<Author> assistant) {
     /**
      * The person alone, with no assistant.
      *
-     * @return the same person, and no assistant
+     * @return the same person and earlier addresses, and no assistant
      */
     public Authors withoutAssistant() {
-        return assistant.isEmpty() ? this : new Authors(person, Optional.empty());
+        return assistant.isEmpty() ? this : new Authors(person, Optional.empty(), earlier);
     }
 
     /**
@@ -328,7 +371,8 @@ public record Authors(Author person, Optional<Author> assistant) {
      * @param properties the properties
      * @return the authors
      * @throws IllegalArgumentException if the person is not named in full, the assistant is named in
-     *                                  part, or a name or an email is not one git takes
+     *                                  part, a name or an email is not one git takes, or an earlier address
+     *                                  is one of the identity addresses
      */
     static Authors of(Properties properties) {
         Optional<String> personName = value(properties, Key.PERSON_NAME);
@@ -344,7 +388,8 @@ public record Authors(Author person, Optional<Author> assistant) {
                     + " go together, and it has only " + (assistantName.isPresent() ? Key.ASSISTANT_NAME : Key.ASSISTANT_EMAIL).stored());
         }
         return new Authors(new Author(personName.get(), personEmail.get()),
-                assistantName.map(name -> new Author(name, assistantEmail.get())));
+                assistantName.map(name -> new Author(name, assistantEmail.get())),
+                value(properties, Key.PERSON_EARLIER).map(listed -> List.of(listed.split(","))).orElse(List.of()));
     }
 
     private static Optional<String> value(Properties properties, Key key) {

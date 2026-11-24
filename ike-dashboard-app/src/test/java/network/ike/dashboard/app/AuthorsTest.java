@@ -130,6 +130,39 @@ class AuthorsTest {
         }
 
         @Test
+        void theFileMayListTheAddressesOfThePersonsEarlierCommits(@TempDir Path home) throws IOException {
+            Authors authors = Authors.read(write(home, ADA
+                    + "person.earlier=ada@example.test, ada@engine.test,ADA@example.test\n")).found().orElseThrow();
+
+            assertThat(authors.earlier()).containsExactly("ada@example.test", "ada@engine.test");
+            assertThat(authors.withoutAssistant().earlier()).isEqualTo(authors.earlier());
+            assertThat(authors.gitEnvironment().values()).doesNotContain("ada@example.test", "ada@engine.test");
+        }
+
+        @Test
+        void theFileNeedListNoEarlierAddress(@TempDir Path home) throws IOException {
+            assertThat(Authors.read(write(home, ADA)).found().orElseThrow().earlier()).isEmpty();
+            assertThat(Authors.read(write(home, ADA + "person.earlier=\n")).found().orElseThrow().earlier()).isEmpty();
+        }
+
+        @Test
+        void anEarlierAddressGitWouldNotTakeIsRefused(@TempDir Path home) throws IOException {
+            assertThat(Authors.read(write(home, ADA + "person.earlier=ada@example.test, Ada Lovelace\n")))
+                    .isInstanceOfSatisfying(Authors.Unreadable.class, unreadable -> assertThat(unreadable.problem())
+                            .contains("person.earlier lists Ada Lovelace"));
+        }
+
+        @Test
+        void anIdentityAddressIsNotAnEarlierOne(@TempDir Path home) throws IOException {
+            assertThat(Authors.read(write(home, ADA + "person.earlier=ADA@komet.ike.network\n")))
+                    .isInstanceOfSatisfying(Authors.Unreadable.class, unreadable -> assertThat(unreadable.problem())
+                            .endsWith("the identity address of Ada Lovelace"));
+            assertThat(Authors.read(write(home, ADA + "person.earlier=ada-claude@komet.ike.network\n")))
+                    .isInstanceOfSatisfying(Authors.Unreadable.class, unreadable -> assertThat(unreadable.problem())
+                            .endsWith("the identity address of Ada's Claude"));
+        }
+
+        @Test
         void namesAreReadAsUtf8(@TempDir Path home) throws IOException {
             Authors.Reading reading = Authors.read(write(home, "person.name=Jürgen Müller\nperson.email=jm@komet.ike.network\n"));
 
@@ -240,6 +273,18 @@ class AuthorsTest {
             assertThat(print(Authors.read(file))).isEqualTo(String.join(System.lineSeparator(),
                     "person     Ada Lovelace <ada@komet.ike.network>",
                     "assistant  Ada's Claude <ada-claude@komet.ike.network>",
+                    "from       " + file, ""));
+        }
+
+        @Test
+        void printsEachEarlierAddress(@TempDir Path home) throws IOException {
+            Path file = write(home, ADA + "person.earlier=ada@example.test,ada@engine.test\n");
+
+            assertThat(print(Authors.read(file))).isEqualTo(String.join(System.lineSeparator(),
+                    "person     Ada Lovelace <ada@komet.ike.network>",
+                    "assistant  Ada's Claude <ada-claude@komet.ike.network>",
+                    "earlier    ada@example.test",
+                    "earlier    ada@engine.test",
                     "from       " + file, ""));
         }
 
